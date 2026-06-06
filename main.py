@@ -27,6 +27,7 @@ from config import TIME_COMPRESSION
 from config import DRAFT_SAFETY_MARGIN_M
 from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR, FUEL_EMERGENCY_REFUEL_FRACTION
 from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
+from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM
 from config import (
     PORT_STAY_CARGO_LOAD_S, PORT_STAY_FERRY_BOARD_S, PORT_STAY_FISHING_UNLOAD_S,
     PORT_STAY_SAIL_ANCHOR_S, PORT_STAY_TUG_S,
@@ -37,7 +38,7 @@ from render.chart import Chart
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
     VESSEL_ROUTE_FERRY, VESSEL_ROUTE_CARGO,
@@ -524,6 +525,7 @@ class Game:
         self.fleet_panel = FleetStatusPanel(self.display)
         self.mission_panel = MissionPanel(self.display)
         self.mission_manager = MissionManager()
+        self.player_hud = PlayerHUDPanel(self.display)
 
         # Simulation state
         self.world = World()
@@ -532,6 +534,7 @@ class Game:
         self.environment = Environment()
         self.selected_vessel: Optional[Vessel] = None
         self.hover_vessel: Optional[Vessel] = None
+        self.player_vessel: Optional[Vessel] = None
         self._dragging = False
         self._drag_last_pos = None
         self._drag_start_pos = None
@@ -544,6 +547,10 @@ class Game:
 
         # Create initial vessels
         self._create_initial_vessels()
+
+        # Follow the player vessel on startup
+        if self.player_vessel is not None and PLAYER_FOLLOW_CAM:
+            self.camera.set_follow_target(self.player_vessel)
 
         # Time tracking for fixed timesteps
         self.accumulator = 0.0  # accumulated time for simulation
@@ -1033,6 +1040,31 @@ class Game:
             if v.name in _PERSONALITY_MAP:
                 v.personality = _PERSONALITY_MAP[v.name]
 
+        # Player vessel — human-controlled cargo ship near Port Maren.
+        # No route, no mission: heading and throttle are set by keyboard.
+        player = Vessel(
+            name="MV Velawind",
+            vessel_type="cargo",
+            position=(130.0, 320.0),
+            heading=90.0,
+            target_speed=0.0,
+            current_speed=0.0,
+            max_speed=14.0,
+            acceleration=2.0,
+            deceleration=1.0,
+            turn_rate=10.0,
+            length_m=85.0,
+            beam_m=14.0,
+            draft_m=5.0,
+            fuel=100.0,
+            fuel_capacity=100.0,
+            fuel_consumption_rate=0.4,
+            is_player=True,
+            status="underway",
+        )
+        self.world.add_vessel(player)
+        self.player_vessel = player
+
     def handle_events(self) -> None:
         """Process keyboard and mouse input."""
         for event in pygame.event.get():
@@ -1046,20 +1078,44 @@ class Game:
                     self.is_paused = not self.is_paused
                     self.environment.time_speed_multiplier = 0.0 if self.is_paused else 1.0
 
-                # Pan with arrow keys
-                elif event.key == pygame.K_UP:
-                    self.camera.pan(0, PAN_SPEED * (1.0 / TARGET_FPS))
-                elif event.key == pygame.K_DOWN:
-                    self.camera.pan(0, -PAN_SPEED * (1.0 / TARGET_FPS))
-                elif event.key == pygame.K_LEFT:
-                    self.camera.pan(PAN_SPEED * (1.0 / TARGET_FPS), 0)
-                elif event.key == pygame.K_RIGHT:
-                    self.camera.pan(-PAN_SPEED * (1.0 / TARGET_FPS), 0)
+                # Player throttle — W/S and UP/DOWN when player vessel active
+                elif event.key in (pygame.K_w, pygame.K_UP, pygame.K_s, pygame.K_DOWN):
+                    _pv_active = (self.player_vessel is not None
+                                  and not self.settings_panel.is_visible)
+                    if _pv_active:
+                        pv = self.player_vessel
+                        if event.key in (pygame.K_w, pygame.K_UP):
+                            pv.target_speed = min(pv.max_speed,
+                                                  pv.target_speed + PLAYER_THROTTLE_STEP)
+                        else:
+                            pv.target_speed = max(0.0,
+                                                  pv.target_speed - PLAYER_THROTTLE_STEP)
+                    else:
+                        # No player vessel — arrow keys pan map; S opens settings
+                        if event.key == pygame.K_UP:
+                            self.camera.pan(0, PAN_SPEED * (1.0 / TARGET_FPS))
+                        elif event.key == pygame.K_DOWN:
+                            self.camera.pan(0, -PAN_SPEED * (1.0 / TARGET_FPS))
+                        elif event.key == pygame.K_s:
+                            self.settings_panel.toggle_visibility()
+                            self.environment.weather_drift_enabled = not self.settings_panel.is_visible
 
-                # Reset zoom
+                # Arrow pan — LEFT/RIGHT only pan when player vessel not active
+                elif event.key in (pygame.K_LEFT, pygame.K_RIGHT):
+                    _pv_active = (self.player_vessel is not None
+                                  and not self.settings_panel.is_visible)
+                    if not _pv_active:
+                        if event.key == pygame.K_LEFT:
+                            self.camera.pan(PAN_SPEED * (1.0 / TARGET_FPS), 0)
+                        else:
+                            self.camera.pan(-PAN_SPEED * (1.0 / TARGET_FPS), 0)
+                    # A/D turning is handled continuously in update_simulation
+
+                # Reset zoom — keep following player vessel if one exists
                 elif event.key == pygame.K_z:
                     self.camera.zoom = self._calculate_default_zoom(self.display.get_width(), self.display.get_height())
-                    self.camera.set_follow_target(None)
+                    if self.player_vessel is None:
+                        self.camera.set_follow_target(None)
 
                 # Select next vessel (for testing)
                 elif event.key == pygame.K_TAB:
@@ -1069,8 +1125,18 @@ class Game:
                 elif event.key == pygame.K_t:
                     self.tech_systems_panel.toggle_visibility()
 
-                # Toggle settings panel
-                elif event.key in (pygame.K_s, pygame.K_e):
+                # Toggle follow cam on/off for player vessel
+                elif event.key == pygame.K_f and self.player_vessel is not None:
+                    if self.camera.follow_target is self.player_vessel:
+                        self.camera.set_follow_target(None)
+                    else:
+                        self.camera.set_follow_target(self.player_vessel)
+
+                # Toggle settings panel — E always; S only when no player vessel
+                elif event.key == pygame.K_e:
+                    self.settings_panel.toggle_visibility()
+                    self.environment.weather_drift_enabled = not self.settings_panel.is_visible
+                elif event.key == pygame.K_s and self.player_vessel is None:
                     self.settings_panel.toggle_visibility()
                     self.environment.weather_drift_enabled = not self.settings_panel.is_visible
 
@@ -1348,70 +1414,84 @@ class Game:
                             self.mission_manager.generate_mission(
                                 "vip_cruise", vessel, target, port_name)
 
-                # Navigation priority: MOB > trawling/anchoring > avoidance > normal.
-                if vessel.mob_timer > 0:
-                    vessel.mob_timer = max(0.0, vessel.mob_timer - SIM_TIMESTEP)
+                _is_player = getattr(vessel, 'is_player', False)
+
+                if _is_player:
+                    # Player vessel: heading controlled by held turn keys each sim step.
+                    if not self.settings_panel.is_visible:
+                        _keys = pygame.key.get_pressed()
+                        _turn = 0.0
+                        if _keys[pygame.K_a] or _keys[pygame.K_LEFT]:
+                            _turn -= PLAYER_TURN_RATE
+                        if _keys[pygame.K_d] or _keys[pygame.K_RIGHT]:
+                            _turn += PLAYER_TURN_RATE
+                        if _turn and vessel.status == "underway":
+                            vessel.heading = (vessel.heading + _turn * SIM_TIMESTEP) % 360.0
+                else:
+                    # Navigation priority: MOB > trawling/anchoring > avoidance > normal.
                     if vessel.mob_timer > 0:
-                        vessel.target_speed = MOB_SEARCH_SPEED_KN
-                        vessel.turn_toward(vessel.bearing_to(vessel.mob_position), SIM_TIMESTEP)
-                    else:
-                        # Search complete — restore speed and hand back to schedule.
-                        vessel.mob_position = None
-                        vessel.target_speed = vessel.max_speed
-                        if vessel.route:
-                            vessel.destination = vessel.route[vessel.route_index]
-                elif vessel.trawling_timer > 0:
-                    # Trawling (fishing) or anchoring (sailboat) pause at open-sea WP.
-                    vessel.trawling_timer = max(0.0, vessel.trawling_timer - SIM_TIMESTEP)
-                    if vessel.trawling_timer > 0:
-                        if vessel.mission_type == "fishing_trip":
-                            vessel.target_speed = TRAWL_SPEED_KN
-                            vessel.trawling_heading_timer -= SIM_TIMESTEP
-                            if vessel.trawling_heading_timer <= 0:
-                                vessel.heading = (vessel.heading + random.uniform(-40, 40)) % 360
-                                vessel.trawling_heading_timer = TRAWL_WANDER_INTERVAL_S
-                        else:  # sailing_cruise anchor stop
-                            vessel.target_speed = 0.0
-                    else:
-                        # Pause complete — restore speed and resume route.
-                        vessel.trawling_heading_timer = 0.0
-                        vessel.target_speed = vessel.max_speed
-                        _set_underway_mission_status(vessel)
-                        if vessel.route:
-                            vessel.destination = vessel.route[vessel.route_index]
-                elif vessel.status == "avoiding":
-                    vessel.turn_toward(vessel.avoid_heading, SIM_TIMESTEP)
-                elif vessel.destination and vessel.status == "underway":
-                    target_bearing = vessel.bearing_to(vessel.destination)
-                    vessel.turn_toward(target_bearing, SIM_TIMESTEP)
-                    # Approach slowdown: bleed speed within 3 wu of destination.
-                    # The else branch restores cruise speed once outside the zone
-                    # so target_speed never stays pinned at 2 kn after a waypoint pass.
-                    dist_to_dest = vessel.distance_to(vessel.destination)
-                    if dist_to_dest < ARRIVAL_DISTANCE * 3:
-                        vessel.target_speed = max(2.0, vessel.current_speed * 0.3)
-                    elif vessel.target_speed < vessel.max_speed:
-                        vessel.target_speed = vessel.max_speed
+                        vessel.mob_timer = max(0.0, vessel.mob_timer - SIM_TIMESTEP)
+                        if vessel.mob_timer > 0:
+                            vessel.target_speed = MOB_SEARCH_SPEED_KN
+                            vessel.turn_toward(vessel.bearing_to(vessel.mob_position), SIM_TIMESTEP)
+                        else:
+                            # Search complete — restore speed and hand back to schedule.
+                            vessel.mob_position = None
+                            vessel.target_speed = vessel.max_speed
+                            if vessel.route:
+                                vessel.destination = vessel.route[vessel.route_index]
+                    elif vessel.trawling_timer > 0:
+                        # Trawling (fishing) or anchoring (sailboat) pause at open-sea WP.
+                        vessel.trawling_timer = max(0.0, vessel.trawling_timer - SIM_TIMESTEP)
+                        if vessel.trawling_timer > 0:
+                            if vessel.mission_type == "fishing_trip":
+                                vessel.target_speed = TRAWL_SPEED_KN
+                                vessel.trawling_heading_timer -= SIM_TIMESTEP
+                                if vessel.trawling_heading_timer <= 0:
+                                    vessel.heading = (vessel.heading + random.uniform(-40, 40)) % 360
+                                    vessel.trawling_heading_timer = TRAWL_WANDER_INTERVAL_S
+                            else:  # sailing_cruise anchor stop
+                                vessel.target_speed = 0.0
+                        else:
+                            # Pause complete — restore speed and resume route.
+                            vessel.trawling_heading_timer = 0.0
+                            vessel.target_speed = vessel.max_speed
+                            _set_underway_mission_status(vessel)
+                            if vessel.route:
+                                vessel.destination = vessel.route[vessel.route_index]
+                    elif vessel.status == "avoiding":
+                        vessel.turn_toward(vessel.avoid_heading, SIM_TIMESTEP)
+                    elif vessel.destination and vessel.status == "underway":
+                        target_bearing = vessel.bearing_to(vessel.destination)
+                        vessel.turn_toward(target_bearing, SIM_TIMESTEP)
+                        # Approach slowdown: bleed speed within 3 wu of destination.
+                        # The else branch restores cruise speed once outside the zone
+                        # so target_speed never stays pinned at 2 kn after a waypoint pass.
+                        dist_to_dest = vessel.distance_to(vessel.destination)
+                        if dist_to_dest < ARRIVAL_DISTANCE * 3:
+                            vessel.target_speed = max(2.0, vessel.current_speed * 0.3)
+                        elif vessel.target_speed < vessel.max_speed:
+                            vessel.target_speed = vessel.max_speed
 
-                # Smart captain decisions: weather, fuel efficiency, traffic, port congestion.
-                _apply_smart_decisions(
-                    vessel, self.world, self.environment,
-                    _sim_time_str(self.environment),
-                    self._vessel_smart_state.setdefault(id(vessel), {}),
-                )
+                    # Smart captain decisions: weather, fuel efficiency, traffic, port congestion.
+                    _apply_smart_decisions(
+                        vessel, self.world, self.environment,
+                        _sim_time_str(self.environment),
+                        self._vessel_smart_state.setdefault(id(vessel), {}),
+                    )
 
-                # Zone speed enforcement — hard cap applied after AI decisions.
-                # Finds the most restrictive speed limit among all zones the vessel
-                # is currently inside; overrides any higher target_speed.
-                if vessel.status in ("underway", "avoiding"):
-                    _zone_limit = None
-                    for _zone in self.world.zones:
-                        if (_zone.speed_limit is not None
-                                and _zone.contains(vessel.position)):
-                            if _zone_limit is None or _zone.speed_limit < _zone_limit:
-                                _zone_limit = _zone.speed_limit
-                    if _zone_limit is not None and vessel.target_speed > _zone_limit:
-                        vessel.target_speed = _zone_limit
+                    # Zone speed enforcement — hard cap applied after AI decisions.
+                    # Finds the most restrictive speed limit among all zones the vessel
+                    # is currently inside; overrides any higher target_speed.
+                    if vessel.status in ("underway", "avoiding"):
+                        _zone_limit = None
+                        for _zone in self.world.zones:
+                            if (_zone.speed_limit is not None
+                                    and _zone.contains(vessel.position)):
+                                if _zone_limit is None or _zone.speed_limit < _zone_limit:
+                                    _zone_limit = _zone.speed_limit
+                        if _zone_limit is not None and vessel.target_speed > _zone_limit:
+                            vessel.target_speed = _zone_limit
 
                 # Mood timer advance — once per sim step per vessel.
                 _mt = _sim_time_str(self.environment)
@@ -1604,6 +1684,7 @@ class Game:
             self.fleet_panel.draw(self.world, self.selected_vessel)
         self.mission_panel.draw(self.mission_manager, self.mission_manager.sim_elapsed_s)
         self.mission_manager.clear_if_expired()
+        self.player_hud.draw(self.player_vessel)
 
         pygame.display.flip()
 

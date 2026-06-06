@@ -720,3 +720,11 @@ PARTY_TENDER_NAME    = "MV Tender I"   # the tender vessel that services parties
 
 # Tender vessel color — white/cream so it stands out from standard AIS types
 VESSEL_COLOR_TENDER = (240, 240, 240)
+
+# ============================================================================
+# Player Vessel
+# ============================================================================
+PLAYER_THROTTLE_STEP = 1.0    # knots per key press for throttle up/down
+PLAYER_TURN_RATE     = 2.5    # degrees per sim-second while turn key held
+PLAYER_FOLLOW_CAM    = True   # follow player vessel on startup
+PLAYER_PULSE_PERIOD  = 1.5    # seconds per full pulse cycle on the player ring

@@ -51,6 +51,7 @@ from config import (
     SHALLOW_WATER_MID_BAND_OFFSET_PX, SHALLOW_WATER_MID_BAND_ALPHA,
     COLOR_COLLISION_AVOID,
     SAR_PULSE_PERIOD, COLOR_SAR_DISTRESS, PORT_ACTIVITY_PULSE_PERIOD,
+    PLAYER_PULSE_PERIOD,
     VESSEL_COLOR_CARGO, VESSEL_COLOR_FERRY, VESSEL_COLOR_FISHING,
     VESSEL_COLOR_SAILBOAT, VESSEL_COLOR_TUG, VESSEL_COLOR_SELECTED,
     VESSEL_COLOR_TANKER, VESSEL_COLOR_COAST_GUARD,
@@ -869,8 +870,11 @@ class Chart:
         return ((float(x1), float(y1)), (float(x2), float(y2)))
 
     def draw_vessel(self, vessel, selected: bool = False, environment=None) -> None:
+        _is_player = getattr(vessel, 'is_player', False)
         screen_x, screen_y = self.camera.world_to_screen(vessel.position)
         size = max(6, min(int(8 * self.camera.zoom), 18))
+        if _is_player:
+            size = max(8, min(int(size * 1.4), 26))
         color = self._vessel_color(vessel)
         # Type-based tint when vessel has no special status override.
         if color == COLOR_VESSEL_DEFAULT:
@@ -878,8 +882,11 @@ class Chart:
             # Per-vessel color_override replaces the type-based tint.
             if getattr(vessel, 'color_override', None) is not None:
                 color = vessel.color_override
+        # Player vessel always uses ACCENT unless aground/distress
+        if _is_player and vessel.status not in ("aground",) and not vessel.distress:
+            color = COLOR_ACCENT
         # Selected vessel: override to white so it stands out regardless of type.
-        if selected and vessel.status not in ("avoiding", "aground") and not vessel.distress:
+        elif selected and vessel.status not in ("avoiding", "aground") and not vessel.distress:
             color = VESSEL_COLOR_SELECTED
 
         # Sailboat in-irons: stalled in the no-go zone — override colour before draw
@@ -891,6 +898,22 @@ class Chart:
         )
         if in_irons:
             color = COLOR_WARNING
+
+        # ── Player vessel pulsing ring ────────────────────────────────────────
+        # Distinct ACCENT-colored pulse so the player ship is immediately obvious.
+        # Drawn before SAR ring so SAR overlays on top when player is in distress.
+        if _is_player and not vessel.distress:
+            p_base_r = size + 8
+            p_phase  = (time.time() % PLAYER_PULSE_PERIOD) / PLAYER_PULSE_PERIOD
+            p_pulse  = abs(math.sin(p_phase * math.pi))
+            p_outer  = int(p_base_r + p_pulse * 10)
+            ca, cb, cc = COLOR_ACCENT
+            pygame.gfxdraw.aacircle(
+                self.surface, int(screen_x), int(screen_y), p_base_r,
+                (ca, cb, cc, 180))
+            pygame.gfxdraw.aacircle(
+                self.surface, int(screen_x), int(screen_y), p_outer,
+                (ca, cb, cc, int(120 * p_pulse)))
 
         # ── SAR distress pulse ────────────────────────────────────────────────
         # Two concentric rings: a fixed inner ring and an outer ring that
@@ -932,20 +955,22 @@ class Chart:
 
         # ── Vessel label ──────────────────────────────────────────────────────
         name_label = self.font_map.render(vessel.name, True, COLOR_TEXT_PRIMARY)
-        prio = 100 if selected else 30
+        # Player vessel: priority 200 — always drawn regardless of zoom threshold.
+        prio = 200 if _is_player else (100 if selected else 30)
         self._queue_label(name_label, int(screen_x - name_label.get_width() / 2),
                           int(screen_y + SHIP_LABEL_OFFSET), priority=prio,
                           anchor_pos=(screen_x, screen_y))
 
-        # ── Selection indicators ──────────────────────────────────────────────
-        if selected:
+        # ── Range rings: always shown for player, else only when selected ─────
+        if selected or _is_player:
+            ring_color = COLOR_ACCENT if _is_player else COLOR_VESSEL_RANGE
             for ring_index in range(1, SHIP_RANGE_RING_COUNT + 1):
                 radius = int(self.camera.distance_to_screen(
                     ring_index * SHIP_RANGE_RING_INTERVAL_NM))
                 if radius <= 0:
                     continue
                 pygame.gfxdraw.aacircle(
-                    self.surface, int(screen_x), int(screen_y), radius, COLOR_VESSEL_RANGE)
+                    self.surface, int(screen_x), int(screen_y), radius, ring_color)
                 label = self.font_mono.render(
                     f"{ring_index * SHIP_RANGE_RING_INTERVAL_NM:g} nm",
                     True, COLOR_TEXT_SECONDARY)
@@ -954,6 +979,8 @@ class Chart:
                 self._queue_label(label, label_x, label_y, priority=70,
                                   anchor_pos=(screen_x, screen_y))
 
+        # ── Selection indicators ──────────────────────────────────────────────
+        if selected:
             # Selection ring: hull extends `size` from centre to bow tip.
             sel_r = size + 4
             pygame.gfxdraw.aacircle(
@@ -1137,7 +1164,10 @@ class Chart:
         priority: int,
         anchor_pos: Position,
     ) -> None:
-        if self.camera.zoom < LABEL_ZOOM_THRESHOLD_SHOW_ALL and priority < 80:
+        # Priority ≥ 200: always shown (player vessel label, regardless of zoom).
+        # Priority ≥ 80: shown at any zoom (ports, selected vessel).
+        # Priority < 80: only shown above LABEL_ZOOM_THRESHOLD_SHOW_ALL.
+        if priority < 200 and self.camera.zoom < LABEL_ZOOM_THRESHOLD_SHOW_ALL and priority < 80:
             return
 
         label_rect = pygame.Rect(

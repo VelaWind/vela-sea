@@ -5,6 +5,7 @@ world/environment/vessel state each frame and draw live, responsive UI.
 """
 
 import time
+import math as _math
 import pygame
 from typing import Optional, Tuple, Dict
 from math import atan2, degrees
@@ -23,6 +24,7 @@ from config import (
     VESSEL_COLOR_COAST_GUARD, VESSEL_COLOR_TENDER,
     KNOTS_TO_UNITS_PER_HOUR, NM_PER_WORLD_UNIT,
     AIS_CPA_WARNING_NM, AIS_NEARBY_MAX,
+    PLAYER_THROTTLE_STEP,
 )
 
 
@@ -701,7 +703,7 @@ class SettingsPanel:
             "Slide any bar to update the environment live.",
             "Adjust Time of Day to influence tide and lighting.",
             "",
-            "Keys: S / E = Settings  |  T = Tech panel  |  1 = Pause  2 = 1×  3 = 2×  4 = 3×",
+            "Keys: E = Settings  |  T = Tech panel  |  1 = Pause  2 = 1×  3 = 2×  4 = 3×",
             "Tab = Select vessel, Esc = Quit",
         ]
         for line in instructions:
@@ -1041,3 +1043,157 @@ class MissionPanel:
             _truncate_text(m.reward_text, self._font_obj, self.WIDTH - pad * 2),
             True, reward_col)
         self.surface.blit(reward_surf, (x + pad, cy))
+
+
+# ---------------------------------------------------------------------------
+# Player HUD panel
+# ---------------------------------------------------------------------------
+
+class PlayerHUDPanel:
+    """Bottom-center HUD for the human-controlled vessel.
+
+    Shows: name + [PLAYER] badge, speed/throttle bar, heading + compass arc,
+    fuel bar, hull integrity bar, status label, and a key-hint line.
+    Hidden entirely when no player vessel is provided.
+    """
+
+    WIDTH    = 340
+    PAD      = 12
+    MARGIN   = 8    # pixels from bottom of screen
+    BAR_H    = 10
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self._font_name   = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
+        self._font_badge  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL,   bold=True)
+        self._font_label  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL)
+        self._font_value  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_LABEL,   bold=True)
+        self._font_hint   = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL)
+
+    # ------------------------------------------------------------------ public
+
+    def draw(self, vessel) -> None:
+        if vessel is None:
+            return
+
+        vw, vh = self.surface.get_size()
+        pad = self.PAD
+        w   = self.WIDTH
+
+        # Measure content height dynamically
+        row_h   = self._font_label.get_height() + 4
+        bar_row = self.BAR_H + 6
+        content_h = (
+            self._font_name.get_height() + 6   # name + badge
+            + row_h                             # speed label + throttle bar
+            + bar_row
+            + row_h                             # heading label
+            + row_h                             # fuel label + bar
+            + bar_row
+            + row_h                             # hull label + bar
+            + bar_row
+            + row_h                             # status
+            + row_h                             # hint
+        )
+        h = content_h + pad * 2
+        x = vw // 2 - w // 2
+        y = vh - h - self.MARGIN - 40  # 40 = status bar height
+
+        # Background
+        bg = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(bg, (*COLOR_PANEL_BG[:3], 220), bg.get_rect(), border_radius=10)
+        pygame.draw.rect(bg, COLOR_ACCENT, bg.get_rect(), width=1, border_radius=10)
+        self.surface.blit(bg, (x, y))
+
+        cy = y + pad
+
+        # ── Name + [PLAYER] badge ─────────────────────────────────────────────
+        name_surf  = self._font_name.render(vessel.name, True, COLOR_ACCENT)
+        badge_surf = self._font_badge.render("[PLAYER]", True, (60, 220, 120))
+        self.surface.blit(name_surf, (x + pad, cy))
+        bx = x + pad + name_surf.get_width() + 8
+        by = cy + (name_surf.get_height() - badge_surf.get_height()) // 2
+        self.surface.blit(badge_surf, (bx, by))
+        cy += name_surf.get_height() + 6
+
+        # ── Speed + throttle bar ──────────────────────────────────────────────
+        spd_str  = f"{vessel.current_speed:.1f} kn"
+        tgt_str  = f"/ {vessel.target_speed:.1f}"
+        spd_surf = self._font_value.render(spd_str, True, COLOR_TEXT_PRIMARY)
+        tgt_surf = self._font_label.render(tgt_str, True, COLOR_TEXT_SECONDARY)
+        lbl_surf = self._font_label.render("SPD", True, COLOR_TEXT_DIM)
+        self.surface.blit(lbl_surf, (x + pad, cy))
+        self.surface.blit(spd_surf, (x + pad + 36, cy - 2))
+        self.surface.blit(tgt_surf, (x + pad + 36 + spd_surf.get_width() + 4, cy))
+        cy += row_h
+        self._draw_bar(x + pad, cy, w - pad * 2,
+                       vessel.target_speed / max(0.1, vessel.max_speed), COLOR_ACCENT)
+        cy += bar_row
+
+        # ── Heading + compass arc ─────────────────────────────────────────────
+        hdg_str  = f"HDG  {vessel.heading:05.1f}°"
+        hdg_surf = self._font_value.render(hdg_str, True, COLOR_TEXT_PRIMARY)
+        self.surface.blit(hdg_surf, (x + pad, cy))
+        # Small compass arc to the right of the heading text
+        arc_cx = x + w - pad - 18
+        arc_cy = cy + self._font_value.get_height() // 2
+        self._draw_compass_arc(arc_cx, arc_cy, 14, vessel.heading)
+        cy += row_h
+
+        # ── Fuel bar ─────────────────────────────────────────────────────────
+        if vessel.fuel is not None and vessel.fuel_capacity:
+            fuel_pct = vessel.fuel / vessel.fuel_capacity
+            fuel_col = COLOR_ACCENT if fuel_pct > 0.25 else COLOR_WARNING
+            fuel_str = f"FUEL  {fuel_pct * 100:.0f}%"
+            fuel_surf = self._font_label.render(fuel_str, True, fuel_col)
+            self.surface.blit(fuel_surf, (x + pad, cy))
+            cy += row_h
+            self._draw_bar(x + pad, cy, w - pad * 2, fuel_pct, fuel_col)
+            cy += bar_row
+
+        # ── Hull integrity bar ────────────────────────────────────────────────
+        hull = getattr(vessel, 'hull_integrity', 1.0)
+        hull_col = COLOR_ACCENT if hull > 0.5 else COLOR_WARNING
+        hull_str = f"HULL  {hull * 100:.0f}%"
+        hull_surf = self._font_label.render(hull_str, True, hull_col)
+        self.surface.blit(hull_surf, (x + pad, cy))
+        cy += row_h
+        self._draw_bar(x + pad, cy, w - pad * 2, hull, hull_col)
+        cy += bar_row
+
+        # ── Status ────────────────────────────────────────────────────────────
+        status_str  = vessel.status.upper()
+        status_col  = COLOR_WARNING if vessel.status in ("aground", "adrift") else COLOR_TEXT_SECONDARY
+        status_surf = self._font_label.render(status_str, True, status_col)
+        self.surface.blit(status_surf, (x + pad, cy))
+        cy += row_h
+
+        # ── Key hint ──────────────────────────────────────────────────────────
+        hint = "W/S throttle  A/D turn  F follow  Z zoom"
+        hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
+        self.surface.blit(hint_surf, (x + w // 2 - hint_surf.get_width() // 2, cy))
+
+    # ----------------------------------------------------------------- helpers
+
+    def _draw_bar(self, x: int, y: int, width: int, fraction: float,
+                  fill_color: tuple) -> None:
+        fraction = max(0.0, min(1.0, fraction))
+        pygame.draw.rect(self.surface, COLOR_FRAME, (x, y, width, self.BAR_H),
+                         border_radius=4)
+        fill_w = max(0, int(width * fraction))
+        if fill_w > 0:
+            pygame.draw.rect(self.surface, fill_color, (x, y, fill_w, self.BAR_H),
+                             border_radius=4)
+
+    def _draw_compass_arc(self, cx: int, cy: int, radius: int,
+                          heading_deg: float) -> None:
+        """Draw a small arc ring with a tick mark at the current heading."""
+        pygame.gfxdraw.aacircle(self.surface, cx, cy, radius,
+                                (*COLOR_FRAME, 200))
+        # Tick mark at heading direction
+        rad = _math.radians(heading_deg - 90.0)  # -90 so 0° = north = up
+        tx = cx + int(_math.cos(rad) * radius)
+        ty = cy + int(_math.sin(rad) * radius)
+        ti = cx + int(_math.cos(rad) * (radius - 4))
+        tj = cy + int(_math.sin(rad) * (radius - 4))
+        pygame.draw.line(self.surface, COLOR_ACCENT, (ti, tj), (tx, ty), 2)

@@ -145,6 +145,14 @@ class Vessel:
     # "thinking" indicator that briefly highlights the log section header.
     _last_decision_time: float = field(default=0.0, repr=False)
 
+    # Player vessel flag — True only for the human-controlled ship.
+    # Skips all AI navigation logic in the sim loop.
+    is_player: bool = False
+
+    # Structural health: 1.0 = fully intact, 0.0 = total loss.
+    # Decremented on grounding events; shown in the player HUD.
+    hull_integrity: float = 1.0
+
     # ------------------------------------------------------------------
     # Route / port-stay state machine (Chunk E)
     # ------------------------------------------------------------------
