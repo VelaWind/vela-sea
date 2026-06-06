@@ -41,6 +41,7 @@ THEME = {
     "ANCHORAGE": (90, 143, 214),
     "TSS": (160, 111, 214),
     "SHALLOW_HAZARD": (224, 200, 74),
+    "BEACH_FRINGE": (200, 178, 125),
     "VESSEL_DEFAULT": (215, 227, 240),
     "VESSEL_SELECTED": (255, 210, 63),
     "VESSEL_DOCKED": (150, 170, 190),
@@ -90,6 +91,7 @@ COLOR_PROTECTED = THEME["PROTECTED"]
 COLOR_ANCHORAGE = THEME["ANCHORAGE"]
 COLOR_TSS = THEME["TSS"]
 COLOR_SHALLOW_HAZARD = THEME["SHALLOW_HAZARD"]
+COLOR_BEACH_FRINGE = THEME["BEACH_FRINGE"]
 COLOR_VESSEL_DEFAULT = THEME["VESSEL_DEFAULT"]
 COLOR_VESSEL_SELECTED = THEME["VESSEL_SELECTED"]
 COLOR_VESSEL_DOCKED = THEME["VESSEL_DOCKED"]
@@ -232,7 +234,7 @@ PORT_LABEL_OFFSET = 16
 # ============================================================================
 ZONE_BORDER_WIDTH = 1
 ZONE_LABEL_OFFSET = 12
-ZONE_FILL_ALPHA = 18
+ZONE_FILL_ALPHA = 10
 ZONE_HATCH_ALPHA = 40
 ZONE_HATCH_SPACING = 20
 SHALLOW_WATER_BAND_WIDTH = 20
@@ -240,7 +242,11 @@ SHALLOW_WATER_BAND_WIDTH = 20
 # Kept soft and low-alpha so the coast reads as a whisper of depth, not a neon rim.
 SHALLOW_WATER_BAND_STEPS = 8
 SHALLOW_WATER_BAND_STEP_PX = 4
-SHALLOW_WATER_BAND_MAX_ALPHA = 45
+SHALLOW_WATER_BAND_MAX_ALPHA = 130
+SHALLOW_WATER_MID_BAND_OFFSET_PX = 40   # pixel outset for the mid-depth fill halo
+SHALLOW_WATER_MID_BAND_ALPHA = 55        # fill alpha for mid-depth zone
+BEACH_FRINGE_ALPHA = 160                 # alpha for sandy beach fringe ring on coastline
+BEACH_FRINGE_WIDTH_PX = 4               # line width for beach fringe
 DEPTH_CONTOUR_WIDTH = 2
 
 # ============================================================================

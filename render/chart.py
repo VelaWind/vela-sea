@@ -47,6 +47,8 @@ from config import (
     LAND_INLAND_TINT_SHRINK_PX, LAND_INLAND_TINT_COLOR,
     OCEAN_VIGNETTE_WORLD_RADIUS, OCEAN_VIGNETTE_ALPHA,
     OCEAN_VIGNETTE_STEPS, OCEAN_VIGNETTE_COLOR,
+    COLOR_BEACH_FRINGE, BEACH_FRINGE_ALPHA, BEACH_FRINGE_WIDTH_PX,
+    SHALLOW_WATER_MID_BAND_OFFSET_PX, SHALLOW_WATER_MID_BAND_ALPHA,
     COLOR_COLLISION_AVOID,
     SAR_PULSE_PERIOD, COLOR_SAR_DISTRESS, PORT_ACTIVITY_PULSE_PERIOD,
     VESSEL_COLOR_CARGO, VESSEL_COLOR_FERRY, VESSEL_COLOR_FISHING,
@@ -175,10 +177,14 @@ class Chart:
         # Rebuilt only when zoom or window size changes — usually never during a run.
         self._ov_surf: Optional[pygame.Surface] = None
         self._ov_key: tuple = ()
-        # Shared full-screen SRCALPHA overlay — allocated once, reused for island
-        # coastal bands, current arrows, and the night tint so we never pay the
-        # ~1.4 ms SDL surface allocation cost more than once per session.
+        # Shared full-screen SRCALPHA overlay — allocated once, reused for current
+        # arrows and the night tint so we never pay the ~1.4 ms SDL surface
+        # allocation cost more than once per session.
         self._alpha_surf: Optional[pygame.Surface] = None
+        # Coastal depth layer: mid-depth fills + shallow bands for all islands.
+        # Cached by (zoom_bucket, vw, vh) — rebuilt only when zoom or window changes.
+        self._depth_surf: Optional[pygame.Surface] = None
+        self._depth_key: tuple = ()
 
     def _get_alpha_surf(self) -> pygame.Surface:
         """Return the shared full-screen SRCALPHA surface, creating it once on first use.
@@ -367,6 +373,67 @@ class Chart:
             int(avg_y + (y - avg_y) * scale),
         ) for x, y in polygon]
 
+    def _build_depth_layer(self, world) -> pygame.Surface:
+        """Build and cache the coastal depth gradient surface for all islands.
+
+        Draws three visual layers per island onto a shared SRCALPHA surface:
+          1. Mid-depth halo — wide offset fill in COLOR_SHALLOW_WATER, visible
+             from coast out to ~40 screen-px; land fill later covers the interior.
+          2. Beach fringe — thin sandy ring right on the polygon edge; the land
+             fill covers its inner half, leaving ~2 px of warm sand in the water.
+          3. Shallow bands — 8 tight rings of COLOR_SHALLOW_BAND fading outward,
+             starting 1 step out from the polygon so none bleeds inside the land.
+
+        Cached by (zoom_bucket, vw, vh); rebuilt only when zoom or window changes.
+        """
+        vw = self.surface.get_width()
+        vh = self.surface.get_height()
+        zoom_key = round(self.camera.zoom, 1)
+        key = (zoom_key, vw, vh)
+        if self._depth_key == key and self._depth_surf is not None:
+            return self._depth_surf
+
+        surf = pygame.Surface((vw, vh), pygame.SRCALPHA)
+        surf.fill((0, 0, 0, 0))
+
+        if world:
+            for island in world.islands:
+                screen_polygon = [self.camera.world_to_screen(p) for p in island.polygon]
+                if len(screen_polygon) < 3:
+                    continue
+                int_polygon = [(int(x), int(y)) for x, y in screen_polygon]
+
+                # 1. Mid-depth zone: large offset polygon; land fill covers interior.
+                mid_poly = self._offset_screen_polygon(
+                    int_polygon, SHALLOW_WATER_MID_BAND_OFFSET_PX)
+                if len(mid_poly) >= 3:
+                    pygame.gfxdraw.filled_polygon(
+                        surf, mid_poly,
+                        (*COLOR_SHALLOW_WATER, SHALLOW_WATER_MID_BAND_ALPHA))
+
+                # 2. Beach fringe: thin warm ring on the polygon edge.
+                pygame.draw.lines(
+                    surf, (*COLOR_BEACH_FRINGE, BEACH_FRINGE_ALPHA),
+                    True, int_polygon, BEACH_FRINGE_WIDTH_PX)
+
+                # 3. Shallow bands: start 1 step outward so no ring overlaps land.
+                for step in range(SHALLOW_WATER_BAND_STEPS):
+                    step_alpha = int(
+                        SHALLOW_WATER_BAND_MAX_ALPHA
+                        * (1.0 - step / SHALLOW_WATER_BAND_STEPS))
+                    step_offset = (step + 1) * SHALLOW_WATER_BAND_STEP_PX
+                    band_poly = self._offset_screen_polygon(int_polygon, step_offset)
+                    if len(band_poly) >= 3:
+                        pygame.draw.lines(
+                            surf,
+                            (*COLOR_SHALLOW_BAND, step_alpha),
+                            True, band_poly,
+                            SHALLOW_WATER_BAND_STEP_PX + 1)
+
+        self._depth_surf = surf
+        self._depth_key = key
+        return surf
+
     def draw_grid(self) -> None:
         cam_x, cam_y = self.camera.position
         zoom = self.camera.zoom
@@ -411,8 +478,6 @@ class Chart:
                 continue
 
             int_polygon = [(int(x), int(y)) for x, y in screen_polygon]
-            overlay = self._get_alpha_surf()
-            overlay.fill((0, 0, 0, 0))
 
             # Per-type land colours — fall back to "island" palette if unknown type.
             _lc = LAND_COLORS.get(island.land_type, LAND_COLORS["island"])
@@ -420,27 +485,7 @@ class Chart:
             _coast = _lc["coast"]
             _shade = _lc["shade"]
 
-            # Coastal depth fade: multiple thin rings of decreasing alpha graduate
-            # smoothly from the shoreline outward so it reads as water depth, not
-            # a hard border.
-            for step in range(SHALLOW_WATER_BAND_STEPS):
-                step_alpha = int(SHALLOW_WATER_BAND_MAX_ALPHA * (1.0 - step / SHALLOW_WATER_BAND_STEPS))
-                step_offset = step * SHALLOW_WATER_BAND_STEP_PX
-                band_poly = (
-                    self._offset_screen_polygon(int_polygon, step_offset)
-                    if step > 0
-                    else int_polygon
-                )
-                if len(band_poly) >= 3:
-                    pygame.draw.lines(
-                        overlay,
-                        (*COLOR_SHALLOW_BAND, step_alpha),
-                        True,
-                        band_poly,
-                        SHALLOW_WATER_BAND_STEP_PX + 1,
-                    )
-
-            self.surface.blit(overlay, (0, 0))
+            # Land fill covers the interior of depth bands drawn by _build_depth_layer.
             pygame.gfxdraw.filled_polygon(self.surface, int_polygon, _fill)
 
             # Inland tint: shrunken polygon in the type-specific shade colour
@@ -453,8 +498,8 @@ class Chart:
                 if len(inner) >= 3:
                     pygame.gfxdraw.filled_polygon(self.surface, inner, _shade)
 
+            # 1px anti-aliased coastline in the darker coast colour.
             pygame.gfxdraw.aapolygon(self.surface, int_polygon, _coast)
-            pygame.gfxdraw.aapolygon(self.surface, int_polygon, _shade)
 
     def _zone_color(self, kind: str):
         return {
@@ -465,6 +510,19 @@ class Chart:
             "tss": COLOR_TSS,
             "shallow": COLOR_SHALLOW_HAZARD,
         }.get(kind, COLOR_TEXT_DIM)
+
+    def _draw_dashed_circle(self, cx: float, cy: float, radius: int,
+                            color: tuple, dash_count: int = 20) -> None:
+        """Draw a dashed circle as alternating arc segments (for no-entry zones)."""
+        if radius < 2:
+            return
+        rect = pygame.Rect(int(cx) - radius, int(cy) - radius,
+                           radius * 2, radius * 2)
+        segment = 2 * math.pi / dash_count
+        for i in range(0, dash_count, 2):
+            start = i * segment
+            end = start + segment * 0.65
+            pygame.draw.arc(self.surface, color, rect, start, end, 1)
 
     def draw_zones(self, world) -> None:
         if not world or not world.zones:
@@ -494,8 +552,9 @@ class Chart:
 
             if zone.kind == "no_entry":
                 self._draw_zone_hatching(screen_x, screen_y, screen_radius, color)
-
-            pygame.gfxdraw.aacircle(self.surface, int(screen_x), int(screen_y), screen_radius, color)
+                self._draw_dashed_circle(screen_x, screen_y, screen_radius, color)
+            else:
+                pygame.gfxdraw.aacircle(self.surface, int(screen_x), int(screen_y), screen_radius, color)
 
             if self.surface.get_rect().collidepoint(screen_x, screen_y) and screen_radius > 24:
                 label = self.font_small.render(zone.name, True, COLOR_ZONE_LABEL)
@@ -1199,6 +1258,10 @@ class Chart:
         self.draw_background(world)
         # Open-ocean vignette sits directly on the water fill, before everything else
         self.draw_ocean_vignette()
+        # Coastal depth layer (mid-depth + shallow bands) — cached; land fill drawn
+        # later in draw_islands() covers the interior of each offset polygon.
+        if world:
+            self.surface.blit(self._build_depth_layer(world), (0, 0))
         # Depth zone fills (before islands so land polygons cover the inward part)
         if world and environment:
             self.draw_depth_zones(world, environment)
