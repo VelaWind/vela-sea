@@ -1088,6 +1088,17 @@ class Chart:
             label_surface.get_height() + 8,
         )
 
+        # Skip labels whose anchor is entirely off-screen; clamp partially-visible
+        # ones inward so text never bleeds past the viewport edge.
+        vw, vh = self.surface.get_width(), self.surface.get_height()
+        if (label_rect.right < 0 or label_rect.left > vw
+                or label_rect.bottom < 0 or label_rect.top > vh):
+            return
+        label_rect.x = max(0, min(vw - label_rect.width, label_rect.x))
+        label_rect.y = max(0, min(vh - label_rect.height, label_rect.y))
+        x = label_rect.x + 4
+        y = label_rect.y + 4
+
         self._label_candidates.append({
             "surface": label_surface,
             "x": x,

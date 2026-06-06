@@ -149,8 +149,9 @@ ZOOM_MAX = 4.0
 ZOOM_DEFAULT = 1.0
 ZOOM_SCROLL_SPEED = 0.10
 PAN_SPEED = 300.0
-# Label declutter: when zoom is below this, only show ports and selected vessel labels
-LABEL_ZOOM_THRESHOLD_SHOW_ALL = 0.8
+# Label declutter: when zoom is below this, only show ports and selected vessel labels.
+# Default zoom on 1080p ≈ 1.05, on 1440p ≈ 1.40 — threshold must be above both.
+LABEL_ZOOM_THRESHOLD_SHOW_ALL = 1.5
 
 # ============================================================================
 # Compass & Scale

@@ -177,13 +177,13 @@ class VesselInfoPanel:
         current_y += 30
 
         if vessel.destination:
-            dist = vessel.distance_to(vessel.destination)
+            dist_nm = vessel.distance_to(vessel.destination) * NM_PER_WORLD_UNIT
             eta_text = "—"
-            if vessel.current_speed > 0:
-                eta_text = _format_duration(dist / vessel.current_speed)
+            if vessel.current_speed > 0.1:
+                eta_text = _format_duration(dist_nm / vessel.current_speed)
             self._draw_section_header(x, current_y, "Navigation Target")
             current_y += 24
-            self._draw_label_value(x, current_y, panel_width, "Distance", f"{dist:.1f} nm")
+            self._draw_label_value(x, current_y, panel_width, "Distance", f"{dist_nm:.1f} nm")
             current_y += 22
             self._draw_label_value(x, current_y, panel_width, "ETA", eta_text)
             current_y += 30
