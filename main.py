@@ -25,7 +25,7 @@ from config import (
 from config import ARRIVAL_DISTANCE, PORT_DETECT_RADIUS, SHIP_SELECT_RADIUS
 from config import TIME_COMPRESSION
 from config import DRAFT_SAFETY_MARGIN_M
-from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR
+from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR, FUEL_EMERGENCY_REFUEL_FRACTION
 from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
 from config import (
     PORT_STAY_CARGO_LOAD_S, PORT_STAY_FERRY_BOARD_S, PORT_STAY_FISHING_UNLOAD_S,
@@ -71,19 +71,31 @@ def _sim_time_str(environment) -> str:
 
 
 def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
-    """Refloat a grounded vessel and release its rescuer (if any).
+    """Refloat a grounded/adrift vessel and release its rescuer (if any).
 
     Calls vessel.refloat() for the grounded vessel's own state, then
     clears the rescuer's player_commanded flag and restores its schedule.
+
+    Fuel-exhaustion case: when the vessel ran dry (fuel == 0), give it an
+    emergency partial refuel so it can motor to the nearest port instead of
+    immediately going adrift again the moment the rescuer leaves.
     """
     rescuer = grounded.rescue_vessel
+    # Emergency refuel for fuel-exhausted vessels so they can reach a port.
+    fuel_rescue = (grounded.fuel is not None
+                   and grounded.fuel == 0.0
+                   and grounded.fuel_capacity is not None)
+    if fuel_rescue:
+        grounded.fuel = grounded.fuel_capacity * FUEL_EMERGENCY_REFUEL_FRACTION
     grounded.refloat()
     if rescuer is not None and rescuer.player_commanded:
         rescuer.player_commanded = False
         if rescuer.route:
             rescuer.destination = rescuer.route[rescuer.route_index]
     if event_log is not None:
-        event_log.add(sim_time, f"REFLOATED — {grounded.name}", EVENT_COLOR_REFLOAT)
+        msg = (f"RESCUED — {grounded.name} (emergency fuel)"
+               if fuel_rescue else f"REFLOATED — {grounded.name}")
+        event_log.add(sim_time, msg, EVENT_COLOR_REFLOAT)
 
 
 def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
@@ -1423,8 +1435,23 @@ class Game:
                         vessel.log_decision(_mt, "Rested — crew refreshed")
 
                 # Speed and movement (both methods respect status internally).
+                _was_adrift = vessel.status == "adrift"
                 vessel.update_speed(SIM_TIMESTEP, self.environment)
-                vessel.move(SIM_TIMESTEP, self.environment)
+                _t = _sim_time_str(self.environment)
+                vessel.move(SIM_TIMESTEP, self.environment,
+                            world=self.world, sim_time=_t)
+                # Fuel-exhaustion distress: ship.py sets distress=True when fuel
+                # hits zero away from a port.  Fire event_log and mission_manager
+                # here (ship.py cannot access them) on the first tick only.
+                if (not _was_adrift
+                        and vessel.status == "adrift"
+                        and vessel.distress
+                        and vessel.fuel is not None and vessel.fuel == 0.0):
+                    self.event_log.add(
+                        _t, f"MAYDAY — {vessel.name} FUEL EXHAUSTED",
+                        EVENT_COLOR_MAYDAY)
+                    self.mission_manager.generate_mission(
+                        "rescue", vessel, vessel.position)
 
                 # Arrival check: fire for "underway" and "avoiding" so a vessel that
                 # reaches a port during avoidance still docks correctly.

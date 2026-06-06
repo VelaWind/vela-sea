@@ -663,6 +663,10 @@ COLOR_EVENT_REFLOATED  = (80, 200, 120)   # green — vessel successfully refloa
 # SAR (Search and Rescue)
 # ============================================================================
 SAR_DISPATCH_RANGE_NM = 50.0    # nautical miles — auto-dispatch only within this range
+# Fuel-exhaustion rescue: fraction of fuel capacity given to a stranded vessel
+# when a SAR rescuer reaches it, so it can motor to the nearest port for a full
+# refuel.  0.20 = 20 % capacity — enough for ~4 sim-hours at cruise speed.
+FUEL_EMERGENCY_REFUEL_FRACTION = 0.20
 SAR_PULSE_PERIOD            = 2.0   # seconds — one full pulse cycle on the distress ring
 PORT_ACTIVITY_PULSE_PERIOD  = 4.0   # seconds — slower pulse shown when a vessel is in port
 COLOR_SAR_DISTRESS    = (255, 70, 50)   # red-orange distress pulse ring

@@ -363,7 +363,7 @@ class Vessel:
         actual_change = max(-max_change, min(max_change, delta))
         self.current_speed = max(0.0, self.current_speed + actual_change)
 
-    def move(self, dt: float, environment=None) -> None:
+    def move(self, dt: float, environment=None, world=None, sim_time: str = "") -> None:
         """Move the vessel by one time step, applying environment forces and consuming fuel.
 
         Position update is the vector sum of:
@@ -375,6 +375,9 @@ class Vessel:
 
         Sailboat propulsion is handled in update_speed() (wind caps target speed);
         the same vector additions apply so the wind still drifts a sailing vessel.
+
+        Optional world/sim_time: when supplied, a vessel whose fuel hits zero away
+        from any port is declared distress=True so SAR dispatch picks it up.
         """
         # Docked, aground, and anchored vessels are held in place.
         # Underway, avoiding, and adrift vessels can be displaced by any of the three forces below.
@@ -433,6 +436,15 @@ class Vessel:
             self.fuel = max(0.0, self.fuel - fuel_used)
             if self.fuel == 0.0 and self.status == "underway":
                 self.status = "adrift"
+                # Declare distress unless the vessel is already alongside a port
+                # (within PORT_DETECT_RADIUS), where it can drift in unaided.
+                near_port = (world is not None
+                             and self._port_at(self.position, world) is not None)
+                if not near_port:
+                    self.distress = True
+                    self.log_decision(
+                        sim_time,
+                        "ENGINE FAILURE — fuel exhausted, requesting assistance")
 
     def status_line(self) -> str:
         """Return a short status string for display."""
