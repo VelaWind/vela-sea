@@ -1,0 +1,27 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# ── Generated / debug artifacts ─────────────────────────────────────────────
+debug_frame.png
+tests/*.png
+
+# ── Editors ─────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Claude Code local config (machine-specific, not project state) ───────────
+.claude/
