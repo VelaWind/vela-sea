@@ -728,3 +728,11 @@ PLAYER_THROTTLE_STEP = 1.0    # knots per key press for throttle up/down
 PLAYER_TURN_RATE     = 2.5    # degrees per sim-second while turn key held
 PLAYER_FOLLOW_CAM    = True   # follow player vessel on startup
 PLAYER_PULSE_PERIOD  = 1.5    # seconds per full pulse cycle on the player ring
+
+# ============================================================================
+# Career System
+# ============================================================================
+PLAYER_STARTING_MONEY      = 5000.0   # opening wallet balance (currency units)
+PLAYER_STARTING_REPUTATION = 10       # opening reputation score (0–100)
+HULL_REPAIR_COST_PER_POINT = 50.0    # cost per 1 % hull integrity restored at port
+CONTRACT_PENALTY           = 200.0   # fine deducted for a missed contract deadline

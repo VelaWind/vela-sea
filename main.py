@@ -28,6 +28,7 @@ from config import DRAFT_SAFETY_MARGIN_M
 from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR, FUEL_EMERGENCY_REFUEL_FRACTION
 from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
 from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM
+from config import HULL_REPAIR_COST_PER_POINT
 from config import (
     PORT_STAY_CARGO_LOAD_S, PORT_STAY_FERRY_BOARD_S, PORT_STAY_FISHING_UNLOAD_S,
     PORT_STAY_SAIL_ANCHOR_S, PORT_STAY_TUG_S,
@@ -38,7 +39,7 @@ from render.chart import Chart
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
     VESSEL_ROUTE_FERRY, VESSEL_ROUTE_CARGO,
@@ -58,6 +59,7 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
 from config import NM_PER_WORLD_UNIT
 from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
+from engine.career import PlayerCareer, JobBoard
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +528,9 @@ class Game:
         self.mission_panel = MissionPanel(self.display)
         self.mission_manager = MissionManager()
         self.player_hud = PlayerHUDPanel(self.display)
+        self.career = PlayerCareer()
+        self.job_board = JobBoard()
+        self.career_panel = CareerPanel(self.display)
 
         # Simulation state
         self.world = World()
@@ -1132,6 +1137,10 @@ class Game:
                     else:
                         self.camera.set_follow_target(self.player_vessel)
 
+                # Toggle career panel
+                elif event.key == pygame.K_j and self.player_vessel is not None:
+                    self.career_panel.toggle_visibility()
+
                 # Toggle settings panel — E always; S only when no player vessel
                 elif event.key == pygame.K_e:
                     self.settings_panel.toggle_visibility()
@@ -1249,6 +1258,13 @@ class Game:
         if self.settings_panel.is_visible:
             self.settings_panel.handle_mouse_click(self.environment, screen_pos)
             return
+
+        # Career panel — accept contract clicks
+        if self.career_panel.is_visible:
+            if self.career_panel.handle_click(
+                    screen_pos, self.job_board, self.career,
+                    self.mission_manager.sim_elapsed_s) is not None:
+                return
 
         # Fleet status panel click — check before chart click
         clicked = self.fleet_panel.handle_click(screen_pos)
@@ -1551,6 +1567,27 @@ class Game:
                                 break
                     _was_player_cmd = vessel.player_commanded
                     vessel.arrive(self.world)
+                    # Career hook: player docked at a port.
+                    if _is_player and vessel.status == "in_port":
+                        _docked_at = getattr(vessel, '_docked_port_name', '')
+                        if _docked_at:
+                            _done = self.job_board.complete_job(_docked_at, self.career)
+                            if _done:
+                                self.event_log.add(
+                                    _t,
+                                    f"Contract complete — \xa3{_done.payout:.0f} earned",
+                                    EVENT_COLOR_REFLOAT)
+                            self.job_board.refresh_jobs(self.world)
+                            _hull = getattr(vessel, 'hull_integrity', 1.0)
+                            if _hull < 1.0:
+                                _repair_cost = round((1.0 - _hull) * 100.0) * HULL_REPAIR_COST_PER_POINT
+                                if self.career.spend(_repair_cost, "Hull repair"):
+                                    vessel.hull_integrity = 1.0
+                                    self.career.hull_repairs_paid += _repair_cost
+                                    self.event_log.add(
+                                        _t,
+                                        f"Hull repaired — -\xa3{_repair_cost:.0f}",
+                                        EVENT_COLOR_WEATHER)
                     # Advance any pending multi-hop player path (from find_safe_path).
                     _vid = id(vessel)
                     if _was_player_cmd and _vid in self._pending_player_paths:
@@ -1609,6 +1646,16 @@ class Game:
                     vessel.log_decision(_t, "AGROUND — sending distress signal")
                     self.mission_manager.generate_mission(
                         "rescue", vessel, vessel.position)
+
+            # Career deadline check — once per sim step for the player vessel only.
+            if self.player_vessel is not None:
+                _expired = self.job_board.check_deadline(self.mission_manager.sim_elapsed_s)
+                if _expired is not None:
+                    self.job_board.fail_active(self.career)
+                    self.event_log.add(
+                        _sim_time_str(self.environment),
+                        f"Contract DEADLINE MISSED — {_expired.contract_id}",
+                        EVENT_COLOR_MAYDAY)
 
             # Random sudden events: each underway vessel has a small per-step chance.
             for vessel in self.world.vessels:
@@ -1685,6 +1732,9 @@ class Game:
         self.mission_panel.draw(self.mission_manager, self.mission_manager.sim_elapsed_s)
         self.mission_manager.clear_if_expired()
         self.player_hud.draw(self.player_vessel)
+        if not self.settings_panel.is_visible:
+            self.career_panel.draw(self.career, self.job_board,
+                                   self.mission_manager.sim_elapsed_s)
 
         pygame.display.flip()
 

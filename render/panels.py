@@ -25,6 +25,7 @@ from config import (
     KNOTS_TO_UNITS_PER_HOUR, NM_PER_WORLD_UNIT,
     AIS_CPA_WARNING_NM, AIS_NEARBY_MAX,
     PLAYER_THROTTLE_STEP,
+    HULL_REPAIR_COST_PER_POINT,
 )
 
 
@@ -1169,7 +1170,7 @@ class PlayerHUDPanel:
         cy += row_h
 
         # ── Key hint ──────────────────────────────────────────────────────────
-        hint = "W/S throttle  A/D turn  F follow  Z zoom"
+        hint = "W/S throttle  A/D turn  F follow  J career  Z zoom"
         hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
         self.surface.blit(hint_surf, (x + w // 2 - hint_surf.get_width() // 2, cy))
 
@@ -1197,3 +1198,242 @@ class PlayerHUDPanel:
         ti = cx + int(_math.cos(rad) * (radius - 4))
         tj = cy + int(_math.sin(rad) * (radius - 4))
         pygame.draw.line(self.surface, COLOR_ACCENT, (ti, tj), (tx, ty), 2)
+
+
+# ---------------------------------------------------------------------------
+# Career panel
+# ---------------------------------------------------------------------------
+
+_JOB_TYPE_COLORS: dict = {
+    "delivery":      (160, 210, 255),
+    "rescue_assist": (255, 160, 100),
+    "patrol":        (160, 230, 160),
+}
+
+
+class CareerPanel:
+    """Right-side panel showing wallet, reputation, job board, and active contract.
+
+    Toggled with J key.  Click the ACCEPT button on a contract row to take the job.
+    """
+
+    WIDTH  = 320
+    MARGIN = 12
+    PAD    = 12
+    ROW_H  = 64   # height of a single contract row
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self.is_visible = False
+        self._job_rects: list = []   # [(pygame.Rect, contract), ...] for click detection
+
+        self._font_title  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_TITLE,   bold=True)
+        self._font_header = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
+        self._font_label  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_LABEL)
+        self._font_value  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_DATA,    bold=True)
+        self._font_small  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL)
+
+    def toggle_visibility(self) -> None:
+        self.is_visible = not self.is_visible
+
+    def handle_click(self, screen_pos, job_board, career, sim_elapsed_s: float):
+        """Accept the clicked contract. Returns contract_id on success, else None."""
+        if not self.is_visible:
+            return None
+        mx, my = screen_pos
+        for rect, contract in self._job_rects:
+            if rect.collidepoint(mx, my):
+                if job_board.accept_job(contract.contract_id, career, sim_elapsed_s):
+                    return contract.contract_id
+        return None
+
+    def draw(self, career, job_board, sim_elapsed_s: float) -> None:
+        if not self.is_visible or career is None or job_board is None:
+            return
+
+        vw, vh = self.surface.get_size()
+        pad = self.PAD
+        w   = self.WIDTH
+        x   = vw - w - self.MARGIN
+        y   = self.MARGIN
+
+        available_contracts = job_board.available
+        active_contract     = job_board.active
+
+        # Dynamic height: title + stats + divider + jobs header + N rows + divider + active
+        stats_h   = 24 + 6 + 22 * 4 + 10 + 2   # header + 4 stat rows + gap + divider
+        jobs_rows = max(1, len(available_contracts[:4]))
+        jobs_h    = 24 + 6 + jobs_rows * (self.ROW_H + 4) + 10 + 2
+        active_h  = 24 + 6 + (72 if active_contract else 20) + pad
+        title_h   = self._font_title.get_height() + 8 + 2 + 10   # title + gap + divider
+        total_h   = pad * 2 + title_h + stats_h + jobs_h + active_h
+        h = min(vh - self.MARGIN * 2, total_h)
+
+        # Background
+        bg = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(bg, (*COLOR_PANEL_BG[:3], 230), bg.get_rect(), border_radius=14)
+        pygame.draw.rect(bg, COLOR_PANEL_BORDER, bg.get_rect(), 2, border_radius=14)
+        self.surface.blit(bg, (x, y))
+
+        cy = y + pad
+
+        # ── Title ─────────────────────────────────────────────────────────────
+        title_surf = self._font_title.render("CAREER", True, COLOR_ACCENT)
+        self.surface.blit(title_surf, (x + pad, cy))
+        cy += title_surf.get_height() + 8
+        pygame.draw.line(self.surface, COLOR_FRAME, (x + pad, cy), (x + w - pad, cy), 1)
+        cy += 10
+
+        # ── Wallet & Reputation ────────────────────────────────────────────────
+        hdr = self._font_header.render("WALLET & REPUTATION", True, COLOR_ACCENT)
+        self.surface.blit(hdr, (x + pad, cy))
+        cy += hdr.get_height() + 6
+
+        self._lv(x, cy, w, "Balance", f"\xa3{career.money:.0f}")
+        cy += 22
+
+        rep_col = (COLOR_ACCENT if career.reputation >= 50
+                   else (220, 165, 50) if career.reputation >= 20
+                   else COLOR_WARNING)
+        self._lv(x, cy, w, "Reputation", f"{career.reputation}/100", rep_col)
+        cy += 22
+
+        self._lv(x, cy, w, "Deliveries", str(career.total_deliveries))
+        cy += 22
+
+        self._lv(x, cy, w, "Hull repairs", f"\xa3{career.hull_repairs_paid:.0f}")
+        cy += 16
+
+        pygame.draw.line(self.surface, COLOR_FRAME, (x + pad, cy), (x + w - pad, cy), 1)
+        cy += 10
+
+        # ── Job Board ─────────────────────────────────────────────────────────
+        hdr = self._font_header.render("JOB BOARD", True, COLOR_ACCENT)
+        self.surface.blit(hdr, (x + pad, cy))
+        cy += hdr.get_height() + 6
+
+        self._job_rects = []
+        if not available_contracts:
+            hint = self._font_small.render("No jobs available — dock to refresh.", True, COLOR_TEXT_DIM)
+            self.surface.blit(hint, (x + pad, cy))
+            cy += 20
+        else:
+            for c in available_contracts[:4]:
+                cy = self._draw_contract_row(x, cy, w, c, career, job_board)
+                cy += 4
+
+        pygame.draw.line(self.surface, COLOR_FRAME, (x + pad, cy), (x + w - pad, cy), 1)
+        cy += 10
+
+        # ── Active Contract ────────────────────────────────────────────────────
+        hdr = self._font_header.render("ACTIVE CONTRACT", True, COLOR_ACCENT)
+        self.surface.blit(hdr, (x + pad, cy))
+        cy += hdr.get_height() + 6
+
+        if active_contract is None:
+            none_surf = self._font_small.render("No active contract.", True, COLOR_TEXT_DIM)
+            self.surface.blit(none_surf, (x + pad, cy))
+        else:
+            c = active_contract
+            tc = _JOB_TYPE_COLORS.get(c.job_type, COLOR_ACCENT)
+            tag = self._font_small.render(c.job_type.upper().replace("_", " "), True, tc)
+            self.surface.blit(tag, (x + pad, cy));  cy += tag.get_height() + 2
+
+            route_text = _truncate_text(
+                f"{c.from_port} → {c.to_port}",
+                self._font_label, w - pad * 2)
+            route_surf = self._font_label.render(route_text, True, COLOR_TEXT_PRIMARY)
+            self.surface.blit(route_surf, (x + pad, cy));  cy += route_surf.get_height() + 2
+
+            pay_surf = self._font_small.render(f"Payout: \xa3{c.payout:.0f}", True, (80, 220, 120))
+            self.surface.blit(pay_surf, (x + pad, cy));  cy += pay_surf.get_height() + 2
+
+            deadline_s  = c.accepted_at_sim_s + c.deadline_sim_hours * 3600.0
+            remaining_s = deadline_s - sim_elapsed_s
+            if remaining_s > 0:
+                h_l = int(remaining_s // 3600)
+                m_l = int((remaining_s % 3600) // 60)
+                dl_text = (f"Time left: {h_l}h {m_l:02d}m" if h_l
+                           else f"Time left: {m_l}m")
+                dl_col = (255, 80, 80) if remaining_s < 3600 else (220, 165, 50)
+            else:
+                dl_text = "DEADLINE MISSED"
+                dl_col  = (255, 80, 80)
+            dl_surf = self._font_small.render(dl_text, True, dl_col)
+            self.surface.blit(dl_surf, (x + pad, cy))
+
+    # ----------------------------------------------------------------- helpers
+
+    def _draw_contract_row(self, panel_x: int, cy: int, panel_w: int,
+                           contract, career, job_board) -> int:
+        """Draw one job-board contract row; append clickable rect. Returns new cy."""
+        pad = self.PAD
+        rx  = panel_x + pad
+        rw  = panel_w - pad * 2
+        rh  = self.ROW_H
+
+        can_accept = (job_board.active is None
+                      and career.reputation >= contract.reputation_required)
+
+        # Row background
+        row_bg = pygame.Surface((rw, rh), pygame.SRCALPHA)
+        row_bg.fill((20, 40, 60, 160 if can_accept else 70))
+        self.surface.blit(row_bg, (rx, cy))
+        pygame.draw.rect(self.surface, COLOR_FRAME if can_accept else (40, 40, 50),
+                         (rx, cy, rw, rh), 1)
+
+        tc = _JOB_TYPE_COLORS.get(contract.job_type, COLOR_ACCENT)
+        tag_surf = self._font_small.render(
+            contract.job_type.upper().replace("_", " "), True, tc)
+        self.surface.blit(tag_surf, (rx + 4, cy + 4))
+
+        route_txt = _truncate_text(
+            f"{contract.from_port} → {contract.to_port}",
+            self._font_small, rw - 80)
+        route_surf = self._font_small.render(route_txt, True, COLOR_TEXT_PRIMARY)
+        self.surface.blit(route_surf, (rx + 4, cy + 4 + tag_surf.get_height() + 2))
+
+        detail_txt = f"\xa3{contract.payout:.0f}  |  {int(contract.deadline_sim_hours)}h"
+        detail_surf = self._font_small.render(detail_txt, True, COLOR_TEXT_SECONDARY)
+        detail_y = cy + 4 + tag_surf.get_height() + 2 + route_surf.get_height() + 2
+        self.surface.blit(detail_surf, (rx + 4, detail_y))
+
+        # ACCEPT button
+        btn_w, btn_h = 62, 22
+        btn_x = rx + rw - btn_w - 4
+        btn_y = cy + (rh - btn_h) // 2
+        btn_rect = pygame.Rect(btn_x, btn_y, btn_w, btn_h)
+
+        if can_accept:
+            pygame.draw.rect(self.surface, (15, 70, 35), btn_rect, border_radius=4)
+            pygame.draw.rect(self.surface, (80, 200, 120), btn_rect, 1, border_radius=4)
+            lbl_surf = self._font_small.render("ACCEPT", True, (80, 220, 120))
+            self._job_rects.append((btn_rect, contract))
+        elif career.reputation < contract.reputation_required:
+            pygame.draw.rect(self.surface, (30, 30, 40), btn_rect, border_radius=4)
+            pygame.draw.rect(self.surface, (60, 60, 70), btn_rect, 1, border_radius=4)
+            lbl_surf = self._font_small.render(
+                f"REP {contract.reputation_required}+", True, (80, 80, 100))
+        else:
+            pygame.draw.rect(self.surface, (30, 30, 40), btn_rect, border_radius=4)
+            pygame.draw.rect(self.surface, (60, 60, 70), btn_rect, 1, border_radius=4)
+            lbl_surf = self._font_small.render("BUSY", True, (80, 80, 100))
+
+        self.surface.blit(lbl_surf, (
+            btn_x + btn_w // 2 - lbl_surf.get_width() // 2,
+            btn_y + btn_h // 2 - lbl_surf.get_height() // 2,
+        ))
+
+        return cy + rh
+
+    def _lv(self, px: int, y: int, pw: int, label: str, value: str,
+            value_color: tuple = None) -> None:
+        """Draw a label/value pair spanning the panel width."""
+        if value_color is None:
+            value_color = COLOR_TEXT_PRIMARY
+        pad  = self.PAD
+        iw   = pw - pad * 2
+        lbl  = self._font_label.render(label, True, COLOR_TEXT_SECONDARY)
+        val  = self._font_value.render(value, True, value_color)
+        self.surface.blit(lbl, (px + pad, y))
+        self.surface.blit(val, (px + pad + iw - val.get_width(), y - 2))
