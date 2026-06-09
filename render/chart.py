@@ -487,7 +487,12 @@ class Chart:
             pygame.draw.aaline(self.surface, color, (0, sy), (vw, sy))
             if is_major:
                 label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
-                self._blit_text_shadow(label, 6, int(sy + 4))
+                # Right-aligned at the right edge.  The fleet panel hugs the LEFT
+                # edge (x=20, 200 px wide) and would clip the trailing digit of a
+                # left-side label — "200" reading as "20".  Right edge is clear
+                # by default (vessel-info only shows when a vessel is selected).
+                self._blit_text_shadow(label, vw - label.get_width() - 4,
+                                       int(sy + 4))
             y += GRID_SPACING
 
     def draw_islands(self, world) -> None:
