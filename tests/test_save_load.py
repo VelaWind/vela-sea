@@ -25,6 +25,7 @@ def _make_career() -> PlayerCareer:
     c.total_distance_nm = 318.25
     c.fines_paid        = 650.0
     c.hull_repairs_paid = 1200.0
+    c.achievements      = {"First Delivery", "Lucky Escape"}
     return c
 
 
@@ -44,6 +45,7 @@ def test_round_trip_exact(tmp_path):
     assert data["fines_paid"]        == 650.0
     assert data["hull_repairs_paid"] == 1200.0
     assert data["hull_integrity"]    == 0.85
+    assert set(data["achievements"]) == {"First Delivery", "Lucky Escape"}
 
 
 def test_load_missing_file_returns_none(tmp_path):

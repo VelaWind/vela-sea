@@ -46,6 +46,7 @@ from engine.ship import Vessel
 from engine.environment import Environment
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
+from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
 from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
@@ -1513,10 +1514,27 @@ class Game:
                 _t,
                 f"Contract complete — \xa3{_done.payout:.0f} earned",
                 EVENT_COLOR_REFLOAT)
+            # Achievement checks tied to contract completion.
+            if self.career.total_deliveries >= 1:
+                self._award_achievement("First Delivery")
+            if (self.environment.active_event_name() == "storm"
+                    or self.environment.wave_height > STORM_WAVE_THRESHOLD):
+                self._award_achievement("Storm Sailor")
+            if (self.career.total_deliveries >= 5
+                    and self.career.fines_paid == 0):
+                self._award_achievement("Clean Record")
         self.job_board.refresh_jobs(self.world)
         # Auto-save: docking is the natural checkpoint — the contract payout
         # above is included; menu purchases re-save when they happen.
         save_career(self.career, hull_integrity=vessel.hull_integrity)
+
+    def _award_achievement(self, name: str) -> None:
+        """Unlock an achievement once; log the moment it happens."""
+        if name in self.career.achievements:
+            return
+        self.career.achievements.add(name)
+        self.event_log.add(_sim_time_str(self.environment),
+                           f"ACHIEVEMENT — {name}", EVENT_COLOR_REFLOAT)
 
     def _trigger_game_over(self, reason: str) -> None:
         """Freeze the sim and show the game-over overlay."""
@@ -1663,9 +1681,11 @@ class Game:
                             and vessel.target_speed <= PLAYER_DOCKING_MAX_SPEED_KN):
                         _dock_port = vessel._port_at(vessel.position, self.world)
                         # Draft restriction: shallow anchorages refuse deep hulls.
+                        # Tier 3 (Captain) reputation earns special clearance.
                         if (_dock_port is not None
                                 and _dock_port.max_draft_m is not None
-                                and vessel.draft_m >= _dock_port.max_draft_m):
+                                and vessel.draft_m >= _dock_port.max_draft_m
+                                and self.career.reputation < REP_TIER_3):
                             if _dock_port.name != self._departed_port:
                                 self.event_log.add(
                                     _pt,
@@ -1944,6 +1964,8 @@ class Game:
                             EVENT_COLOR_MAYDAY)
                         if vessel.hull_integrity <= 0.0:
                             self._trigger_game_over("Hull failure")
+                        elif vessel.hull_integrity > LUCKY_ESCAPE_HULL_MIN:
+                            self._award_achievement("Lucky Escape")
 
             # Career deadline check — once per sim step for the player vessel only.
             if self.player_vessel is not None:
@@ -2106,6 +2128,7 @@ class Game:
         self.career.total_distance_nm = data["total_distance_nm"]
         self.career.fines_paid        = data["fines_paid"]
         self.career.hull_repairs_paid = data["hull_repairs_paid"]
+        self.career.achievements      = set(data.get("achievements", []))
         if self.player_vessel is not None:
             self.player_vessel.hull_integrity = data["hull_integrity"]
 

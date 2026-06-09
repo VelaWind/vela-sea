@@ -1250,13 +1250,17 @@ _JOB_TYPE_COLORS: dict = {
     "patrol":        (160, 230, 160),
     "hazmat":        (255, 120,  60),
     "charter":       (200, 170, 255),
+    "vip_charter":   (255, 215, 120),
 }
 
 # Short special-requirement tags shown beside payout/deadline on contract rows.
 _JOB_SPECIAL_NOTES: dict = {
-    "hazmat":  "2× fines",
-    "charter": "max 10 kn",
+    "hazmat":      "2× fines",
+    "charter":     "max 10 kn",
+    "vip_charter": "VIP",
 }
+
+from engine.career import ACHIEVEMENT_DEFS
 
 
 class CareerPanel:
@@ -1308,13 +1312,15 @@ class CareerPanel:
         available_contracts = job_board.available
         active_contract     = job_board.active
 
-        # Dynamic height: title + stats + divider + jobs header + N rows + divider + active
+        # Dynamic height: title + stats + divider + jobs header + N rows
+        # + divider + active contract + divider + achievements
         stats_h   = 24 + 6 + 22 * 4 + 10 + 2   # header + 4 stat rows + gap + divider
         jobs_rows = max(1, len(available_contracts[:4]))
         jobs_h    = 24 + 6 + jobs_rows * (self.ROW_H + 4) + 10 + 2
-        active_h  = 24 + 6 + (72 if active_contract else 20) + pad
+        active_h  = 24 + 6 + (100 if active_contract else 20) + pad
+        ach_h     = 12 + 24 + 6 + len(ACHIEVEMENT_DEFS) * 18
         title_h   = self._font_title.get_height() + 8 + 2 + 10   # title + gap + divider
-        total_h   = pad * 2 + title_h + stats_h + jobs_h + active_h
+        total_h   = pad * 2 + title_h + stats_h + jobs_h + active_h + ach_h
         h = min(vh - self.MARGIN * 2, total_h)
 
         # Background
@@ -1343,7 +1349,8 @@ class CareerPanel:
         rep_col = (COLOR_ACCENT if career.reputation >= 50
                    else (220, 165, 50) if career.reputation >= 20
                    else COLOR_WARNING)
-        self._lv(x, cy, w, "Reputation", f"{career.reputation}/100", rep_col)
+        self._lv(x, cy, w, "Reputation",
+                 f"{career.reputation}/100 · {career.tier_name}", rep_col)
         cy += 22
 
         self._lv(x, cy, w, "Deliveries", str(career.total_deliveries))
@@ -1381,6 +1388,7 @@ class CareerPanel:
         if active_contract is None:
             none_surf = self._font_small.render("No active contract.", True, COLOR_TEXT_DIM)
             self.surface.blit(none_surf, (x + pad, cy))
+            cy += 20
         else:
             c = active_contract
             tc = _JOB_TYPE_COLORS.get(c.job_type, COLOR_ACCENT)
@@ -1416,6 +1424,24 @@ class CareerPanel:
                 dl_col  = (255, 80, 80)
             dl_surf = self._font_small.render(dl_text, True, dl_col)
             self.surface.blit(dl_surf, (x + pad, cy))
+            cy += dl_surf.get_height() + 4
+
+        # ── Achievements ──────────────────────────────────────────────────────
+        cy += 8
+        pygame.draw.line(self.surface, COLOR_FRAME, (x + pad, cy), (x + w - pad, cy), 1)
+        cy += 10
+        hdr = self._font_header.render("ACHIEVEMENTS", True, COLOR_ACCENT)
+        self.surface.blit(hdr, (x + pad, cy))
+        cy += hdr.get_height() + 6
+        for name, how in ACHIEVEMENT_DEFS:
+            unlocked = name in getattr(career, "achievements", set())
+            mark = "✓" if unlocked else "·"
+            col = (80, 220, 120) if unlocked else COLOR_TEXT_DIM
+            row_txt = _truncate_text(f"{mark} {name} — {how}",
+                                     self._font_small, w - pad * 2)
+            row_surf = self._font_small.render(row_txt, True, col)
+            self.surface.blit(row_surf, (x + pad, cy))
+            cy += 18
 
     # ----------------------------------------------------------------- helpers
 

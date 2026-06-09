@@ -18,6 +18,7 @@ from config import (
     HAZMAT_RATE_MULT, HAZMAT_REP_REQUIRED, HAZMAT_DEADLINE_RANGE_H,
     CHARTER_RATE_PER_NM, CHARTER_DEADLINE_RANGE_H,
     CONTRACT_DEADLINE_RANGE_H,
+    REP_TIER_2, REP_TIER_4, REP_TIER_TABLE, VIP_CHARTER_RATE_MULT,
 )
 
 
@@ -40,10 +41,11 @@ class Contract:
 _CONTRACT_TEMPLATES = [
     ("delivery",      80.0,  0),
     ("delivery",      80.0,  0),   # weighted: delivery is most common
-    ("rescue_assist", 150.0, 10),
+    ("rescue_assist", 150.0, REP_TIER_2),   # Tier 2 (First Mate) privilege
     ("patrol",        60.0,  25),
     ("hazmat",        80.0 * HAZMAT_RATE_MULT, HAZMAT_REP_REQUIRED),
     ("charter",       CHARTER_RATE_PER_NM, 0),
+    ("vip_charter",   80.0 * VIP_CHARTER_RATE_MULT, REP_TIER_4),  # Tier 4 exclusive
 ]
 
 # Per-type deadline windows (sim-hours); types not listed use the default.
@@ -54,9 +56,28 @@ _DEADLINE_RANGES = {
 
 # Special-requirement text surfaced on the career panel.
 _JOB_DESCRIPTIONS = {
-    "hazmat":  "Hazardous cargo — avoid restricted zones or double fine",
-    "charter": "Passenger charter — must maintain speed ≤ 10 kn in all zones",
+    "hazmat":      "Hazardous cargo — avoid restricted zones or double fine",
+    "charter":     "Passenger charter — must maintain speed ≤ 10 kn in all zones",
+    "vip_charter": "Exclusive VIP charter — Master Mariner clientele only",
 }
+
+
+# Canonical achievement list: (name, how to earn it).  The award logic lives
+# in main.py; this table drives the CareerPanel display and the save format.
+ACHIEVEMENT_DEFS = [
+    ("First Delivery", "Complete 1 contract"),
+    ("Storm Sailor",   "Complete a contract during a storm"),
+    ("Clean Record",   "Complete 5 contracts with zero fines"),
+    ("Lucky Escape",   "Survive grounding with hull > 10%"),
+]
+
+
+def reputation_tier_name(reputation: int) -> str:
+    """Map a reputation score to its rank title via the config tier table."""
+    for threshold, name in REP_TIER_TABLE:
+        if reputation >= threshold:
+            return name
+    return REP_TIER_TABLE[-1][1]
 
 
 class PlayerCareer:
@@ -69,7 +90,13 @@ class PlayerCareer:
         self.total_distance_nm: float = 0.0
         self.fines_paid: float = 0.0
         self.hull_repairs_paid: float = 0.0
+        self.achievements: set = set()  # unlocked achievement names
         self._history: List[str] = []   # capped at 20 entries
+
+    @property
+    def tier_name(self) -> str:
+        """Current rank title (Deckhand → Master Mariner)."""
+        return reputation_tier_name(self.reputation)
 
     def earn(self, amount: float, reason: str) -> None:
         self.money += amount
@@ -109,7 +136,7 @@ class PlayerCareer:
 # hand-edited file is rejected as a whole rather than half-restoring state.
 _SAVE_FIELDS = (
     "money", "reputation", "total_deliveries", "total_distance_nm",
-    "fines_paid", "hull_repairs_paid", "hull_integrity",
+    "fines_paid", "hull_repairs_paid", "hull_integrity", "achievements",
 )
 
 
@@ -129,6 +156,8 @@ def save_career(career: "PlayerCareer", filepath: str = SAVE_FILEPATH,
         "fines_paid": career.fines_paid,
         "hull_repairs_paid": career.hull_repairs_paid,
         "hull_integrity": hull_integrity,
+        # Sorted for a stable file diff; restored as a set on load.
+        "achievements": sorted(career.achievements),
     }
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)

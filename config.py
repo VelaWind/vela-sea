@@ -774,6 +774,28 @@ PLAYER_PULSE_PERIOD  = 1.5    # seconds per full pulse cycle on the player ring
 # ============================================================================
 PLAYER_STARTING_MONEY      = 5000.0   # opening wallet balance (currency units)
 PLAYER_STARTING_REPUTATION = 10       # opening reputation score (0–100)
+
+# ── Reputation tiers ─────────────────────────────────────────────────────────
+# Each tier unlocks privileges: Tier 2 → rescue contracts, Tier 3 → hazmat
+# contracts and Kessock Anchorage clearance, Tier 4 → VIP charters.
+REP_TIER_1 = 0    # Deckhand (starting rank)
+REP_TIER_2 = 25   # First Mate
+REP_TIER_3 = 50   # Captain
+REP_TIER_4 = 75   # Master Mariner
+# Highest-first lookup table: the first threshold ≤ reputation wins.
+REP_TIER_TABLE = (
+    (REP_TIER_4, "Master Mariner"),
+    (REP_TIER_3, "Captain"),
+    (REP_TIER_2, "First Mate"),
+    (REP_TIER_1, "Deckhand"),
+)
+
+# VIP charter (Tier 4 exclusive): premium payout multiplier on the base
+# delivery rate — the highest-paying contract type in the game.
+VIP_CHARTER_RATE_MULT = 2.5
+
+# "Lucky Escape" achievement: survive a grounding with hull above this.
+LUCKY_ESCAPE_HULL_MIN = 0.10
 HULL_REPAIR_COST_PER_POINT = 50.0    # cost per 1 % hull integrity restored at port
 CONTRACT_PENALTY           = 200.0   # fine deducted for a missed contract deadline
 
@@ -788,8 +810,8 @@ PLAYER_DOCKING_MAX_SPEED_KN = 2.0
 
 # ── Special contract types ───────────────────────────────────────────────────
 # Hazmat: premium rate for dangerous cargo, short deadline, double zone fines.
-HAZMAT_RATE_MULT        = 1.8     # payout multiplier vs the standard delivery rate
-HAZMAT_REP_REQUIRED     = 40      # reputation gate (F7 lowers via tier table)
+HAZMAT_RATE_MULT        = 1.8          # payout multiplier vs the standard delivery rate
+HAZMAT_REP_REQUIRED     = REP_TIER_3   # Captain rank — hazmat is a Tier 3 privilege
 HAZMAT_DEADLINE_RANGE_H = (4, 6)  # tight window — the cargo can't sit around
 HAZMAT_FINE_MULT        = 2.0     # zone fines double while a hazmat job is active
 
