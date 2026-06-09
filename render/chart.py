@@ -57,6 +57,7 @@ from config import (
     VESSEL_COLOR_TANKER, VESSEL_COLOR_COAST_GUARD,
     SHIPPING_LANE_ALPHA, SHIPPING_LANE_DASH_PX,
     SHIPPING_LANE_GAP_PX, SHIPPING_LANE_MIN_ZOOM,
+    AUTOPILOT_MARKER_SIZE_PX,
 )
 from render.camera import Camera
 
@@ -931,6 +932,20 @@ class Chart:
             pygame.gfxdraw.aacircle(
                 self.surface, int(screen_x), int(screen_y), outer_r,
                 (dr, dg, db, int(160 * pulse_t)))
+
+        # ── Player autopilot route ────────────────────────────────────────────
+        # Dashed track from the player to the right-click waypoint, with a
+        # diamond marker at the destination.  Drawn before the hull polygon.
+        _ap = getattr(vessel, 'autopilot_destination', None)
+        if _is_player and _ap is not None:
+            ap_screen = self.camera.world_to_screen(_ap)
+            self._draw_dashed_line((screen_x, screen_y), ap_screen, COLOR_ACCENT,
+                                   dash_length=8.0, gap_length=5.0)
+            adx, ady = int(ap_screen[0]), int(ap_screen[1])
+            s = AUTOPILOT_MARKER_SIZE_PX
+            diamond = [(adx, ady - s), (adx + s, ady), (adx, ady + s), (adx - s, ady)]
+            pygame.gfxdraw.filled_polygon(self.surface, diamond, (*COLOR_ACCENT, 90))
+            pygame.gfxdraw.aapolygon(self.surface, diamond, COLOR_ACCENT)
 
         # ── Player-command route line ─────────────────────────────────────────
         # Drawn before the icon so the hull naturally covers the line's origin.

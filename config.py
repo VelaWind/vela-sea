@@ -763,6 +763,13 @@ FUEL_COST_PER_UNIT = 8.0
 PLAYER_DOCKING_MAX_SPEED_KN = 2.0
 
 # ============================================================================
+# Player autopilot (right-click waypoint navigation)
+# ============================================================================
+PORT_CLICK_RADIUS_PX     = 14   # screen px around a port symbol that snaps the
+                                # right-click destination to the port itself
+AUTOPILOT_MARKER_SIZE_PX = 6    # half-size of the diamond waypoint marker
+
+# ============================================================================
 # Consequences — zone fines, hull damage, storm limits
 # ============================================================================
 ZONE_FINE_NO_ENTRY   = 500.0    # £ fine for entering a no-entry zone

@@ -149,6 +149,10 @@ class Vessel:
     # Skips all AI navigation logic in the sim loop.
     is_player: bool = False
 
+    # Autopilot waypoint set by right-click (player vessel only).  While set,
+    # the sim steers toward it each step; manual A/D steering clears it.
+    autopilot_destination: Optional[Position] = None
+
     # Structural health: 1.0 = fully intact, 0.0 = total loss.
     # Decremented on grounding events; shown in the player HUD.
     hull_integrity: float = 1.0

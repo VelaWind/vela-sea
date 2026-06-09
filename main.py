@@ -43,7 +43,7 @@ from render.chart import Chart
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
-from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN
+from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
@@ -1249,14 +1249,16 @@ class Game:
                     self._drag_start_pos = None
 
     def _handle_right_click(self, screen_pos) -> None:
-        """Right-click: command the selected vessel to navigate to the clicked position.
+        """Right-click: set the player's autopilot waypoint, or command an AI vessel.
 
-        If a vessel is selected, sets its destination to the clicked world coordinate
-        and sets player_commanded = True.  If the vessel is docked, it departs
-        immediately so the command takes effect at once.
-        No-op when no vessel is selected.
+        With a non-player vessel selected, the click commands that vessel to
+        the position (legacy dispatcher behaviour).  Otherwise the click sets
+        the player's autopilot destination — snapping to a port if the click
+        landed on its symbol, ignored entirely when the click is on land.
         """
-        if self.selected_vessel is None:
+        if (self.selected_vessel is None
+                or getattr(self.selected_vessel, 'is_player', False)):
+            self._set_player_autopilot(screen_pos)
             return
         v = self.selected_vessel
         world_pos = self.camera.screen_to_world(screen_pos)
@@ -1276,6 +1278,32 @@ class Game:
             del self._pending_player_paths[id(v)]
         if v.status in ("in_port", "docked"):
             v.status = "underway"
+
+    def _set_player_autopilot(self, screen_pos) -> None:
+        """Point the player's autopilot at the clicked water position or port."""
+        pv = self.player_vessel
+        if pv is None:
+            return
+        world_pos = self.camera.screen_to_world(screen_pos)
+
+        # Clicking a port symbol snaps the waypoint to the port itself.
+        target = None
+        for port in self.world.ports:
+            psx, psy = self.camera.world_to_screen(port.position)
+            if math.hypot(psx - screen_pos[0], psy - screen_pos[1]) <= PORT_CLICK_RADIUS_PX:
+                target = port.position
+                break
+        if target is None:
+            if self.world.point_in_island(world_pos):
+                return  # can't sail onto land
+            target = world_pos
+
+        # Setting a course while berthed implies departure.
+        if pv.status == "in_port":
+            self._player_depart()
+        pv.autopilot_destination = target
+        self.event_log.add(_sim_time_str(self.environment),
+                           "Autopilot — course set", EVENT_COLOR_WEATHER)
 
     def _cycle_vessel_selection(self) -> None:
         """Cycle to the next vessel for testing."""
@@ -1590,9 +1618,22 @@ class Game:
                         if _keys[pygame.K_d] or _keys[pygame.K_RIGHT]:
                             _turn += PLAYER_TURN_RATE
                         if _turn and vessel.status == "underway":
+                            # Manual helm overrides and cancels the autopilot.
+                            vessel.autopilot_destination = None
                             vessel.heading = (vessel.heading + _turn * SIM_TIMESTEP) % 360.0
 
                     _pt = _sim_time_str(self.environment)
+
+                    # Autopilot: steer toward the right-click waypoint using the
+                    # vessel's real rudder model; clear on arrival.
+                    if (vessel.autopilot_destination is not None
+                            and vessel.status == "underway"):
+                        _ap = vessel.autopilot_destination
+                        vessel.turn_toward(vessel.bearing_to(_ap), SIM_TIMESTEP)
+                        if vessel.distance_to(_ap) <= ARRIVAL_DISTANCE:
+                            vessel.autopilot_destination = None
+                            self.event_log.add(_pt, "Waypoint reached",
+                                               EVENT_COLOR_WEATHER)
 
                     # Departure grace: re-enable proximity docking only after
                     # the player has cleared the port they just cast off from.
