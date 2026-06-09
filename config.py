@@ -121,6 +121,12 @@ COLOR_TEXT_DIM = THEME["TEXT_DIM"]
 COLOR_WARNING = THEME["WARNING"]
 COLOR_VESSEL_RANGE = THEME["TEXT_SECONDARY"]
 
+# Hull-integrity HUD bar — colour-coded by condition so it never reads as the
+# cyan fuel bar.  Green (healthy) → yellow (damaged) → red (critical).
+HULL_BAR_HIGH_COLOR = (63, 191, 100)   # > 50%  — green, seaworthy
+HULL_BAR_MID_COLOR  = (224, 161, 58)   # 25-50% — yellow, take care
+HULL_BAR_LOW_COLOR  = (217, 74, 74)    # < 25%  — red, critical
+
 # ============================================================================
 # Typography
 # ============================================================================
@@ -593,6 +599,9 @@ FOG_LOW_VIS_THRESHOLD_M  = 150.0
 # World-unit range around the player within which other vessels stay visible
 # during fog.  100 wu ≈ 15 nm of chart — close traffic only.
 FOG_VESSEL_HIDE_RANGE_WU = 100.0
+# Peak opacity of the full-screen fog haze.  Capped low so fog reads as
+# atmosphere rather than a blackout — the chart must stay legible through it.
+FOG_OVERLAY_MAX_ALPHA    = 50
 
 # Storm seas: scrolling horizontal wave lines + a grey-green cast, shown
 # whenever wave_height exceeds STORM_WAVE_THRESHOLD (same trigger as the

@@ -60,7 +60,7 @@ from config import (
     AUTOPILOT_MARKER_SIZE_PX,
     SCREEN_VIGNETTE_DEPTH_PX, SCREEN_VIGNETTE_MAX_ALPHA, SCREEN_VIGNETTE_STEPS,
     PORT_NEAR_PULSE_RANGE_WU,
-    FOG_LOW_VIS_THRESHOLD_M, FOG_VESSEL_HIDE_RANGE_WU,
+    FOG_LOW_VIS_THRESHOLD_M, FOG_VESSEL_HIDE_RANGE_WU, FOG_OVERLAY_MAX_ALPHA,
     STORM_TINT_COLOR, STORM_TINT_ALPHA, STORM_WAVE_THRESHOLD,
     STORM_WAVE_LINE_COLOR, STORM_WAVE_LINE_ALPHA,
     STORM_WAVE_LINE_SPACING_PX, STORM_WAVE_SCROLL_PX_S,
@@ -449,37 +449,43 @@ class Chart:
         return surf
 
     def draw_grid(self) -> None:
-        cam_x, cam_y = self.camera.position
-        zoom = self.camera.zoom
+        # camera.position = world coords at screen centre.  Labels always show
+        # the real world coordinate of each line; lines only draw inside world
+        # bounds [0, WORLD_WIDTH] x [0, WORLD_HEIGHT], so no negatives ever.
         vw, vh = self.surface.get_width(), self.surface.get_height()
+        zoom = self.camera.zoom
 
-        world_left = cam_x - vw / (2 * zoom)
-        world_right = cam_x + vw / (2 * zoom)
-        world_top = cam_y - vh / (2 * zoom)
-        world_bottom = cam_y + vh / (2 * zoom)
+        world_left = self.camera.position[0] - (vw / 2.0) / zoom
+        world_top  = self.camera.position[1] - (vh / 2.0) / zoom
 
-        x = math.ceil(world_left / GRID_SPACING) * GRID_SPACING
-        while x <= world_right:
-            if 0 <= x <= WORLD_WIDTH:
-                screen_x, _ = self.camera.world_to_screen((x, 0))
-                is_major = x % GRID_LABEL_INTERVAL < 1.0
-                color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-                pygame.draw.aaline(self.surface, color, (screen_x, 0), (screen_x, vh))
-                if is_major:
-                    label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
-                    self._blit_text_shadow(label, int(screen_x + 4), 6)
+        # First grid line at or after the visible top-left, never below zero.
+        first_x = math.ceil(max(0.0, world_left) / GRID_SPACING) * GRID_SPACING
+        first_y = math.ceil(max(0.0, world_top)  / GRID_SPACING) * GRID_SPACING
+
+        x = first_x
+        while x <= WORLD_WIDTH:
+            screen_x = self.camera.world_to_screen((x, 0))[0]
+            if screen_x > vw:
+                break
+            is_major = x % GRID_LABEL_INTERVAL < 1.0
+            color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+            pygame.draw.aaline(self.surface, color, (screen_x, 0), (screen_x, vh))
+            if is_major:
+                label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
+                self._blit_text_shadow(label, int(screen_x + 4), 6)
             x += GRID_SPACING
 
-        y = math.ceil(world_top / GRID_SPACING) * GRID_SPACING
-        while y <= world_bottom:
-            if 0 <= y <= WORLD_HEIGHT:
-                _, screen_y = self.camera.world_to_screen((0, y))
-                is_major = y % GRID_LABEL_INTERVAL < 1.0
-                color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-                pygame.draw.aaline(self.surface, color, (0, screen_y), (vw, screen_y))
-                if is_major:
-                    label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
-                    self._blit_text_shadow(label, 6, int(screen_y + 4))
+        y = first_y
+        while y <= WORLD_HEIGHT:
+            screen_y = self.camera.world_to_screen((0, y))[1]
+            if screen_y > vh:
+                break
+            is_major = y % GRID_LABEL_INTERVAL < 1.0
+            color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+            pygame.draw.aaline(self.surface, color, (0, screen_y), (vw, screen_y))
+            if is_major:
+                label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
+                self._blit_text_shadow(label, 6, int(screen_y + 4))
             y += GRID_SPACING
 
     def draw_islands(self, world) -> None:
@@ -1344,10 +1350,12 @@ class Chart:
         event = environment.active_event_name()
 
         # ── (A) Fog overlay ──────────────────────────────────────────────────
-        # Pale blue-grey haze: alpha=0 at vis=200, alpha=160 at vis=10.
-        # Color (200, 210, 220) reads as real sea fog — grey-white, not darkness.
+        # Pale grey-white haze: alpha=0 at vis=200, ramping to FOG_OVERLAY_MAX_ALPHA
+        # at vis=10.  Capped low (atmospheric, not a blackout) so the chart stays
+        # readable through it.  Colour (200, 210, 220) reads as real sea fog.
         if environment.visibility < 200:
-            fog_alpha = max(0, min(160, int(160 * (200 - environment.visibility) / 190)))
+            fog_alpha = max(0, min(FOG_OVERLAY_MAX_ALPHA,
+                int(FOG_OVERLAY_MAX_ALPHA * (200 - environment.visibility) / 190)))
             if fog_alpha > 0:
                 s = self._get_alpha_surf()
                 s.fill((200, 210, 220, fog_alpha))
