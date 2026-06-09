@@ -225,7 +225,10 @@ class Vessel:
             self._docked_port_name = port.name
             self.position = port.claim_berth(self.name, self.position)
             # Refuel to capacity if this berth has fuel and the vessel has a tank.
-            if port.refuel and self.fuel is not None and self.fuel_capacity is not None:
+            # The player pays for fuel through the docking menu instead, so the
+            # free schedule-refuel applies to AI traffic only.
+            if (port.refuel and not self.is_player
+                    and self.fuel is not None and self.fuel_capacity is not None):
                 self.fuel = self.fuel_capacity * REFUEL_FRACTION
         else:
             # Open-sea waypoint: advance and continue without a stay.

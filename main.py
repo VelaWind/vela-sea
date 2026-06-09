@@ -43,8 +43,8 @@ from render.chart import Chart
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
-from config import SAVE_FILEPATH
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen
+from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
     VESSEL_ROUTE_FERRY, VESSEL_ROUTE_CARGO,
@@ -536,6 +536,7 @@ class Game:
         self.career = PlayerCareer()
         self.job_board = JobBoard()
         self.career_panel = CareerPanel(self.display)
+        self.docking_menu = DockingMenuPanel(self.display)
 
         # Game-over state
         self.game_over = False
@@ -543,6 +544,11 @@ class Game:
         self._restart_requested = False
         self._session_start_time = time.time()
         self._game_over_screen = GameOverScreen(self.display)
+
+        # Port the player just departed from — proximity docking is suppressed
+        # until the vessel clears that port's radius, else DEPART would re-dock
+        # on the very next sim step.
+        self._departed_port: Optional[str] = None
 
         # Player consequence trackers (Game-level; engine stays pure)
         self._zone_timer: float = 0.0          # cumulative seconds inside violation zone
@@ -1100,6 +1106,16 @@ class Game:
                 elif event.key == pygame.K_r and self.game_over:
                     self._restart_requested = True
                     self.running = False
+
+                # Docking menu captures its keys while the player is in port —
+                # SPACE departs instead of pausing, W departs and throttles up.
+                elif (self.docking_menu.visible
+                        and not self.settings_panel.is_visible
+                        and event.key in (pygame.K_UP, pygame.K_DOWN,
+                                          pygame.K_RETURN, pygame.K_KP_ENTER,
+                                          pygame.K_SPACE, pygame.K_w)):
+                    self._handle_docking_key(event.key)
+
                 elif event.key == pygame.K_SPACE:
                     self.is_paused = not self.is_paused
                     self.environment.time_speed_multiplier = 0.0 if self.is_paused else 1.0
@@ -1280,6 +1296,18 @@ class Game:
             self.settings_panel.handle_mouse_click(self.environment, screen_pos)
             return
 
+        # Docking menu — clicks on its rows take priority while in port.
+        if self.docking_menu.visible:
+            action = self.docking_menu.handle_click(
+                screen_pos, self.player_vessel, self.career)
+            if action is not None:
+                self._apply_docking_action(action)
+                return
+            # Swallow clicks inside the panel so they don't select vessels.
+            if (self.docking_menu.panel_rect is not None
+                    and self.docking_menu.panel_rect.collidepoint(screen_pos)):
+                return
+
         # Career panel — accept contract clicks
         if self.career_panel.is_visible:
             if self.career_panel.handle_click(
@@ -1373,6 +1401,93 @@ class Game:
                     _t, f"PARTY — tender dispatched to {vessel.name}", EVENT_COLOR_WEATHER
                 )
 
+    def _handle_docking_key(self, key: int) -> None:
+        """Translate a KEYDOWN into a docking-menu action while in port."""
+        pv = self.player_vessel
+        if key == pygame.K_UP:
+            self.docking_menu.move_selection(-1)
+        elif key == pygame.K_DOWN:
+            self.docking_menu.move_selection(1)
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self._apply_docking_action(
+                self.docking_menu.selected_action(pv, self.career))
+        elif key == pygame.K_SPACE:
+            self._apply_docking_action("depart")
+        elif key == pygame.K_w:
+            # Throttling up while berthed is the natural "cast off" gesture.
+            self._apply_docking_action("depart")
+            if pv is not None:
+                pv.target_speed = min(pv.max_speed,
+                                      pv.target_speed + PLAYER_THROTTLE_STEP)
+
+    def _apply_docking_action(self, action: Optional[str]) -> None:
+        """Apply a docking-menu purchase or departure to the game state."""
+        pv = self.player_vessel
+        if action is None or pv is None:
+            return
+        _t = _sim_time_str(self.environment)
+
+        if action == "fuel":
+            cost = DockingMenuPanel.fuel_cost(pv)
+            if cost > 0 and self.career.spend(cost, "Refuel"):
+                pv.fuel = pv.fuel_capacity
+                self.event_log.add(_t, f"Refueled — -\xa3{cost:.0f}",
+                                   EVENT_COLOR_WEATHER)
+                save_career(self.career, hull_integrity=pv.hull_integrity)
+
+        elif action == "repair":
+            cost = DockingMenuPanel.repair_cost(pv)
+            if cost > 0 and self.career.spend(cost, "Hull repair"):
+                pv.hull_integrity = 1.0
+                self.career.hull_repairs_paid += cost
+                self.event_log.add(_t, f"Hull repaired — -\xa3{cost:.0f}",
+                                   EVENT_COLOR_WEATHER)
+                save_career(self.career, hull_integrity=pv.hull_integrity)
+
+        elif action == "jobs":
+            self.career_panel.is_visible = True
+
+        elif action == "depart":
+            self._player_depart()
+
+    def _player_depart(self) -> None:
+        """Cast the player off: release the berth and set the vessel underway."""
+        pv = self.player_vessel
+        if pv is None or pv.status != "in_port":
+            return
+        if pv._docked_port_name:
+            port = self.world.find_port(pv._docked_port_name)
+            if port is not None:
+                port.release_berth(pv.name)
+        self._departed_port = pv._docked_port_name
+        pv._docked_port_name = None
+        pv.port_stay_timer = 0.0
+        pv.status = "underway"
+        self.docking_menu.visible = False
+        save_career(self.career, hull_integrity=pv.hull_integrity)
+
+    def _on_player_docked(self, vessel) -> None:
+        """Career hooks fired once when the player vessel berths at a port.
+
+        Completes a matching contract, refreshes the job board, and writes the
+        auto-save checkpoint.  Fuel and hull repair are bought explicitly via
+        the docking menu, never applied automatically.
+        """
+        _t = _sim_time_str(self.environment)
+        _docked_at = getattr(vessel, '_docked_port_name', '')
+        if not _docked_at:
+            return
+        _done = self.job_board.complete_job(_docked_at, self.career)
+        if _done:
+            self.event_log.add(
+                _t,
+                f"Contract complete — \xa3{_done.payout:.0f} earned",
+                EVENT_COLOR_REFLOAT)
+        self.job_board.refresh_jobs(self.world)
+        # Auto-save: docking is the natural checkpoint — the contract payout
+        # above is included; menu purchases re-save when they happen.
+        save_career(self.career, hull_integrity=vessel.hull_integrity)
+
     def _trigger_game_over(self, reason: str) -> None:
         """Freeze the sim and show the game-over overlay."""
         if self.game_over:
@@ -1420,9 +1535,11 @@ class Game:
 
             # Update each vessel using the same simulated timestep.
             for vessel in self.world.vessels:
-                # Port stay: count down timer; depart when ready.
+                # Port stay: count down timer; depart when ready.  The player
+                # has no schedule — they stay berthed until the docking menu's
+                # DEPART (or W/SPACE), so the timer countdown is skipped.
                 _was_in_port = vessel.status == "in_port"
-                if vessel.status == "in_port":
+                if vessel.status == "in_port" and not getattr(vessel, 'is_player', False):
                     vessel.update_route(SIM_TIMESTEP, self.world)
                 # Departure detected → generate mission for relevant vessel types.
                 if _was_in_port and vessel.status == "underway":
@@ -1476,6 +1593,32 @@ class Game:
                             vessel.heading = (vessel.heading + _turn * SIM_TIMESTEP) % 360.0
 
                     _pt = _sim_time_str(self.environment)
+
+                    # Departure grace: re-enable proximity docking only after
+                    # the player has cleared the port they just cast off from.
+                    if self._departed_port is not None:
+                        _near = vessel._port_at(vessel.position, self.world)
+                        if _near is None or _near.name != self._departed_port:
+                            self._departed_port = None
+
+                    # Proximity docking: drifting into a port radius at low
+                    # speed berths the ship — no destination click required.
+                    if (vessel.status == "underway"
+                            and vessel.current_speed <= PLAYER_DOCKING_MAX_SPEED_KN
+                            and vessel.target_speed <= PLAYER_DOCKING_MAX_SPEED_KN):
+                        _dock_port = vessel._port_at(vessel.position, self.world)
+                        if (_dock_port is not None
+                                and _dock_port.name != self._departed_port):
+                            vessel.status = "in_port"
+                            vessel.current_speed = 0.0
+                            vessel.target_speed = 0.0
+                            vessel._docked_port_name = _dock_port.name
+                            vessel.position = _dock_port.claim_berth(
+                                vessel.name, vessel.position)
+                            self.event_log.add(
+                                _pt, f"Docked at {_dock_port.name}",
+                                EVENT_COLOR_WEATHER)
+                            self._on_player_docked(vessel)
 
                     # Storm: cap speed and apply hull damage each step.
                     if vessel.status == "underway":
@@ -1658,29 +1801,7 @@ class Game:
                     vessel.arrive(self.world)
                     # Career hook: player docked at a port.
                     if _is_player and vessel.status == "in_port":
-                        _docked_at = getattr(vessel, '_docked_port_name', '')
-                        if _docked_at:
-                            _done = self.job_board.complete_job(_docked_at, self.career)
-                            if _done:
-                                self.event_log.add(
-                                    _t,
-                                    f"Contract complete — \xa3{_done.payout:.0f} earned",
-                                    EVENT_COLOR_REFLOAT)
-                            self.job_board.refresh_jobs(self.world)
-                            _hull = getattr(vessel, 'hull_integrity', 1.0)
-                            if _hull < 1.0:
-                                _repair_cost = round((1.0 - _hull) * 100.0) * HULL_REPAIR_COST_PER_POINT
-                                if self.career.spend(_repair_cost, "Hull repair"):
-                                    vessel.hull_integrity = 1.0
-                                    self.career.hull_repairs_paid += _repair_cost
-                                    self.event_log.add(
-                                        _t,
-                                        f"Hull repaired — -\xa3{_repair_cost:.0f}",
-                                        EVENT_COLOR_WEATHER)
-                            # Auto-save: docking is the natural checkpoint —
-                            # contract payouts and repairs above are included.
-                            save_career(self.career,
-                                        hull_integrity=vessel.hull_integrity)
+                        self._on_player_docked(vessel)
                     # Advance any pending multi-hop player path (from find_safe_path).
                     _vid = id(vessel)
                     if _was_player_cmd and _vid in self._pending_player_paths:
@@ -1803,6 +1924,12 @@ class Game:
 
         self.last_sim_steps = steps
 
+        # Docking menu visibility mirrors the player's port status — updated
+        # after the sim steps so it's consistent the moment the player docks.
+        if self.player_vessel is not None:
+            self.docking_menu.visible = (
+                self.player_vessel.status == "in_port" and not self.game_over)
+
         # Collision avoidance runs once per real frame (not per sim step).
         # Running it inside the loop at 375× per frame was the crash cause at 3×
         # speed — the O(n²) pair scan repeated hundreds of times per frame.
@@ -1848,6 +1975,11 @@ class Game:
         if not self.settings_panel.is_visible:
             self.career_panel.draw(self.career, self.job_board,
                                    self.mission_manager.sim_elapsed_s)
+            if self.player_vessel is not None:
+                self.docking_menu.draw(
+                    self.player_vessel,
+                    self.player_vessel._docked_port_name or "IN PORT",
+                    self.career)
 
         if self.game_over:
             self._game_over_screen.draw(

@@ -25,7 +25,7 @@ from config import (
     KNOTS_TO_UNITS_PER_HOUR, NM_PER_WORLD_UNIT,
     AIS_CPA_WARNING_NM, AIS_NEARBY_MAX,
     PLAYER_THROTTLE_STEP,
-    HULL_REPAIR_COST_PER_POINT,
+    HULL_REPAIR_COST_PER_POINT, FUEL_COST_PER_UNIT,
     STORM_WAVE_THRESHOLD,
     GAME_VERSION,
     TITLE_FONT_SIZE, TITLE_SUBTITLE_SIZE, TITLE_MENU_FONT_SIZE,
@@ -1468,6 +1468,150 @@ class CareerPanel:
         val  = self._font_value.render(value, True, value_color)
         self.surface.blit(lbl, (px + pad, y))
         self.surface.blit(val, (px + pad + iw - val.get_width(), y - 2))
+
+
+# ---------------------------------------------------------------------------
+# Docking menu
+# ---------------------------------------------------------------------------
+
+class DockingMenuPanel:
+    """Centered port-services menu shown automatically while the player is in port.
+
+    The panel never mutates game state: Game asks selected_action()/handle_click()
+    which action the player chose and applies the purchase/departure itself.
+    Game sets .visible each sim step from the player vessel's status.
+    """
+
+    WIDTH  = 380
+    PAD    = 16
+    ROW_H  = 44
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self.visible = False
+        self.selected_index = 0
+        self.panel_rect: Optional[pygame.Rect] = None
+        self._item_rects: list = []   # [(pygame.Rect, action, enabled), ...]
+
+        self._font_title = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_TITLE,   bold=True)
+        self._font_item  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
+        self._font_cost  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_LABEL,   bold=True)
+        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL)
+
+    # ------------------------------------------------------------------ costs
+
+    @staticmethod
+    def fuel_cost(vessel) -> float:
+        """£ to refill the tank: missing percentage points × FUEL_COST_PER_UNIT."""
+        if vessel is None or vessel.fuel is None or not vessel.fuel_capacity:
+            return 0.0
+        missing_pct = (1.0 - vessel.fuel / vessel.fuel_capacity) * 100.0
+        return round(missing_pct) * FUEL_COST_PER_UNIT
+
+    @staticmethod
+    def repair_cost(vessel) -> float:
+        """£ to restore the hull: same per-point formula the career system uses."""
+        hull = getattr(vessel, "hull_integrity", 1.0)
+        return round((1.0 - hull) * 100.0) * HULL_REPAIR_COST_PER_POINT
+
+    # ------------------------------------------------------------------ input
+
+    def move_selection(self, delta: int) -> None:
+        self.selected_index = (self.selected_index + delta) % 4
+
+    def _menu_items(self, vessel, career) -> list:
+        """Return [(label, cost_text, action, enabled, unaffordable), ...]."""
+        items = []
+
+        fc = self.fuel_cost(vessel)
+        if fc <= 0:
+            items.append(("FUEL", "TANK FULL", "fuel", False, False))
+        else:
+            afford = career.money >= fc
+            items.append(("FUEL", f"\xa3{fc:.0f}", "fuel", afford, not afford))
+
+        rc = self.repair_cost(vessel)
+        if rc <= 0:
+            items.append(("REPAIR HULL", "NO DAMAGE", "repair", False, False))
+        else:
+            afford = career.money >= rc
+            items.append(("REPAIR HULL", f"\xa3{rc:.0f}", "repair", afford, not afford))
+
+        items.append(("JOB BOARD", "", "jobs", True, False))
+        items.append(("DEPART", "", "depart", True, False))
+        return items
+
+    def selected_action(self, vessel, career) -> Optional[str]:
+        """Return the action of the highlighted row, or None when it's disabled."""
+        items = self._menu_items(vessel, career)
+        label, cost, action, enabled, _ = items[self.selected_index % len(items)]
+        return action if enabled else None
+
+    def handle_click(self, screen_pos, vessel, career) -> Optional[str]:
+        """Return the action of an enabled row under the cursor, or None."""
+        for rect, action, enabled in self._item_rects:
+            if rect.collidepoint(screen_pos) and enabled:
+                return action
+        return None
+
+    # ------------------------------------------------------------------ draw
+
+    def draw(self, vessel, port_name: str, career) -> None:
+        if not self.visible or vessel is None or career is None:
+            return
+
+        items = self._menu_items(vessel, career)
+        vw, vh = self.surface.get_size()
+        pad = self.PAD
+        w   = self.WIDTH
+        h   = pad * 2 + self._font_title.get_height() + 14 + len(items) * (self.ROW_H + 6) + 24
+        x   = vw // 2 - w // 2
+        y   = vh // 2 - h // 2
+        self.panel_rect = pygame.Rect(x, y, w, h)
+
+        bg = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(bg, (*COLOR_PANEL_BG[:3], 235), bg.get_rect(), border_radius=14)
+        pygame.draw.rect(bg, COLOR_ACCENT, bg.get_rect(), 2, border_radius=14)
+        self.surface.blit(bg, (x, y))
+
+        cy = y + pad
+        title_surf = self._font_title.render(port_name, True, COLOR_ACCENT)
+        self.surface.blit(title_surf, (x + w // 2 - title_surf.get_width() // 2, cy))
+        cy += title_surf.get_height() + 14
+
+        self._item_rects = []
+        for i, (label, cost_text, action, enabled, unaffordable) in enumerate(items):
+            row_rect = pygame.Rect(x + pad, cy, w - pad * 2, self.ROW_H)
+            self._item_rects.append((row_rect, action, enabled))
+
+            if i == self.selected_index:
+                hl = pygame.Surface(row_rect.size, pygame.SRCALPHA)
+                hl.fill((255, 255, 255, 18))
+                self.surface.blit(hl, row_rect.topleft)
+                pygame.draw.rect(self.surface, COLOR_ACCENT, row_rect, 1, border_radius=6)
+            else:
+                pygame.draw.rect(self.surface, COLOR_FRAME, row_rect, 1, border_radius=6)
+
+            lbl_col = COLOR_TEXT_PRIMARY if enabled else COLOR_TEXT_DIM
+            lbl_surf = self._font_item.render(label, True, lbl_col)
+            self.surface.blit(lbl_surf,
+                              (row_rect.x + 12,
+                               row_rect.centery - lbl_surf.get_height() // 2))
+
+            if cost_text:
+                cost_col = (COLOR_WARNING if unaffordable
+                            else COLOR_TEXT_SECONDARY if not enabled
+                            else (80, 220, 120))
+                cost_surf = self._font_cost.render(cost_text, True, cost_col)
+                self.surface.blit(cost_surf,
+                                  (row_rect.right - cost_surf.get_width() - 12,
+                                   row_rect.centery - cost_surf.get_height() // 2))
+
+            cy += self.ROW_H + 6
+
+        hint = "UP/DOWN select  |  ENTER confirm  |  W or SPACE depart"
+        hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
+        self.surface.blit(hint_surf, (x + w // 2 - hint_surf.get_width() // 2, cy + 4))
 
 
 # ---------------------------------------------------------------------------

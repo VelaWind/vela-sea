@@ -753,6 +753,15 @@ PLAYER_STARTING_REPUTATION = 10       # opening reputation score (0–100)
 HULL_REPAIR_COST_PER_POINT = 50.0    # cost per 1 % hull integrity restored at port
 CONTRACT_PENALTY           = 200.0   # fine deducted for a missed contract deadline
 
+# Docking menu economics & behaviour
+# Fuel is priced per percentage point of tank refilled, mirroring the hull
+# formula: a full refuel from empty costs 100 × 8 = £800 — meaningful against
+# typical contract payouts (£2000–8000) without being punishing.
+FUEL_COST_PER_UNIT = 8.0
+# Player docks by drifting into the port radius at or below this speed.
+# 2 kn ≈ bare steerage way — fast approaches sail straight through the harbour.
+PLAYER_DOCKING_MAX_SPEED_KN = 2.0
+
 # ============================================================================
 # Consequences — zone fines, hull damage, storm limits
 # ============================================================================
