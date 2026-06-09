@@ -58,6 +58,8 @@ from config import (
     SHIPPING_LANE_ALPHA, SHIPPING_LANE_DASH_PX,
     SHIPPING_LANE_GAP_PX, SHIPPING_LANE_MIN_ZOOM,
     AUTOPILOT_MARKER_SIZE_PX,
+    SCREEN_VIGNETTE_DEPTH_PX, SCREEN_VIGNETTE_MAX_ALPHA, SCREEN_VIGNETTE_STEPS,
+    PORT_NEAR_PULSE_RANGE_WU,
     FOG_LOW_VIS_THRESHOLD_M, FOG_VESSEL_HIDE_RANGE_WU,
     STORM_TINT_COLOR, STORM_TINT_ALPHA, STORM_WAVE_THRESHOLD,
     STORM_WAVE_LINE_COLOR, STORM_WAVE_LINE_ALPHA,
@@ -195,6 +197,8 @@ class Chart:
         # Weather-event transition tracking for the squall lightning flash.
         self._last_weather_event: Optional[str] = None
         self._squall_flash_until: float = 0.0
+        # Screen-edge vignette — cached by window size, rebuilt on resize only.
+        self._vignette_surf: Optional[pygame.Surface] = None
 
     def _get_alpha_surf(self) -> pygame.Surface:
         """Return the shared full-screen SRCALPHA surface, creating it once on first use.
@@ -589,6 +593,9 @@ class Chart:
             return
 
         now = time.time()
+        _player = next((v for v in world.vessels
+                        if getattr(v, 'is_player', False)), None)
+        _near_r2 = PORT_NEAR_PULSE_RANGE_WU * PORT_NEAR_PULSE_RANGE_WU
 
         for port in world.ports:
             screen_x, screen_y = self.camera.world_to_screen(port.position)
@@ -648,6 +655,19 @@ class Chart:
                 pygame.draw.line(self.surface, ic, (ax - 4, ay - 2), (ax + 4, ay - 2), 1)  # crossbar
                 pygame.draw.line(self.surface, ic, (ax - 4, ay + 6), (ax, ay + 3), 1)  # port fluke
                 pygame.draw.line(self.surface, ic, (ax + 4, ay + 6), (ax, ay + 3), 1)  # stbd fluke
+
+            # Docking-range pulse: a gentle accent breath when the player is
+            # close enough to consider berthing here.
+            if _player is not None:
+                _pdx = _player.position[0] - port.position[0]
+                _pdy = _player.position[1] - port.position[1]
+                if _pdx * _pdx + _pdy * _pdy <= _near_r2:
+                    _ph = (now % PORT_ACTIVITY_PULSE_PERIOD) / PORT_ACTIVITY_PULSE_PERIOD
+                    _pt = abs(math.sin(_ph * math.pi))
+                    _pr = symbol_size + 3 + int(_pt * 5)
+                    ca, cb, cc = COLOR_ACCENT
+                    pygame.gfxdraw.aacircle(
+                        self.surface, sx, sy, _pr, (ca, cb, cc, int(60 + 100 * _pt)))
 
             pygame.gfxdraw.filled_circle(self.surface, sx, sy, symbol_size, COLOR_PANEL_BORDER)
             pygame.gfxdraw.aacircle(self.surface, sx, sy, symbol_size, COLOR_ACCENT)
@@ -1111,6 +1131,29 @@ class Chart:
 
         self.surface.blit(surf, (0, 0))
 
+    def draw_screen_vignette(self) -> None:
+        """Subtle dark gradient at the screen edges — a cinematic frame.
+
+        Built once per window size as concentric 1-ring border rects whose
+        alpha falls off toward the centre; per-frame cost is a single blit.
+        """
+        vw, vh = self.surface.get_size()
+        if (self._vignette_surf is None
+                or self._vignette_surf.get_size() != (vw, vh)):
+            surf = pygame.Surface((vw, vh), pygame.SRCALPHA)
+            step_px = max(1, SCREEN_VIGNETTE_DEPTH_PX // SCREEN_VIGNETTE_STEPS)
+            for i in range(SCREEN_VIGNETTE_STEPS):
+                alpha = int(SCREEN_VIGNETTE_MAX_ALPHA
+                            * (1.0 - i / SCREEN_VIGNETTE_STEPS))
+                if alpha <= 0:
+                    break
+                inset = i * step_px
+                pygame.draw.rect(surf, (0, 0, 0, alpha),
+                                 (inset, inset, vw - inset * 2, vh - inset * 2),
+                                 width=step_px)
+            self._vignette_surf = surf
+        self.surface.blit(self._vignette_surf, (0, 0))
+
     def draw_compass_rose(self) -> None:
         center_x = COMPASS_OFFSET_X
         center_y = COMPASS_OFFSET_Y
@@ -1171,7 +1214,11 @@ class Chart:
         pygame.draw.line(self.surface, COLOR_FRAME, bar_rect.bottomleft, bar_rect.bottomright, 1)
 
         time_text = f"{int(environment.time_of_day):02d}:{int((environment.time_of_day % 1) * 60):02d}"
-        wind_text = f"Wind {environment.wind_speed:.1f} @ {int(environment.wind_direction)}°"
+        # Compass bearing ("NE", "SSW") reads faster than raw degrees.
+        _dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                 "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+        _card = _dirs[round(environment.wind_direction / 22.5) % 16]
+        wind_text = f"Wind {environment.wind_speed:.1f} kn {_card}"
         # Use the environment's visibility formatter so status bar and panels match.
         try:
             vis_display = environment.get_visibility_display()
@@ -1393,6 +1440,9 @@ class Chart:
         # Weather visuals drawn after night tint so fog/rain sit on top of everything
         if environment:
             self.draw_weather_effects(environment)
+
+        # Edge vignette frames the whole scene, under the status bar only.
+        self.draw_screen_vignette()
 
         if environment:
             self.draw_status_bar(environment, selected_vessel)

@@ -631,6 +631,23 @@ OCEAN_VIGNETTE_COLOR        = (18, 50, 85)  # faint mid-blue, slightly above DEE
 SHIP_PREDICTOR_LABEL_FRAC  = 0.65
 
 # ============================================================================
+# Screen polish — vignette, port pulse, minimap
+# ============================================================================
+# Screen-edge vignette: concentric border rings fading from the edge inward.
+# Very low alpha — a cinematic frame, not a tunnel.
+SCREEN_VIGNETTE_DEPTH_PX  = 90   # how far the fade reaches into the screen
+SCREEN_VIGNETTE_MAX_ALPHA = 42   # alpha of the outermost ring
+SCREEN_VIGNETTE_STEPS     = 18   # ring count; 18 is smooth at this alpha
+
+# Port symbols pulse gently when the player is within docking range.
+PORT_NEAR_PULSE_RANGE_WU = 50.0
+
+# Minimap: fixed-zoom overview of the whole sea, bottom-right corner.
+MINIMAP_WIDTH_PX  = 200
+MINIMAP_HEIGHT_PX = 140
+MINIMAP_MARGIN_PX = 12
+
+# ============================================================================
 # Collision Avoidance — COLREGS-simplified CPA/TCPA model
 # ============================================================================
 # All distance values are in nautical miles; time values are in simulated seconds.

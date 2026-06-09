@@ -30,6 +30,8 @@ from config import (
     GAME_VERSION,
     TITLE_FONT_SIZE, TITLE_SUBTITLE_SIZE, TITLE_MENU_FONT_SIZE,
     TITLE_PANEL_WIDTH, TITLE_PANEL_HEIGHT, TITLE_PANEL_ALPHA,
+    MINIMAP_WIDTH_PX, MINIMAP_HEIGHT_PX, MINIMAP_MARGIN_PX,
+    WORLD_WIDTH, WORLD_HEIGHT, LAND_COLORS, COLOR_WATER,
 )
 
 
@@ -141,6 +143,12 @@ class VesselInfoPanel:
         current_y = y + padding
         title_text = self.font_title.render(vessel.name, True, COLOR_ACCENT)
         self.surface.blit(title_text, (x + padding, current_y))
+        # [YOU] badge marks the player's own ship in the info panel.
+        if getattr(vessel, 'is_player', False):
+            you_surf = self.font_small.render("[YOU]", True, (60, 220, 120))
+            self.surface.blit(you_surf,
+                              (x + padding + title_text.get_width() + 8,
+                               current_y + (title_text.get_height() - you_surf.get_height()) // 2))
         current_y += title_text.get_height() + 12
 
         self._draw_divider(x, current_y, panel_width)
@@ -623,7 +631,8 @@ class SettingsPanel:
         if hasattr(environment, "sync_auto_to_current"):
             environment.sync_auto_to_current()
 
-    def handle_mouse_click(self, environment, mouse_pos: Tuple[int, int]) -> None:
+    def handle_mouse_click(self, environment, mouse_pos: Tuple[int, int],
+                           sound=None) -> None:
         if not self.is_visible or not environment:
             return
 
@@ -636,6 +645,9 @@ class SettingsPanel:
                 if label == "Reset":
                     self.reset_environment(environment)
                     return
+                if label == "SoundToggle" and sound is not None:
+                    sound.set_enabled(not sound.enabled)
+                    return
 
         # Fields managed by the dynamic weather engine get user_override() so
         # the engine knows to pin the value briefly before resuming auto-drift.
@@ -647,13 +659,18 @@ class SettingsPanel:
             if bar_x <= mx <= bar_x + bar_width and bar_y <= my <= bar_y + 12:
                 ratio = (mx - bar_x) / bar_width
                 new_value = min_val + ratio * (max_val - min_val)
+                # Sound volume routes to the SoundManager, not the environment.
+                if attr_name == "sound_volume":
+                    if sound is not None:
+                        sound.set_volume(new_value)
+                    return
                 if attr_name in _WEATHER_DYNAMIC and hasattr(environment, "user_override"):
                     environment.user_override(attr_name, new_value)
                 else:
                     setattr(environment, attr_name, new_value)
                 return
 
-    def draw(self, environment: Optional[object]) -> None:
+    def draw(self, environment: Optional[object], sound=None) -> None:
         if not self.is_visible or environment is None:
             return
 
@@ -702,6 +719,22 @@ class SettingsPanel:
         self._draw_button(reset_rect, "Reset")
         self.buttons["Reset"] = reset_rect
         current_y += 46
+
+        # ── Sound controls ────────────────────────────────────────────────────
+        if sound is not None:
+            hdr = self.font_header.render("SOUND", True, COLOR_ACCENT)
+            self.surface.blit(hdr, (panel_x + 24, current_y))
+            current_y += hdr.get_height() + 8
+
+            toggle_rect = pygame.Rect(panel_x + 24, current_y, 120, 30)
+            self._draw_button(toggle_rect,
+                              "Sound: ON" if sound.enabled else "Sound: OFF")
+            self.buttons["SoundToggle"] = toggle_rect
+            current_y += 40
+
+            current_y = self._draw_slider(
+                panel_x, current_y, "Volume", sound.volume,
+                0.0, 1.0, "sound_volume")
 
         instructions = [
             "Click presets to apply common conditions.",
@@ -932,13 +965,19 @@ class MissionPanel:
         self._font_obj  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         self._font_done = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
 
-    def draw(self, mission_manager, sim_elapsed_s: float = 0.0) -> None:
-        """Draw the mission panel if a mission is active."""
+    def draw(self, mission_manager, sim_elapsed_s: float = 0.0,
+             bottom_offset: int = 0) -> None:
+        """Draw the mission panel if a mission is active.
+
+        bottom_offset lifts the panel (e.g. above the minimap) so the two
+        bottom-right elements never overlap.
+        """
         m = mission_manager.active_mission
         if m is None:
             return
 
         vw, vh = self.surface.get_size()
+        vh -= bottom_offset
         pad = self.PAD
 
         if m.complete:
@@ -1078,9 +1117,17 @@ class PlayerHUDPanel:
     # ------------------------------------------------------------------ public
 
     def draw(self, vessel, career=None, zone_violation=False, frame_count=0,
-             low_visibility=False) -> None:
+             low_visibility=False, active_contract=None, world=None) -> None:
         if vessel is None:
             return
+
+        # Active-contract destination line: "→ Port Ardent  12.4 nm".
+        _contract_line = None
+        if active_contract is not None and world is not None:
+            _to_port = world.find_port(active_contract.to_port)
+            if _to_port is not None:
+                _dist_nm = vessel.distance_to(_to_port.position) * NM_PER_WORLD_UNIT
+                _contract_line = f"→ {active_contract.to_port}  {_dist_nm:.1f} nm"
 
         vw, vh = self.surface.get_size()
         pad = self.PAD
@@ -1105,6 +1152,7 @@ class PlayerHUDPanel:
             + bar_row
             + (_low_funds and row_h or 0)       # low-funds warning (conditional)
             + (low_visibility and row_h or 0)   # fog warning (conditional)
+            + (_contract_line and row_h or 0)   # contract destination (conditional)
             + row_h                             # status
             + row_h                             # hint
         )
@@ -1202,6 +1250,12 @@ class PlayerHUDPanel:
             self.surface.blit(lv_surf, (x + pad, cy))
             cy += row_h
 
+        # ── Active-contract destination ───────────────────────────────────────
+        if _contract_line:
+            cl_surf = self._font_label.render(_contract_line, True, COLOR_ACCENT)
+            self.surface.blit(cl_surf, (x + pad, cy))
+            cy += row_h
+
         # ── Status ────────────────────────────────────────────────────────────
         status_str  = vessel.status.upper()
         status_col  = COLOR_WARNING if vessel.status in ("aground", "adrift") else COLOR_TEXT_SECONDARY
@@ -1210,7 +1264,7 @@ class PlayerHUDPanel:
         cy += row_h
 
         # ── Key hint ──────────────────────────────────────────────────────────
-        hint = "W/S throttle  A/D turn  F follow  J career  Z zoom"
+        hint = "W/S throttle  A/D turn  F follow  J career  M map  Z zoom"
         hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
         self.surface.blit(hint_surf, (x + w // 2 - hint_surf.get_width() // 2, cy))
 
@@ -1524,6 +1578,123 @@ class CareerPanel:
 
 
 # ---------------------------------------------------------------------------
+# Minimap
+# ---------------------------------------------------------------------------
+
+class MinimapPanel:
+    """Fixed-zoom overview of the whole sea in the bottom-right corner.
+
+    Static content (water, islands, port squares) is rendered once into a
+    cached surface; per-frame work is one blit plus the live player dot.
+    Toggled with the M key.
+    """
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self.is_visible = True
+        self._static: Optional[pygame.Surface] = None
+
+    # Scale factors world → minimap pixels.
+    _SX = MINIMAP_WIDTH_PX / WORLD_WIDTH
+    _SY = MINIMAP_HEIGHT_PX / WORLD_HEIGHT
+
+    def _build_static(self, world) -> pygame.Surface:
+        surf = pygame.Surface((MINIMAP_WIDTH_PX, MINIMAP_HEIGHT_PX), pygame.SRCALPHA)
+        surf.fill((*COLOR_WATER, 235))
+        for island in world.islands:
+            pts = [(int(x * self._SX), int(y * self._SY)) for x, y in island.polygon]
+            if len(pts) >= 3:
+                fill = LAND_COLORS.get(island.land_type, LAND_COLORS["island"])["fill"]
+                pygame.draw.polygon(surf, fill, pts)
+        for port in world.ports:
+            px = int(port.position[0] * self._SX)
+            py = int(port.position[1] * self._SY)
+            pygame.draw.rect(surf, COLOR_ACCENT, (px - 1, py - 1, 3, 3))
+        pygame.draw.rect(surf, COLOR_PANEL_BORDER, surf.get_rect(), 1)
+        return surf
+
+    def draw(self, world, player) -> None:
+        if not self.is_visible or world is None:
+            return
+        if self._static is None:
+            self._static = self._build_static(world)
+
+        vw, vh = self.surface.get_size()
+        x = vw - MINIMAP_WIDTH_PX - MINIMAP_MARGIN_PX
+        y = vh - MINIMAP_HEIGHT_PX - MINIMAP_MARGIN_PX
+        self.surface.blit(self._static, (x, y))
+
+        if player is not None:
+            px = x + int(player.position[0] * self._SX)
+            py = y + int(player.position[1] * self._SY)
+            pygame.gfxdraw.filled_circle(self.surface, px, py, 2, COLOR_ACCENT)
+            pygame.gfxdraw.aacircle(self.surface, px, py, 4, COLOR_ACCENT)
+
+
+# ---------------------------------------------------------------------------
+# Controls screen (reachable from the title menu)
+# ---------------------------------------------------------------------------
+
+class ControlsScreen:
+    """Full keybinding table shown from the title menu; ESC dismisses it."""
+
+    BINDINGS = [
+        ("W / S",        "Throttle up / down"),
+        ("A / D",        "Steer port / starboard"),
+        ("Right-click",  "Set autopilot waypoint (click a port to target it)"),
+        ("F",            "Toggle follow camera"),
+        ("J",            "Career panel & job board"),
+        ("M",            "Toggle minimap"),
+        ("E",            "Environment settings"),
+        ("T",            "Technical systems panel"),
+        ("Tab",          "Cycle vessel selection"),
+        ("Space",        "Pause  (in port: depart)"),
+        ("1 / 2 / 3 / 4", "Time speed: pause / 1× / 2× / 3×"),
+        ("Z",            "Reset zoom"),
+        ("Mouse drag",   "Pan the chart"),
+        ("Mouse wheel",  "Zoom at cursor"),
+        ("R",            "Restart (after game over)"),
+        ("Esc",          "Quit"),
+    ]
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self._font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
+        self._font_key   = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_LABEL, bold=True)
+        self._font_desc  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+
+    def draw(self) -> None:
+        vw, vh = self.surface.get_size()
+        row_h = 26
+        w = 560
+        h = 110 + len(self.BINDINGS) * row_h
+        x = vw // 2 - w // 2
+        y = vh // 2 - h // 2
+
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (*COLOR_PANEL_BG[:3], TITLE_PANEL_ALPHA),
+                         panel.get_rect(), border_radius=18)
+        pygame.draw.rect(panel, COLOR_PANEL_BORDER, panel.get_rect(), 2, border_radius=18)
+        self.surface.blit(panel, (x, y))
+
+        cy = y + 24
+        title = self._font_title.render("CONTROLS", True, COLOR_ACCENT)
+        self.surface.blit(title, (vw // 2 - title.get_width() // 2, cy))
+        cy += title.get_height() + 18
+
+        for key, desc in self.BINDINGS:
+            key_surf = self._font_key.render(key, True, COLOR_TEXT_PRIMARY)
+            desc_surf = self._font_desc.render(desc, True, COLOR_TEXT_SECONDARY)
+            self.surface.blit(key_surf, (x + 36, cy))
+            self.surface.blit(desc_surf, (x + 200, cy))
+            cy += row_h
+
+        hint = self._font_hint.render("ESC to return", True, COLOR_TEXT_DIM)
+        self.surface.blit(hint, (vw // 2 - hint.get_width() // 2, y + h - 30))
+
+
+# ---------------------------------------------------------------------------
 # Docking menu
 # ---------------------------------------------------------------------------
 
@@ -1685,6 +1856,7 @@ class TitleScreen:
     MENU_ITEMS = [
         ("New Career", "new"),
         ("Continue",   "continue"),
+        ("Controls",   "controls"),
         ("Quit",       "quit"),
     ]
 

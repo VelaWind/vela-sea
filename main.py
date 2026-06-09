@@ -47,8 +47,9 @@ from engine.environment import Environment
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, ControlsScreen
 from render.sound import SoundManager
+from config import MINIMAP_HEIGHT_PX, MINIMAP_MARGIN_PX
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
     VESSEL_ROUTE_FERRY, VESSEL_ROUTE_CARGO,
@@ -541,6 +542,7 @@ class Game:
         self.job_board = JobBoard()
         self.career_panel = CareerPanel(self.display)
         self.docking_menu = DockingMenuPanel(self.display)
+        self.minimap = MinimapPanel(self.display)
 
         # Audio — constructed after pygame.init(); falls back to silence on
         # any mixer failure.  Ambient sea bed starts immediately.
@@ -1187,6 +1189,10 @@ class Game:
                 elif event.key == pygame.K_j and self.player_vessel is not None:
                     self.career_panel.toggle_visibility()
 
+                # Toggle minimap
+                elif event.key == pygame.K_m:
+                    self.minimap.is_visible = not self.minimap.is_visible
+
                 # Toggle settings panel — E always; S only when no player vessel
                 elif event.key == pygame.K_e:
                     self.settings_panel.toggle_visibility()
@@ -1330,7 +1336,8 @@ class Game:
         """Handle a left-click: select a vessel or adjust sliders."""
         # Settings panel sliders have priority
         if self.settings_panel.is_visible:
-            self.settings_panel.handle_mouse_click(self.environment, screen_pos)
+            self.settings_panel.handle_mouse_click(self.environment, screen_pos,
+                                                   self.sound)
             return
 
         # Docking menu — clicks on its rows take priority while in port.
@@ -2078,18 +2085,27 @@ class Game:
         # Draw UI panels
         self.vessel_info_panel.draw(self.selected_vessel, self.environment, self.world)  # Phase 2
         self.tech_systems_panel.draw(self.world, self.environment, self.selected_vessel)  # Phase 3
-        self.settings_panel.draw(self.environment)  # Phase 4
+        self.settings_panel.draw(self.environment, self.sound)  # Phase 4
         self.event_log.draw()
         if not self.settings_panel.is_visible:
             self.fleet_panel.draw(self.world, self.selected_vessel)
-        self.mission_panel.draw(self.mission_manager, self.mission_manager.sim_elapsed_s)
+        # Mission panel lifts above the minimap when both occupy bottom-right.
+        _mm_offset = (MINIMAP_HEIGHT_PX + MINIMAP_MARGIN_PX
+                      if self.minimap.is_visible else 0)
+        self.mission_panel.draw(self.mission_manager,
+                                self.mission_manager.sim_elapsed_s,
+                                bottom_offset=_mm_offset)
         self.mission_manager.clear_if_expired()
+        if not self.settings_panel.is_visible:
+            self.minimap.draw(self.world, self.player_vessel)
         self.player_hud.draw(
             self.player_vessel,
             career=self.career,
             zone_violation=self._zone_warning_sent,
             frame_count=pygame.time.get_ticks() // 250,
             low_visibility=self.environment.visibility < FOG_LOW_VIS_THRESHOLD_M,
+            active_contract=self.job_board.active,
+            world=self.world,
         )
         if not self.settings_panel.is_visible:
             self.career_panel.draw(self.career, self.job_board,
@@ -2115,6 +2131,8 @@ class Game:
         or "quit".
         """
         title = TitleScreen(self.display)
+        controls = ControlsScreen(self.display)
+        showing_controls = False
         while True:
             dt = self.clock.tick(TARGET_FPS) / 1000.0
             has_save = os.path.exists(SAVE_FILEPATH)
@@ -2123,13 +2141,24 @@ class Game:
                 if event.type == pygame.QUIT:
                     return "quit"
                 elif event.type == pygame.KEYDOWN:
+                    if showing_controls:
+                        # Any dismissal key returns to the menu.
+                        if event.key in (pygame.K_ESCAPE, pygame.K_RETURN,
+                                         pygame.K_SPACE):
+                            showing_controls = False
+                        continue
                     action = title.handle_key(event.key, has_save)
-                    if action is not None:
+                    if action == "controls":
+                        showing_controls = True
+                    elif action is not None:
                         return action
 
             self.update_simulation(dt)
             self.chart.draw_all(world=self.world, environment=self.environment)
-            title.draw(has_save)
+            if showing_controls:
+                controls.draw()
+            else:
+                title.draw(has_save)
             pygame.display.flip()
 
     def _load_save(self) -> None:
