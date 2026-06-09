@@ -1,16 +1,18 @@
 """Automated gameplay bot — headless, end-to-end scenario runner.
 
 Drives a real ``Game`` instance with no window/audio (SDL dummy drivers) and
-plays through six gameplay scenarios that exercise the player vessel, the
-career/contract system, and the consequence systems (zone fines, grounding,
-hull failure, fuel-exhaustion SAR).  Each scenario produces a structured
+plays through fourteen gameplay scenarios that exercise the player vessel,
+the career/contract system, the consequence systems (zone fines, grounding,
+hull failure, fuel-exhaustion SAR), and the v0.4.0 features (title screen,
+save/load, docking menu, autopilot, contract variety, reputation tiers,
+achievements, weather gameplay effects).  Each scenario produces a structured
 pass/fail result with enough detail to fix a failure without further digging.
 
 Run directly for the human-readable report::
 
     python tests/test_bot.py
 
-Run under pytest (all six scenarios collapse into one test)::
+Run under pytest (all fourteen scenarios collapse into one test)::
 
     pytest tests/test_bot.py
 
@@ -537,10 +539,283 @@ def scenario_6():
 
 
 # ===========================================================================
-# Step 8 — Final report
+# Step 8 — Scenario 7: --skip-title bypasses the title screen
 # ===========================================================================
 
-SCENARIOS = [scenario_1, scenario_2, scenario_3, scenario_4, scenario_5, scenario_6]
+def scenario_7():
+    """run(skip_title=True) must never enter the title loop; False must."""
+    calls = []
+
+    def _run_once(skip):
+        game = make_game()
+        game._title_loop = lambda: calls.append(skip) or "new"
+        game.running = False          # main loop exits immediately
+        try:
+            game.run(skip_title=skip)
+        except SystemExit:
+            pass                       # run() calls sys.exit() on shutdown
+
+    _run_once(True)
+    skipped_ok = len(calls) == 0       # title loop never invoked
+    _run_once(False)
+    shown_ok = calls == [False]        # invoked exactly once without the flag
+
+    passed = skipped_ok and shown_ok
+    return Result(
+        7, "Title screen skip", passed,
+        summary=f"--skip-title bypassed title loop; without flag it ran",
+        expected="title loop not called with skip_title=True, called once with False",
+        got=f"calls={calls}",
+        cause="Game.run() not honouring the skip_title flag",
+    )
+
+
+# ===========================================================================
+# Step 9 — Scenario 8: save/load round-trip is exact
+# ===========================================================================
+
+def scenario_8():
+    import tempfile
+    from engine.career import PlayerCareer, save_career, load_career
+
+    path = os.path.join(tempfile.gettempdir(), "meridian_bot_roundtrip.json")
+    career = PlayerCareer()
+    career.money             = 7777.25
+    career.reputation        = 33
+    career.total_deliveries  = 4
+    career.total_distance_nm = 123.5
+    career.fines_paid        = 950.0
+    career.hull_repairs_paid = 400.0
+    career.achievements      = {"First Delivery"}
+    save_career(career, filepath=path, hull_integrity=0.62)
+    data = load_career(filepath=path)
+
+    checks = {
+        "money":             (data or {}).get("money") == 7777.25,
+        "reputation":        (data or {}).get("reputation") == 33,
+        "total_deliveries":  (data or {}).get("total_deliveries") == 4,
+        "total_distance_nm": (data or {}).get("total_distance_nm") == 123.5,
+        "fines_paid":        (data or {}).get("fines_paid") == 950.0,
+        "hull_repairs_paid": (data or {}).get("hull_repairs_paid") == 400.0,
+        "hull_integrity":    (data or {}).get("hull_integrity") == 0.62,
+    }
+    passed = data is not None and all(checks.values())
+    bad = [k for k, ok in checks.items() if not ok]
+    return Result(
+        8, "Save/load round-trip", passed,
+        summary="all 7 fields match exactly after save->load",
+        expected="every saved field loads back unchanged",
+        got=f"mismatched fields: {bad or 'none'}, data={'None' if data is None else 'dict'}",
+        cause="save_career/load_career field handling in engine/career.py",
+    )
+
+
+# ===========================================================================
+# Step 10 — Scenario 9: docking menu appears with correct fuel cost
+# ===========================================================================
+
+def scenario_9():
+    from render.panels import DockingMenuPanel
+    from config import FUEL_COST_PER_UNIT
+
+    game = make_game()
+    pv = game.player_vessel
+    maren = game.world.find_port("Port Maren")
+
+    pv.position = (maren.position[0] + 1.0, maren.position[1])
+    pv.current_speed = 1.0
+    pv.target_speed = 0.0
+    pv.fuel = 40.0          # 60 points missing → cost 60 × FUEL_COST_PER_UNIT
+    run_sim(game, 2.0, until=lambda g: g.player_vessel.status == "in_port")
+
+    visible_ok = game.docking_menu.visible is True
+    expected_cost = 60 * FUEL_COST_PER_UNIT
+    got_cost = DockingMenuPanel.fuel_cost(pv)
+    cost_ok = got_cost == expected_cost
+    passed = pv.status == "in_port" and visible_ok and cost_ok
+
+    return Result(
+        9, "Docking menu", passed,
+        summary=(f"docked at Port Maren, menu visible, "
+                 f"fuel cost {POUND}{got_cost:.0f}"),
+        expected=(f"status=in_port, docking_menu.visible=True, "
+                  f"fuel_cost={expected_cost:.0f}"),
+        got=(f"status={pv.status}, visible={game.docking_menu.visible}, "
+             f"fuel_cost={got_cost:.0f}"),
+        cause="proximity docking or DockingMenuPanel.fuel_cost formula",
+    )
+
+
+# ===========================================================================
+# Step 11 — Scenario 10: autopilot waypoint navigation
+# ===========================================================================
+
+def scenario_10():
+    from config import ARRIVAL_DISTANCE
+
+    game = make_game()
+    pv = game.player_vessel
+    dest = (180.0, 370.0)           # ~70 wu SE of spawn, open water
+    pv.autopilot_destination = dest
+    pv.target_speed = 8.0           # under the Maren Approach 8 kn limit
+
+    run_sim(game, 120.0,
+            until=lambda g: g.player_vessel.autopilot_destination is None)
+
+    cleared = pv.autopilot_destination is None
+    close = pv.distance_to(dest) <= ARRIVAL_DISTANCE * 3
+    logged = any("Waypoint reached" in t for t, c in game.event_log._entries)
+    passed = cleared and close and logged
+
+    return Result(
+        10, "Autopilot waypoint", passed,
+        summary=(f"navigated to ({dest[0]:.0f},{dest[1]:.0f}), "
+                 f"final dist {pv.distance_to(dest):.1f} wu, cleared on arrival"),
+        expected="autopilot_destination cleared near the waypoint + log entry",
+        got=(f"cleared={cleared}, dist={pv.distance_to(dest):.1f} wu, "
+             f"logged={logged}"),
+        cause="autopilot steering/arrival block in update_simulation",
+    )
+
+
+# ===========================================================================
+# Step 12 — Scenario 11: contract type variety
+# ===========================================================================
+
+def scenario_11():
+    game = make_game()
+    want = {"delivery", "rescue_assist", "patrol", "hazmat", "charter"}
+    seen = set()
+    for _ in range(10):
+        game.job_board._contracts = []      # force a full re-roll
+        game.job_board.refresh_jobs(game.world)
+        seen |= {c.job_type for c in game.job_board.available}
+
+    missing = want - seen
+    passed = not missing
+    return Result(
+        11, "Contract variety", passed,
+        summary=f"types over 10 refreshes: {sorted(seen)}",
+        expected=f"all of {sorted(want)} appear at least once",
+        got=f"missing: {sorted(missing) or 'none'}",
+        cause="_CONTRACT_TEMPLATES weighting in engine/career.py",
+    )
+
+
+# ===========================================================================
+# Step 13 — Scenario 12: reputation tier progression
+# ===========================================================================
+
+def scenario_12():
+    game = make_game()
+    results = {}
+    for rep, want in ((0, "Deckhand"), (25, "First Mate"),
+                      (50, "Captain"), (75, "Master Mariner")):
+        game.career.reputation = rep
+        results[rep] = game.career.tier_name
+    passed = all(results[r] == w for r, w in
+                 ((0, "Deckhand"), (25, "First Mate"),
+                  (50, "Captain"), (75, "Master Mariner")))
+    return Result(
+        12, "Reputation tiers", passed,
+        summary=f"0→{results[0]}, 25→{results[25]}, 50→{results[50]}, 75→{results[75]}",
+        expected="Deckhand / First Mate / Captain / Master Mariner at 0/25/50/75",
+        got=str(results),
+        cause="REP_TIER_TABLE in config.py or reputation_tier_name()",
+    )
+
+
+# ===========================================================================
+# Step 14 — Scenario 13: achievement unlock on first delivery
+# ===========================================================================
+
+def scenario_13():
+    game = make_game()
+    pv = game.player_vessel
+
+    contract = setup_delivery_contract(game)
+    if contract is None:
+        return Result(13, "Achievement unlock", False,
+                      expected="a deliverable rep-0 contract",
+                      got="none generated",
+                      cause="JobBoard.refresh_jobs weighting")
+    game.job_board.accept_job(contract.contract_id, game.career,
+                              game.mission_manager.sim_elapsed_s)
+    to_port = game.world.find_port(contract.to_port)
+    pv.position = _APPROACH_STAGES[contract.to_port]
+    pv.heading = pv.bearing_to(to_port.position)
+    pv.current_speed = 10.0
+    pv.target_speed = 10.0
+    pv.player_commanded = False
+    pv.destination = to_port.position
+    pv.status = "underway"
+    run_sim(game, 120.0,
+            on_step=lambda g: _steer(g, to_port.position, 10.0),
+            until=lambda g: contract.status == "completed")
+
+    unlocked = "First Delivery" in game.career.achievements
+    passed = contract.status == "completed" and unlocked
+    return Result(
+        13, "Achievement unlock", passed,
+        summary=f"{contract.contract_id} completed, achievements={sorted(game.career.achievements)}",
+        expected="contract completed and 'First Delivery' in career.achievements",
+        got=f"status={contract.status}, achievements={sorted(game.career.achievements)}",
+        cause="_award_achievement hook in Game._on_player_docked",
+    )
+
+
+# ===========================================================================
+# Step 15 — Scenario 14: weather gameplay effects
+# ===========================================================================
+
+def scenario_14():
+    import pygame
+    from config import STORM_MAX_SPEED_KN
+
+    game = make_game()
+    pv = game.player_vessel
+
+    # Park an AI vessel exactly under the (dummy-driver) mouse position so
+    # hover detection finds it in clear weather.
+    target = next(v for v in game.world.vessels if v is not pv)
+    mouse_world = game.camera.screen_to_world(pygame.mouse.get_pos())
+    target.position = mouse_world
+    game.selected_vessel = None
+
+    game.environment.visibility = 500.0
+    game.render()
+    hover_clear = game.hover_vessel is target
+
+    game.environment.visibility = 100.0
+    game.render()
+    hover_fog = game.hover_vessel is None
+
+    # Storm: wave height above threshold caps the player's target speed.
+    game.environment.wave_height = 4.0
+    pv.status = "underway"
+    pv.target_speed = pv.max_speed
+    run_sim(game, 0.5)
+    speed_capped = pv.target_speed <= STORM_MAX_SPEED_KN
+
+    passed = hover_clear and hover_fog and speed_capped
+    return Result(
+        14, "Weather effects", passed,
+        summary=(f"hover ok in clear, suppressed in fog, "
+                 f"storm caps target to {pv.target_speed:.1f} kn"),
+        expected="hover works at vis=500, None at vis=100; target<=6 kn at wave 4.0",
+        got=(f"hover_clear={hover_clear}, hover_fog={hover_fog}, "
+             f"target_speed={pv.target_speed:.1f}"),
+        cause="fog hover suppression in Game.render or storm cap in update_simulation",
+    )
+
+
+# ===========================================================================
+# Step 16 — Final report
+# ===========================================================================
+
+SCENARIOS = [scenario_1, scenario_2, scenario_3, scenario_4, scenario_5,
+             scenario_6, scenario_7, scenario_8, scenario_9, scenario_10,
+             scenario_11, scenario_12, scenario_13, scenario_14]
 
 
 def run_all_scenarios():
