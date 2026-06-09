@@ -62,6 +62,15 @@ class PlayerCareer:
         self._record(f"-£{amount:.0f}  {reason}")
         return True
 
+    def force_spend(self, amount: float, reason: str) -> None:
+        """Forcibly deduct amount even if it drives the balance negative.
+
+        Use for mandatory penalties (zone fines, contract penalties) where the
+        player cannot simply choose not to pay.
+        """
+        self.money -= amount
+        self._record(f"-£{amount:.0f}  {reason}")
+
     def add_reputation(self, delta: int) -> None:
         self.reputation = max(0, min(100, self.reputation + delta))
 
@@ -137,7 +146,7 @@ class JobBoard:
             return None
         c = self._active
         c.status = "failed"
-        career.spend(CONTRACT_PENALTY, f"Missed deadline {c.contract_id}")
+        career.force_spend(CONTRACT_PENALTY, f"Missed deadline {c.contract_id}")
         career.add_reputation(-10)
         self._active = None
         self._contracts = [x for x in self._contracts if x is not c]

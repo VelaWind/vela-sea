@@ -736,3 +736,16 @@ PLAYER_STARTING_MONEY      = 5000.0   # opening wallet balance (currency units)
 PLAYER_STARTING_REPUTATION = 10       # opening reputation score (0–100)
 HULL_REPAIR_COST_PER_POINT = 50.0    # cost per 1 % hull integrity restored at port
 CONTRACT_PENALTY           = 200.0   # fine deducted for a missed contract deadline
+
+# ============================================================================
+# Consequences — zone fines, hull damage, storm limits
+# ============================================================================
+ZONE_FINE_NO_ENTRY   = 500.0    # £ fine for entering a no-entry zone
+ZONE_FINE_SPEED      = 150.0    # £ fine for exceeding a speed-limit zone
+ZONE_FINE_INTERVAL_S = 30.0     # minimum seconds between successive fines in the same zone
+
+GROUNDING_HULL_DAMAGE  = 0.15   # hull integrity lost per grounding event (15 %)
+STORM_WAVE_THRESHOLD   = 3.5    # wave height (m) above which storm consequences apply
+STORM_HULL_DAMAGE_RATE = 0.0002 # hull integrity lost per sim-second while in storm
+
+STORM_MAX_SPEED_KN = 6.0        # player's max effective speed during storm conditions

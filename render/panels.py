@@ -26,6 +26,7 @@ from config import (
     AIS_CPA_WARNING_NM, AIS_NEARBY_MAX,
     PLAYER_THROTTLE_STEP,
     HULL_REPAIR_COST_PER_POINT,
+    STORM_WAVE_THRESHOLD,
 )
 
 
@@ -1073,13 +1074,18 @@ class PlayerHUDPanel:
 
     # ------------------------------------------------------------------ public
 
-    def draw(self, vessel) -> None:
+    def draw(self, vessel, career=None, zone_violation=False, frame_count=0) -> None:
         if vessel is None:
             return
 
         vw, vh = self.surface.get_size()
         pad = self.PAD
         w   = self.WIDTH
+
+        hull = getattr(vessel, 'hull_integrity', 1.0)
+        _low_funds = (career is not None and career.money < 500.0)
+        _in_storm  = (getattr(vessel, 'current_speed', 0) >= 0
+                      and getattr(vessel, 'status', '') == 'underway')  # presence check
 
         # Measure content height dynamically
         row_h   = self._font_label.get_height() + 4
@@ -1093,6 +1099,7 @@ class PlayerHUDPanel:
             + bar_row
             + row_h                             # hull label + bar
             + bar_row
+            + (_low_funds and row_h or 0)       # low-funds warning (conditional)
             + row_h                             # status
             + row_h                             # hint
         )
@@ -1100,10 +1107,21 @@ class PlayerHUDPanel:
         x = vw // 2 - w // 2
         y = vh - h - self.MARGIN - 40  # 40 = status bar height
 
+        # Zone violation flashing banner above the panel
+        if zone_violation:
+            _flash_on = (frame_count % 2 == 0)
+            zv_col  = COLOR_WARNING if _flash_on else (180, 50, 50)
+            zv_surf = self._font_badge.render("!! ZONE VIOLATION !!", True, zv_col)
+            self.surface.blit(zv_surf,
+                              (vw // 2 - zv_surf.get_width() // 2,
+                               y - zv_surf.get_height() - 4))
+
         # Background
+        border_col = (COLOR_WARNING if zone_violation and frame_count % 2 == 0
+                      else COLOR_ACCENT)
         bg = pygame.Surface((w, h), pygame.SRCALPHA)
         pygame.draw.rect(bg, (*COLOR_PANEL_BG[:3], 220), bg.get_rect(), border_radius=10)
-        pygame.draw.rect(bg, COLOR_ACCENT, bg.get_rect(), width=1, border_radius=10)
+        pygame.draw.rect(bg, border_col, bg.get_rect(), width=1, border_radius=10)
         self.surface.blit(bg, (x, y))
 
         cy = y + pad
@@ -1135,7 +1153,6 @@ class PlayerHUDPanel:
         hdg_str  = f"HDG  {vessel.heading:05.1f}°"
         hdg_surf = self._font_value.render(hdg_str, True, COLOR_TEXT_PRIMARY)
         self.surface.blit(hdg_surf, (x + pad, cy))
-        # Small compass arc to the right of the heading text
         arc_cx = x + w - pad - 18
         arc_cy = cy + self._font_value.get_height() // 2
         self._draw_compass_arc(arc_cx, arc_cy, 14, vessel.heading)
@@ -1152,15 +1169,26 @@ class PlayerHUDPanel:
             self._draw_bar(x + pad, cy, w - pad * 2, fuel_pct, fuel_col)
             cy += bar_row
 
-        # ── Hull integrity bar ────────────────────────────────────────────────
-        hull = getattr(vessel, 'hull_integrity', 1.0)
-        hull_col = COLOR_ACCENT if hull > 0.5 else COLOR_WARNING
-        hull_str = f"HULL  {hull * 100:.0f}%"
+        # ── Hull integrity bar — flash red when critical ───────────────────────
+        if hull < 0.3:
+            hull_col = COLOR_WARNING if (frame_count % 2 == 0) else (100, 20, 20)
+        elif hull > 0.5:
+            hull_col = COLOR_ACCENT
+        else:
+            hull_col = COLOR_WARNING
+        hull_str  = f"HULL  {hull * 100:.0f}%"
         hull_surf = self._font_label.render(hull_str, True, hull_col)
         self.surface.blit(hull_surf, (x + pad, cy))
         cy += row_h
         self._draw_bar(x + pad, cy, w - pad * 2, hull, hull_col)
         cy += bar_row
+
+        # ── Low-funds warning ─────────────────────────────────────────────────
+        if _low_funds:
+            lf_surf = self._font_label.render(
+                f"LOW FUNDS  \xa3{career.money:.0f}", True, COLOR_WARNING)
+            self.surface.blit(lf_surf, (x + pad, cy))
+            cy += row_h
 
         # ── Status ────────────────────────────────────────────────────────────
         status_str  = vessel.status.upper()
@@ -1437,3 +1465,71 @@ class CareerPanel:
         val  = self._font_value.render(value, True, value_color)
         self.surface.blit(lbl, (px + pad, y))
         self.surface.blit(val, (px + pad + iw - val.get_width(), y - 2))
+
+
+# ---------------------------------------------------------------------------
+# Game Over screen
+# ---------------------------------------------------------------------------
+
+def _fmt_session(seconds: float) -> str:
+    """Format session seconds as 'Xh Ym' or 'Ym'."""
+    m = int(seconds // 60)
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m" if h else f"{m}m"
+
+
+class GameOverScreen:
+    """Full-screen overlay shown when the player vessel is lost.
+
+    Displays the reason, career statistics, and restart / quit prompts.
+    """
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self._font_big   = pygame.font.SysFont(FONT_UI_NAME,   64, bold=True)
+        self._font_sub   = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_TITLE, bold=True)
+        self._font_stats = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_DATA)
+        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_LABEL)
+
+    def draw(self, reason: str, career, session_seconds: float) -> None:
+        vw, vh = self.surface.get_size()
+
+        # Dark overlay
+        overlay = pygame.Surface((vw, vh), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 210))
+        self.surface.blit(overlay, (0, 0))
+
+        cy = vh // 2 - 120
+
+        # "VESSEL LOST"
+        title_surf = self._font_big.render("VESSEL LOST", True, COLOR_WARNING)
+        self.surface.blit(title_surf,
+                          (vw // 2 - title_surf.get_width() // 2, cy))
+        cy += title_surf.get_height() + 10
+
+        # Reason
+        reason_surf = self._font_sub.render(reason, True, COLOR_TEXT_SECONDARY)
+        self.surface.blit(reason_surf,
+                          (vw // 2 - reason_surf.get_width() // 2, cy))
+        cy += reason_surf.get_height() + 28
+
+        # Stats
+        stats = [
+            ("Final balance",   f"\xa3{career.money:.0f}"),
+            ("Deliveries",      str(career.total_deliveries)),
+            ("Fines paid",      f"\xa3{career.fines_paid:.0f}"),
+            ("Hull repairs",    f"\xa3{career.hull_repairs_paid:.0f}"),
+            ("Session time",    _fmt_session(session_seconds)),
+        ]
+        for label, value in stats:
+            line_surf = self._font_stats.render(
+                f"{label}:  {value}", True, COLOR_TEXT_PRIMARY)
+            self.surface.blit(line_surf,
+                              (vw // 2 - line_surf.get_width() // 2, cy))
+            cy += line_surf.get_height() + 6
+
+        cy += 20
+        hint_surf = self._font_hint.render(
+            "Press R to restart  |  ESC to quit", True, COLOR_TEXT_DIM)
+        self.surface.blit(hint_surf,
+                          (vw // 2 - hint_surf.get_width() // 2, cy))

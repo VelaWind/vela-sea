@@ -29,6 +29,9 @@ from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR, FUEL_EMERGENC
 from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
 from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM
 from config import HULL_REPAIR_COST_PER_POINT
+from config import (ZONE_FINE_NO_ENTRY, ZONE_FINE_SPEED, ZONE_FINE_INTERVAL_S,
+                    GROUNDING_HULL_DAMAGE, STORM_WAVE_THRESHOLD,
+                    STORM_HULL_DAMAGE_RATE, STORM_MAX_SPEED_KN)
 from config import (
     PORT_STAY_CARGO_LOAD_S, PORT_STAY_FERRY_BOARD_S, PORT_STAY_FISHING_UNLOAD_S,
     PORT_STAY_SAIL_ANCHOR_S, PORT_STAY_TUG_S,
@@ -39,7 +42,7 @@ from render.chart import Chart
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
     VESSEL_ROUTE_FERRY, VESSEL_ROUTE_CARGO,
@@ -531,6 +534,19 @@ class Game:
         self.career = PlayerCareer()
         self.job_board = JobBoard()
         self.career_panel = CareerPanel(self.display)
+
+        # Game-over state
+        self.game_over = False
+        self.game_over_reason = ""
+        self._restart_requested = False
+        self._session_start_time = time.time()
+        self._game_over_screen = GameOverScreen(self.display)
+
+        # Player consequence trackers (Game-level; engine stays pure)
+        self._zone_timer: float = 0.0          # cumulative seconds inside violation zone
+        self._zone_fine_cooldown: float = 0.0  # seconds until next fine can fire
+        self._zone_warning_sent: bool = False  # one-time entry-warning flag
+        self._storm_speed_warning_sent: bool = False
 
         # Simulation state
         self.world = World()
@@ -1079,6 +1095,9 @@ class Game:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
+                elif event.key == pygame.K_r and self.game_over:
+                    self._restart_requested = True
+                    self.running = False
                 elif event.key == pygame.K_SPACE:
                     self.is_paused = not self.is_paused
                     self.environment.time_speed_multiplier = 0.0 if self.is_paused else 1.0
@@ -1352,6 +1371,13 @@ class Game:
                     _t, f"PARTY — tender dispatched to {vessel.name}", EVENT_COLOR_WEATHER
                 )
 
+    def _trigger_game_over(self, reason: str) -> None:
+        """Freeze the sim and show the game-over overlay."""
+        if self.game_over:
+            return
+        self.game_over = True
+        self.game_over_reason = reason
+
     def update_simulation(self, dt: float) -> None:
         """Update the simulation by dt seconds using fixed timesteps.
 
@@ -1443,6 +1469,64 @@ class Game:
                             _turn += PLAYER_TURN_RATE
                         if _turn and vessel.status == "underway":
                             vessel.heading = (vessel.heading + _turn * SIM_TIMESTEP) % 360.0
+
+                    _pt = _sim_time_str(self.environment)
+
+                    # Storm: cap speed and apply hull damage each step.
+                    if vessel.status == "underway":
+                        if self.environment.wave_height > STORM_WAVE_THRESHOLD:
+                            if vessel.target_speed > STORM_MAX_SPEED_KN:
+                                vessel.target_speed = STORM_MAX_SPEED_KN
+                            if not self._storm_speed_warning_sent:
+                                self._storm_speed_warning_sent = True
+                                self.event_log.add(
+                                    _pt,
+                                    "WARNING — heavy seas, speed capped to 6 kn",
+                                    EVENT_COLOR_WEATHER)
+                            vessel.hull_integrity = max(
+                                0.0,
+                                vessel.hull_integrity - STORM_HULL_DAMAGE_RATE * SIM_TIMESTEP)
+                            if vessel.hull_integrity <= 0.0:
+                                self._trigger_game_over("Hull failure (storm)")
+                        else:
+                            self._storm_speed_warning_sent = False
+
+                    # Zone violation: warn once on entry, fine every 30 s after 10 s grace.
+                    if vessel.status in ("underway", "avoiding"):
+                        _viol_zone = None
+                        for _z in self.world.get_zones_containing(vessel.position):
+                            if _z.kind == "no_entry":
+                                _viol_zone = _z
+                                break
+                            if (_z.speed_limit is not None
+                                    and vessel.current_speed > _z.speed_limit):
+                                _viol_zone = _z
+                        if _viol_zone is not None:
+                            self._zone_timer += SIM_TIMESTEP
+                            self._zone_fine_cooldown = max(
+                                0.0, self._zone_fine_cooldown - SIM_TIMESTEP)
+                            if not self._zone_warning_sent:
+                                self._zone_warning_sent = True
+                                self.event_log.add(
+                                    _pt,
+                                    f"WARNING — entering restricted zone: {_viol_zone.name}",
+                                    EVENT_COLOR_MAYDAY)
+                            if (self._zone_timer >= 10.0
+                                    and self._zone_fine_cooldown <= 0.0):
+                                _fine = (ZONE_FINE_NO_ENTRY
+                                         if _viol_zone.kind == "no_entry"
+                                         else ZONE_FINE_SPEED)
+                                self.career.force_spend(
+                                    _fine, f"Zone fine: {_viol_zone.name}")
+                                self.career.fines_paid += _fine
+                                self.event_log.add(
+                                    _pt,
+                                    f"FINE — \xa3{_fine:.0f} zone violation",
+                                    EVENT_COLOR_MAYDAY)
+                                self._zone_fine_cooldown = ZONE_FINE_INTERVAL_S
+                        else:
+                            self._zone_timer = 0.0
+                            self._zone_warning_sent = False
                 else:
                     # Navigation priority: MOB > trawling/anchoring > avoidance > normal.
                     if vessel.mob_timer > 0:
@@ -1646,6 +1730,16 @@ class Game:
                     vessel.log_decision(_t, "AGROUND — sending distress signal")
                     self.mission_manager.generate_mission(
                         "rescue", vessel, vessel.position)
+                    # Player hull damage on grounding.
+                    if _is_player:
+                        vessel.hull_integrity = max(
+                            0.0, vessel.hull_integrity - GROUNDING_HULL_DAMAGE)
+                        self.event_log.add(
+                            _t,
+                            f"HULL DAMAGE — integrity {vessel.hull_integrity * 100:.0f}%",
+                            EVENT_COLOR_MAYDAY)
+                        if vessel.hull_integrity <= 0.0:
+                            self._trigger_game_over("Hull failure")
 
             # Career deadline check — once per sim step for the player vessel only.
             if self.player_vessel is not None:
@@ -1656,6 +1750,11 @@ class Game:
                         _sim_time_str(self.environment),
                         f"Contract DEADLINE MISSED — {_expired.contract_id}",
                         EVENT_COLOR_MAYDAY)
+
+            # Game-over checks — player only.
+            if self.player_vessel is not None and not self.game_over:
+                if self.career.money < -500.0:
+                    self._trigger_game_over("Bankrupt")
 
             # Random sudden events: each underway vessel has a small per-step chance.
             for vessel in self.world.vessels:
@@ -1731,10 +1830,20 @@ class Game:
             self.fleet_panel.draw(self.world, self.selected_vessel)
         self.mission_panel.draw(self.mission_manager, self.mission_manager.sim_elapsed_s)
         self.mission_manager.clear_if_expired()
-        self.player_hud.draw(self.player_vessel)
+        self.player_hud.draw(
+            self.player_vessel,
+            career=self.career,
+            zone_violation=self._zone_warning_sent,
+            frame_count=pygame.time.get_ticks() // 250,
+        )
         if not self.settings_panel.is_visible:
             self.career_panel.draw(self.career, self.job_board,
                                    self.mission_manager.sim_elapsed_s)
+
+        if self.game_over:
+            self._game_over_screen.draw(
+                self.game_over_reason, self.career,
+                time.time() - self._session_start_time)
 
         pygame.display.flip()
 
@@ -1744,17 +1853,24 @@ class Game:
             dt = self.clock.tick(TARGET_FPS) / 1000.0  # convert ms to seconds
 
             self.handle_events()
-            self.update_simulation(dt)
+            if not self.game_over:
+                self.update_simulation(dt)
             self.render()
 
-        pygame.quit()
-        sys.exit()
+        if not self._restart_requested:
+            pygame.quit()
+            sys.exit()
 
 
 def main():
     """Entry point."""
-    game = Game()
-    game.run()
+    while True:
+        game = Game()
+        game.run()
+        if not getattr(game, '_restart_requested', False):
+            break
+    pygame.quit()
+    sys.exit()
 
 
 if __name__ == "__main__":
