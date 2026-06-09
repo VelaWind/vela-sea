@@ -48,6 +48,7 @@ from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
 from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel
+from render.sound import SoundManager
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
     VESSEL_ROUTE_FERRY, VESSEL_ROUTE_CARGO,
@@ -540,6 +541,11 @@ class Game:
         self.job_board = JobBoard()
         self.career_panel = CareerPanel(self.display)
         self.docking_menu = DockingMenuPanel(self.display)
+
+        # Audio — constructed after pygame.init(); falls back to silence on
+        # any mixer failure.  Ambient sea bed starts immediately.
+        self.sound = SoundManager()
+        self.sound.start_ambient()
 
         # Game-over state
         self.game_over = False
@@ -1508,6 +1514,7 @@ class Game:
         _docked_at = getattr(vessel, '_docked_port_name', '')
         if not _docked_at:
             return
+        self.sound.play("docking")
         _done = self.job_board.complete_job(_docked_at, self.career)
         if _done:
             self.event_log.add(
@@ -1542,6 +1549,7 @@ class Game:
             return
         self.game_over = True
         self.game_over_reason = reason
+        self.sound.play("mayday")
         # A lost run cannot be continued: remove the save so the title
         # screen greys out "Continue" on the next launch.
         delete_save()
@@ -1743,6 +1751,7 @@ class Game:
                                 0.0, self._zone_fine_cooldown - SIM_TIMESTEP)
                             if not self._zone_warning_sent:
                                 self._zone_warning_sent = True
+                                self.sound.play("warning")
                                 self.event_log.add(
                                     _pt,
                                     f"WARNING — entering restricted zone: {_viol_zone.name}",
@@ -1872,6 +1881,8 @@ class Game:
                     self.event_log.add(
                         _t, f"MAYDAY — {vessel.name} FUEL EXHAUSTED",
                         EVENT_COLOR_MAYDAY)
+                    if _is_player:
+                        self.sound.play("mayday")
                     self.mission_manager.generate_mission(
                         "rescue", vessel, vessel.position)
 
@@ -1951,6 +1962,8 @@ class Game:
                     vessel.memory["grounded_positions"].append(vessel.position)
                     _t = _sim_time_str(self.environment)
                     self.event_log.add(_t, f"MAYDAY — {vessel.name} AGROUND", EVENT_COLOR_MAYDAY)
+                    if _is_player:
+                        self.sound.play("mayday")
                     vessel.log_decision(_t, "AGROUND — sending distress signal")
                     self.mission_manager.generate_mission(
                         "rescue", vessel, vessel.position)
@@ -2037,6 +2050,12 @@ class Game:
 
     def render(self) -> None:
         """Render the current frame."""
+        # Engine hum tracks the player's actual way through the water.
+        if self.player_vessel is not None:
+            _eng_spd = (self.player_vessel.current_speed
+                        if self.player_vessel.status == "underway" else 0.0)
+            self.sound.update_engine(_eng_spd)
+
         # Hover detection: nearest vessel within click radius, excluding selected.
         mouse_pos = pygame.mouse.get_pos()
         world_pos = self.camera.screen_to_world(mouse_pos)
@@ -2147,6 +2166,9 @@ class Game:
             if not self.game_over:
                 self.update_simulation(dt)
             self.render()
+
+        # Silence loops so a restart doesn't stack a second ambient track.
+        self.sound.stop_all()
 
         if not self._restart_requested:
             pygame.quit()

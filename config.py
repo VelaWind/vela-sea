@@ -831,6 +831,24 @@ PORT_CLICK_RADIUS_PX     = 14   # screen px around a port symbol that snaps the
 AUTOPILOT_MARKER_SIZE_PX = 6    # half-size of the diamond waypoint marker
 
 # ============================================================================
+# Sound
+# ============================================================================
+SOUND_ENABLED = True
+SOUND_VOLUME  = 0.6              # master volume 0.0–1.0 (UI slider adjusts this)
+SOUND_DIR     = "assets/sounds"  # generated .wav files live here
+# Engine hum plays only while the player is underway above this speed.
+ENGINE_SOUND_MIN_SPEED_KN = 2.0
+# Per-sound mix levels, multiplied by the master volume.  The loops sit low
+# beneath the one-shot alerts so warnings always cut through.
+SOUND_RELATIVE_VOLUMES = {
+    "engine_loop": 0.55,
+    "ambient_sea": 0.40,
+    "docking":     0.90,
+    "warning":     0.90,
+    "mayday":      1.00,
+}
+
+# ============================================================================
 # Consequences — zone fines, hull damage, storm limits
 # ============================================================================
 ZONE_FINE_NO_ENTRY   = 500.0    # £ fine for entering a no-entry zone
