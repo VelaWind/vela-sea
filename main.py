@@ -45,6 +45,7 @@ from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
+from config import FOG_LOW_VIS_THRESHOLD_M
 from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
@@ -1557,10 +1558,14 @@ class Game:
             _new_event  = self.environment.active_event_name()
             if _prev_event != _new_event:
                 _t = _sim_time_str(self.environment)
-                if _new_event:
+                if _new_event == "squall":
+                    self.event_log.add(_t, "SQUALL WARNING — sudden wind and rain",
+                                       EVENT_COLOR_WEATHER)
+                elif _new_event:
                     self.event_log.add(_t, f"WEATHER — {_new_event.upper()}", EVENT_COLOR_WEATHER)
                 else:
-                    self.event_log.add(_t, f"WEATHER — {_prev_event.upper()} CLEAR", EVENT_COLOR_WEATHER)
+                    self.event_log.add(_t, f"Weather event cleared: {_prev_event}",
+                                       EVENT_COLOR_WEATHER)
 
             # Update each vessel using the same simulated timestep.
             for vessel in self.world.vessels:
@@ -2021,6 +2026,9 @@ class Game:
             if vessel.distance_to(world_pos) < threshold:
                 self.hover_vessel = vessel
                 break
+        # Fog disables the AIS hover aid — can't identify what you can't see.
+        if self.environment.visibility < FOG_LOW_VIS_THRESHOLD_M:
+            self.hover_vessel = None
 
         self.chart.draw_all(world=self.world, environment=self.environment,
                             selected_vessel=self.selected_vessel,
@@ -2040,6 +2048,7 @@ class Game:
             career=self.career,
             zone_violation=self._zone_warning_sent,
             frame_count=pygame.time.get_ticks() // 250,
+            low_visibility=self.environment.visibility < FOG_LOW_VIS_THRESHOLD_M,
         )
         if not self.settings_panel.is_visible:
             self.career_panel.draw(self.career, self.job_board,

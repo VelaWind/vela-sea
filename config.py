@@ -573,6 +573,30 @@ WEATHER_SQUALL_WIND_DELTA =   12.0   # +12 kn at peak
 WEATHER_SQUALL_WAVE_DELTA =    1.5   # +1.5 m at peak
 WEATHER_SQUALL_VIS_DROP   =  200.0   # spray-reduced visibility
 
+# ---- Weather gameplay & visual effects (render-side) ----
+# Fog: below this visibility (m) the AIS hover popup is disabled, the HUD
+# shows LOW VISIBILITY, and traffic beyond visual range vanishes from chart.
+# 150 m matches the AI captains' own low-visibility threshold in main.py.
+FOG_LOW_VIS_THRESHOLD_M  = 150.0
+# World-unit range around the player within which other vessels stay visible
+# during fog.  100 wu ≈ 15 nm of chart — close traffic only.
+FOG_VESSEL_HIDE_RANGE_WU = 100.0
+
+# Storm seas: scrolling horizontal wave lines + a grey-green cast, shown
+# whenever wave_height exceeds STORM_WAVE_THRESHOLD (same trigger as the
+# player speed cap so visuals and consequences always agree).
+STORM_TINT_COLOR          = (60, 90, 80)     # grey-green storm cast
+STORM_TINT_ALPHA          = 26
+STORM_WAVE_LINE_COLOR     = (170, 190, 185)  # pale foam-grey line
+STORM_WAVE_LINE_ALPHA     = 30
+STORM_WAVE_LINE_SPACING_PX = 48              # vertical gap between wave lines
+STORM_WAVE_SCROLL_PX_S    = 10               # slow downward scroll speed
+
+# Squall lightning: a brief full-screen white flash on the frame the squall
+# event first becomes active.
+SQUALL_FLASH_ALPHA      = 70
+SQUALL_FLASH_DURATION_S = 0.18   # real seconds the flash persists (~11 frames)
+
 # ---- Storm event: sustained severe weather ----
 WEATHER_STORM_BUILDUP_S  = 1800.0   # 30 sim-min buildup
 WEATHER_STORM_PEAK_S     = 5400.0   # 90 sim-min peak

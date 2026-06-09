@@ -58,6 +58,11 @@ from config import (
     SHIPPING_LANE_ALPHA, SHIPPING_LANE_DASH_PX,
     SHIPPING_LANE_GAP_PX, SHIPPING_LANE_MIN_ZOOM,
     AUTOPILOT_MARKER_SIZE_PX,
+    FOG_LOW_VIS_THRESHOLD_M, FOG_VESSEL_HIDE_RANGE_WU,
+    STORM_TINT_COLOR, STORM_TINT_ALPHA, STORM_WAVE_THRESHOLD,
+    STORM_WAVE_LINE_COLOR, STORM_WAVE_LINE_ALPHA,
+    STORM_WAVE_LINE_SPACING_PX, STORM_WAVE_SCROLL_PX_S,
+    SQUALL_FLASH_ALPHA, SQUALL_FLASH_DURATION_S,
 )
 from render.camera import Camera
 
@@ -187,6 +192,9 @@ class Chart:
         # Cached by (zoom_bucket, vw, vh) — rebuilt only when zoom or window changes.
         self._depth_surf: Optional[pygame.Surface] = None
         self._depth_key: tuple = ()
+        # Weather-event transition tracking for the squall lightning flash.
+        self._last_weather_event: Optional[str] = None
+        self._squall_flash_until: float = 0.0
 
     def _get_alpha_surf(self) -> pygame.Surface:
         """Return the shared full-screen SRCALPHA surface, creating it once on first use.
@@ -728,15 +736,33 @@ class Chart:
         if not world or not world.vessels:
             return
 
+        # Fog declutter: in low visibility, traffic beyond visual range of the
+        # player vessel disappears from the chart — you can't see what the fog
+        # hides.  The player's own ship always stays visible.
+        _fog_origin = None
+        if (environment is not None
+                and environment.visibility < FOG_LOW_VIS_THRESHOLD_M):
+            for v in world.vessels:
+                if getattr(v, 'is_player', False):
+                    _fog_origin = v.position
+                    break
+
         # Two-pass rendering: trails behind everything, then icons on top.
         # Trails are suppressed at low zoom to avoid clutter.
         if self.camera.zoom > 0.6 and selected_vessel is not None:
             self._draw_vessel_trail(selected_vessel, selected=True)
 
+        _hide_r2 = FOG_VESSEL_HIDE_RANGE_WU * FOG_VESSEL_HIDE_RANGE_WU
         for vessel in world.vessels:
+            if _fog_origin is not None and not getattr(vessel, 'is_player', False):
+                dx = vessel.position[0] - _fog_origin[0]
+                dy = vessel.position[1] - _fog_origin[1]
+                if dx * dx + dy * dy > _hide_r2:
+                    continue
             self.draw_vessel(vessel, vessel == selected_vessel, environment)
 
-        if hover_vessel is not None:
+        # Hover popup is an AIS aid — unavailable when fog hides the target.
+        if hover_vessel is not None and _fog_origin is None:
             self._draw_hover_popup(hover_vessel)
 
     def _draw_hover_popup(self, vessel) -> None:
@@ -1285,6 +1311,27 @@ class Chart:
                 pygame.draw.line(rain_surf, (200, 210, 220, 60),
                                  (x, y), (x + 4, y + 8), 1)
             self.surface.blit(rain_surf, (0, 0))
+
+        # ── (B2) Storm seas: scrolling wave lines + grey-green cast ──────────
+        # Keyed to wave_height (not the event) so the visual always agrees with
+        # the player speed cap and hull-damage consequences in main.py.
+        if environment.wave_height > STORM_WAVE_THRESHOLD:
+            s = self._get_alpha_surf()
+            s.fill((*STORM_TINT_COLOR, STORM_TINT_ALPHA))
+            offset = int(time.time() * STORM_WAVE_SCROLL_PX_S) % STORM_WAVE_LINE_SPACING_PX
+            for y in range(offset, vh, STORM_WAVE_LINE_SPACING_PX):
+                pygame.draw.line(s, (*STORM_WAVE_LINE_COLOR, STORM_WAVE_LINE_ALPHA),
+                                 (0, y), (vw, y), 1)
+            self.surface.blit(s, (0, 0))
+
+        # ── (B3) Squall lightning: brief white flash on event onset ──────────
+        if event == "squall" and self._last_weather_event != "squall":
+            self._squall_flash_until = time.time() + SQUALL_FLASH_DURATION_S
+        self._last_weather_event = event
+        if time.time() < self._squall_flash_until:
+            s = self._get_alpha_surf()
+            s.fill((255, 255, 255, SQUALL_FLASH_ALPHA))
+            self.surface.blit(s, (0, 0))
 
         # ── (C) Star field during deep night when zoomed out ─────────────────
         # Fixed seed → no flicker; dots are painted directly on the surface.

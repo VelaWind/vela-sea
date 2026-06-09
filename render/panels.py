@@ -1077,7 +1077,8 @@ class PlayerHUDPanel:
 
     # ------------------------------------------------------------------ public
 
-    def draw(self, vessel, career=None, zone_violation=False, frame_count=0) -> None:
+    def draw(self, vessel, career=None, zone_violation=False, frame_count=0,
+             low_visibility=False) -> None:
         if vessel is None:
             return
 
@@ -1103,6 +1104,7 @@ class PlayerHUDPanel:
             + row_h                             # hull label + bar
             + bar_row
             + (_low_funds and row_h or 0)       # low-funds warning (conditional)
+            + (low_visibility and row_h or 0)   # fog warning (conditional)
             + row_h                             # status
             + row_h                             # hint
         )
@@ -1191,6 +1193,13 @@ class PlayerHUDPanel:
             lf_surf = self._font_label.render(
                 f"LOW FUNDS  \xa3{career.money:.0f}", True, COLOR_WARNING)
             self.surface.blit(lf_surf, (x + pad, cy))
+            cy += row_h
+
+        # ── Fog warning ───────────────────────────────────────────────────────
+        if low_visibility:
+            lv_surf = self._font_label.render(
+                "LOW VISIBILITY", True, (220, 165, 50))
+            self.surface.blit(lv_surf, (x + pad, cy))
             cy += row_h
 
         # ── Status ────────────────────────────────────────────────────────────
