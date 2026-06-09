@@ -20,7 +20,7 @@ from typing import Optional
 from config import (
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, WINDOW_SCALE_FACTOR, WINDOW_TITLE,
     TARGET_FPS, ZOOM_MIN, ZOOM_MAX, ZOOM_SCROLL_SPEED,
-    PAN_SPEED, SIM_TIMESTEP, DEFAULT_VIEW_SPAN_WU,
+    PAN_SPEED, SIM_TIMESTEP, DEFAULT_VIEW_SPAN_WU, CAMERA_START_CENTER,
     MAX_SIM_STEPS_PER_FRAME,
 )
 from config import ARRIVAL_DISTANCE, PORT_DETECT_RADIUS, SHIP_SELECT_RADIUS
@@ -527,6 +527,9 @@ class Game:
         # Camera and rendering
         self.camera = Camera(display_width, display_height)
         self.camera.zoom = self._calculate_default_zoom(display_width, display_height)
+        # Open framed on the middle of the port cluster, not the player's
+        # far-western start; follow-cam engages in run() once the title clears.
+        self.camera.set_center(CAMERA_START_CENTER)
         self.chart = Chart(self.display, self.camera)
 
         # UI Panels
@@ -588,9 +591,9 @@ class Game:
         # Create initial vessels
         self._create_initial_vessels()
 
-        # Follow the player vessel on startup
-        if self.player_vessel is not None and PLAYER_FOLLOW_CAM:
-            self.camera.set_follow_target(self.player_vessel)
+        # Follow-cam is engaged in run() (after the title overview) so the
+        # opening chart stays centred on the cluster set above, not snapped
+        # straight to the player at the far-western edge.
 
         # Time tracking for fixed timesteps
         self.accumulator = 0.0  # accumulated time for simulation
@@ -2189,6 +2192,10 @@ class Game:
                 self.running = False
             elif action == "continue":
                 self._load_save()
+        # Engage follow-cam now the title overview is done: gameplay tracks the
+        # player ship, while the title screen kept the port cluster framed.
+        if self.player_vessel is not None and PLAYER_FOLLOW_CAM:
+            self.camera.set_follow_target(self.player_vessel)
         while self.running:
             dt = self.clock.tick(TARGET_FPS) / 1000.0  # convert ms to seconds
 

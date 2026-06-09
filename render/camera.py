@@ -110,6 +110,10 @@ class Camera:
         """Convert a screen-space distance to world units."""
         return distance_pixels / self.zoom
 
+    def set_center(self, world_pos: Position) -> None:
+        """Center the camera on a world position (overrides any prior pan)."""
+        self.position = (float(world_pos[0]), float(world_pos[1]))
+
     def set_follow_target(self, target) -> None:
         """Make the camera follow a target (e.g., a vessel).
         

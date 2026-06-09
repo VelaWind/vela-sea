@@ -885,11 +885,12 @@ class FleetStatusPanel:
         x = 20
         y = self.TOP_Y
 
-        # Background
+        # Background — dark translucent panel with a themed border so the fleet
+        # list reads as a proper UI element, not text floating over the chart.
         bg = pygame.Surface((self.WIDTH, h), pygame.SRCALPHA)
-        bg.fill((8, 20, 40, 195))
+        bg.fill((*COLOR_PANEL_BG, 200))
         self.surface.blit(bg, (x, y))
-        pygame.draw.rect(self.surface, (40, 65, 95), (x, y, self.WIDTH, h), 1)
+        pygame.draw.rect(self.surface, COLOR_PANEL_BORDER, (x, y, self.WIDTH, h), 1)
 
         self._rows = []
         for i, vessel in enumerate(vessels):
@@ -1155,7 +1156,7 @@ class PlayerHUDPanel:
         )
         h = content_h + pad * 2
         x = vw // 2 - w // 2
-        y = vh - h - self.MARGIN - 40  # 40 = status bar height
+        y = vh - h - self.MARGIN  # anchor to the very bottom (MARGIN = 8 px)
 
         # Zone violation flashing banner above the panel
         if zone_violation:
@@ -1208,8 +1209,10 @@ class PlayerHUDPanel:
         self._draw_compass_arc(arc_cx, arc_cy, 14, vessel.heading)
         cy += row_h
         # Proportional heading bar: fill scales 0–360°, so 090° reads 25 % full.
+        # min_fill_px keeps a 2 px sliver visible even at 000° (due north).
         self._draw_bar(x + pad, cy, w - pad * 2,
-                       (vessel.heading % 360.0) / 360.0, COLOR_ACCENT)
+                       (vessel.heading % 360.0) / 360.0, COLOR_ACCENT,
+                       min_fill_px=2)
         cy += bar_row
 
         # ── Fuel bar ─────────────────────────────────────────────────────────
@@ -1272,11 +1275,14 @@ class PlayerHUDPanel:
     # ----------------------------------------------------------------- helpers
 
     def _draw_bar(self, x: int, y: int, width: int, fraction: float,
-                  fill_color: tuple) -> None:
+                  fill_color: tuple, min_fill_px: int = 0) -> None:
         fraction = max(0.0, min(1.0, fraction))
         pygame.draw.rect(self.surface, COLOR_FRAME, (x, y, width, self.BAR_H),
                          border_radius=4)
-        fill_w = max(0, int(width * fraction))
+        # Fill shares the background's x/y exactly.  min_fill_px guarantees a
+        # visible sliver for "always a bar" readouts (heading at 000°); value
+        # bars leave it 0 so an empty tank/hull genuinely reads as empty.
+        fill_w = min(width, max(min_fill_px, int(width * fraction)))
         if fill_w > 0:
             pygame.draw.rect(self.surface, fill_color, (x, y, fill_w, self.BAR_H),
                              border_radius=4)

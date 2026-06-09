@@ -177,6 +177,12 @@ DEFAULT_VIEW_SPAN_WU = 1300.0
 # (4K ≈ 2.95 default) show all labels at default, which the extra pixels can fit.
 LABEL_ZOOM_THRESHOLD_SHOW_ALL = 2.0
 
+# Opening camera framing: the chart first centres here — the middle of the main
+# port cluster, between Port Maren (105,315) in the west and Outer Reach (1320,620)
+# in the east — so the game opens on the busy heart of the sea rather than the
+# player's far-western start.  Follow-cam re-centres on the player once play begins.
+CAMERA_START_CENTER = (650.0, 450.0)
+
 # ============================================================================
 # Compass & Scale
 # ============================================================================
