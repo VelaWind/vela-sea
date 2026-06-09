@@ -59,7 +59,23 @@ from config import (
     PLAYER_STARTING_MONEY, ZONE_FINE_NO_ENTRY, GROUNDING_HULL_DAMAGE,
     DRAFT_SAFETY_MARGIN_M, SAR_DISPATCH_RANGE_NM,
 )
+import main as _main_module
 from main import Game
+
+# ---------------------------------------------------------------------------
+# Save-file isolation: the bot docks the player and triggers game-overs, both
+# of which write/delete the career save.  Redirect those calls to a temp file
+# so running the test suite never clobbers the player's real save.json.
+# ---------------------------------------------------------------------------
+import tempfile
+from engine import career as _career_module
+
+_BOT_SAVE_PATH = os.path.join(tempfile.gettempdir(), "meridian_bot_save.json")
+_main_module.save_career = (
+    lambda career, filepath=None, hull_integrity=1.0:
+        _career_module.save_career(career, _BOT_SAVE_PATH, hull_integrity))
+_main_module.delete_save = (
+    lambda filepath=None: _career_module.delete_save(_BOT_SAVE_PATH))
 
 REAL_DT = 0.016           # seconds of "real" frame time fed to update_simulation
 SEED = 20260609           # fixed seed → deterministic spawns, contracts, events

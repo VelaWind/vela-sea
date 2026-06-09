@@ -64,7 +64,7 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
 from config import NM_PER_WORLD_UNIT
 from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
-from engine.career import PlayerCareer, JobBoard
+from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
 
 
 # ---------------------------------------------------------------------------
@@ -1379,6 +1379,9 @@ class Game:
             return
         self.game_over = True
         self.game_over_reason = reason
+        # A lost run cannot be continued: remove the save so the title
+        # screen greys out "Continue" on the next launch.
+        delete_save()
 
     def update_simulation(self, dt: float) -> None:
         """Update the simulation by dt seconds using fixed timesteps.
@@ -1674,6 +1677,10 @@ class Game:
                                         _t,
                                         f"Hull repaired — -\xa3{_repair_cost:.0f}",
                                         EVENT_COLOR_WEATHER)
+                            # Auto-save: docking is the natural checkpoint —
+                            # contract payouts and repairs above are included.
+                            save_career(self.career,
+                                        hull_integrity=vessel.hull_integrity)
                     # Advance any pending multi-hop player path (from find_safe_path).
                     _vid = id(vessel)
                     if _was_player_cmd and _vid in self._pending_player_paths:
@@ -1875,8 +1882,22 @@ class Game:
             pygame.display.flip()
 
     def _load_save(self) -> None:
-        """Restore career state from save.json (wired fully in Feature 2)."""
-        pass
+        """Restore career state and player hull from save.json.
+
+        A None result (missing/corrupt/wrong-version file) leaves the fresh
+        default career untouched — equivalent to starting a new career.
+        """
+        data = load_career()
+        if data is None:
+            return
+        self.career.money             = data["money"]
+        self.career.reputation        = data["reputation"]
+        self.career.total_deliveries  = data["total_deliveries"]
+        self.career.total_distance_nm = data["total_distance_nm"]
+        self.career.fines_paid        = data["fines_paid"]
+        self.career.hull_repairs_paid = data["hull_repairs_paid"]
+        if self.player_vessel is not None:
+            self.player_vessel.hull_integrity = data["hull_integrity"]
 
     def run(self, skip_title: bool = False) -> None:
         """Run the title menu, then the main game loop until quit."""

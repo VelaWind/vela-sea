@@ -3,7 +3,9 @@
 Pure Python — no Pygame imports. All state lives here; render/panels.py reads it.
 """
 
+import json
 import math
+import os
 import random
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -12,6 +14,7 @@ from config import (
     PLAYER_STARTING_MONEY, PLAYER_STARTING_REPUTATION,
     HULL_REPAIR_COST_PER_POINT, CONTRACT_PENALTY,
     NM_PER_WORLD_UNIT,
+    GAME_VERSION, SAVE_FILEPATH,
 )
 
 
@@ -78,6 +81,69 @@ class PlayerCareer:
         self._history.append(text)
         if len(self._history) > 20:
             self._history.pop(0)
+
+
+# ---------------------------------------------------------------------------
+# Save / load — JSON persistence for career state between sessions
+# ---------------------------------------------------------------------------
+
+# Every field a valid save must contain.  Checked on load so a truncated or
+# hand-edited file is rejected as a whole rather than half-restoring state.
+_SAVE_FIELDS = (
+    "money", "reputation", "total_deliveries", "total_distance_nm",
+    "fines_paid", "hull_repairs_paid", "hull_integrity",
+)
+
+
+def save_career(career: "PlayerCareer", filepath: str = SAVE_FILEPATH,
+                hull_integrity: float = 1.0) -> None:
+    """Write career state (plus the player vessel's hull) to a JSON file.
+
+    hull_integrity is passed in rather than read from a vessel so this module
+    stays decoupled from ship.py — the caller owns that relationship.
+    """
+    data = {
+        "version": GAME_VERSION,
+        "money": career.money,
+        "reputation": career.reputation,
+        "total_deliveries": career.total_deliveries,
+        "total_distance_nm": career.total_distance_nm,
+        "fines_paid": career.fines_paid,
+        "hull_repairs_paid": career.hull_repairs_paid,
+        "hull_integrity": hull_integrity,
+    }
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_career(filepath: str = SAVE_FILEPATH) -> Optional[dict]:
+    """Read a save file. Returns the field dict, or None when the file is
+    missing, unparseable, the wrong version, or missing any required field.
+
+    Returning the raw dict (not a PlayerCareer) lets the caller restore both
+    the career object and the player vessel's hull in one place.
+    """
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("version") != GAME_VERSION:
+        return None
+    if any(k not in data for k in _SAVE_FIELDS):
+        return None
+    return data
+
+
+def delete_save(filepath: str = SAVE_FILEPATH) -> None:
+    """Remove the save file if present; silently ignore a missing file.
+
+    Called on game over so a lost run cannot be continued.
+    """
+    try:
+        os.remove(filepath)
+    except OSError:
+        pass
 
 
 class JobBoard:
