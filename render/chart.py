@@ -460,24 +460,26 @@ class Chart:
 
         x = math.ceil(world_left / GRID_SPACING) * GRID_SPACING
         while x <= world_right:
-            screen_x, _ = self.camera.world_to_screen((x, 0))
-            is_major = abs(x) % GRID_LABEL_INTERVAL < 1.0
-            color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-            pygame.draw.aaline(self.surface, color, (screen_x, 0), (screen_x, vh))
-            if is_major:
-                label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
-                self._blit_text_shadow(label, int(screen_x + 4), 6)
+            if 0 <= x <= WORLD_WIDTH:
+                screen_x, _ = self.camera.world_to_screen((x, 0))
+                is_major = x % GRID_LABEL_INTERVAL < 1.0
+                color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+                pygame.draw.aaline(self.surface, color, (screen_x, 0), (screen_x, vh))
+                if is_major:
+                    label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
+                    self._blit_text_shadow(label, int(screen_x + 4), 6)
             x += GRID_SPACING
 
         y = math.ceil(world_top / GRID_SPACING) * GRID_SPACING
         while y <= world_bottom:
-            _, screen_y = self.camera.world_to_screen((0, y))
-            is_major = abs(y) % GRID_LABEL_INTERVAL < 1.0
-            color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-            pygame.draw.aaline(self.surface, color, (0, screen_y), (vw, screen_y))
-            if is_major:
-                label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
-                self._blit_text_shadow(label, 6, int(screen_y + 4))
+            if 0 <= y <= WORLD_HEIGHT:
+                _, screen_y = self.camera.world_to_screen((0, y))
+                is_major = y % GRID_LABEL_INTERVAL < 1.0
+                color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+                pygame.draw.aaline(self.surface, color, (0, screen_y), (vw, screen_y))
+                if is_major:
+                    label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
+                    self._blit_text_shadow(label, 6, int(screen_y + 4))
             y += GRID_SPACING
 
     def draw_islands(self, world) -> None:
