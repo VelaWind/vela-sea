@@ -10,6 +10,7 @@ timesteps, so physics behaves consistently regardless of FPS.
 """
 
 import math
+import os
 import pygame
 import random
 import sys
@@ -42,7 +43,8 @@ from render.chart import Chart
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen
+from config import SAVE_FILEPATH
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
 from data.world_data import (populate_world,
     VESSEL_ROUTE_FERRY, VESSEL_ROUTE_CARGO,
@@ -1847,8 +1849,43 @@ class Game:
 
         pygame.display.flip()
 
-    def run(self) -> None:
-        """Run the main game loop until quit."""
+    def _title_loop(self) -> str:
+        """Run the title menu until the player confirms an action.
+
+        The simulation keeps ticking underneath so the chart background is
+        alive (AI vessels sail their routes).  Returns "new", "continue",
+        or "quit".
+        """
+        title = TitleScreen(self.display)
+        while True:
+            dt = self.clock.tick(TARGET_FPS) / 1000.0
+            has_save = os.path.exists(SAVE_FILEPATH)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return "quit"
+                elif event.type == pygame.KEYDOWN:
+                    action = title.handle_key(event.key, has_save)
+                    if action is not None:
+                        return action
+
+            self.update_simulation(dt)
+            self.chart.draw_all(world=self.world, environment=self.environment)
+            title.draw(has_save)
+            pygame.display.flip()
+
+    def _load_save(self) -> None:
+        """Restore career state from save.json (wired fully in Feature 2)."""
+        pass
+
+    def run(self, skip_title: bool = False) -> None:
+        """Run the title menu, then the main game loop until quit."""
+        if not skip_title:
+            action = self._title_loop()
+            if action == "quit":
+                self.running = False
+            elif action == "continue":
+                self._load_save()
         while self.running:
             dt = self.clock.tick(TARGET_FPS) / 1000.0  # convert ms to seconds
 
@@ -1864,9 +1901,10 @@ class Game:
 
 def main():
     """Entry point."""
+    skip_title = "--skip-title" in sys.argv
     while True:
         game = Game()
-        game.run()
+        game.run(skip_title=skip_title)
         if not getattr(game, '_restart_requested', False):
             break
     pygame.quit()

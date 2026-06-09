@@ -27,6 +27,9 @@ from config import (
     PLAYER_THROTTLE_STEP,
     HULL_REPAIR_COST_PER_POINT,
     STORM_WAVE_THRESHOLD,
+    GAME_VERSION,
+    TITLE_FONT_SIZE, TITLE_SUBTITLE_SIZE, TITLE_MENU_FONT_SIZE,
+    TITLE_PANEL_WIDTH, TITLE_PANEL_HEIGHT, TITLE_PANEL_ALPHA,
 )
 
 
@@ -1465,6 +1468,104 @@ class CareerPanel:
         val  = self._font_value.render(value, True, value_color)
         self.surface.blit(lbl, (px + pad, y))
         self.surface.blit(val, (px + pad + iw - val.get_width(), y - 2))
+
+
+# ---------------------------------------------------------------------------
+# Title screen
+# ---------------------------------------------------------------------------
+
+class TitleScreen:
+    """Main-menu overlay drawn over the live chart before the game starts.
+
+    The caller owns the loop: it draws the chart first, then calls draw(),
+    and feeds KEYDOWN events to handle_key().  handle_key() returns an action
+    string ("new" | "continue" | "quit") when a menu item is confirmed, or
+    None while the player is still browsing.
+    """
+
+    # (label, action) in display order.  "Continue" is greyed out when no
+    # save file exists; confirming it then is a no-op.
+    MENU_ITEMS = [
+        ("New Career", "new"),
+        ("Continue",   "continue"),
+        ("Quit",       "quit"),
+    ]
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self.selected_index = 0
+        self._font_title    = pygame.font.SysFont(FONT_UI_NAME, TITLE_FONT_SIZE,    bold=True)
+        self._font_subtitle = pygame.font.SysFont(FONT_UI_NAME, TITLE_SUBTITLE_SIZE)
+        self._font_menu     = pygame.font.SysFont(FONT_UI_NAME, TITLE_MENU_FONT_SIZE, bold=True)
+        self._font_hint     = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+
+    def handle_key(self, key: int, has_save: bool):
+        """Process one KEYDOWN. Returns an action string on confirm, else None."""
+        n = len(self.MENU_ITEMS)
+        if key == pygame.K_UP:
+            self.selected_index = (self.selected_index - 1) % n
+        elif key == pygame.K_DOWN:
+            self.selected_index = (self.selected_index + 1) % n
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+            action = self.MENU_ITEMS[self.selected_index][1]
+            # Continue without a save is disabled — stay on the title.
+            if action == "continue" and not has_save:
+                return None
+            return action
+        elif key == pygame.K_ESCAPE:
+            return "quit"
+        return None
+
+    def draw(self, has_save: bool) -> None:
+        vw, vh = self.surface.get_size()
+        w, h = TITLE_PANEL_WIDTH, TITLE_PANEL_HEIGHT
+        x = vw // 2 - w // 2
+        y = vh // 2 - h // 2
+
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (*COLOR_PANEL_BG[:3], TITLE_PANEL_ALPHA),
+                         panel.get_rect(), border_radius=18)
+        pygame.draw.rect(panel, COLOR_PANEL_BORDER, panel.get_rect(), 2, border_radius=18)
+        self.surface.blit(panel, (x, y))
+
+        cy = y + 44
+
+        title_surf = self._font_title.render("MERIDIAN SEA", True, COLOR_ACCENT)
+        self.surface.blit(title_surf, (vw // 2 - title_surf.get_width() // 2, cy))
+        cy += title_surf.get_height() + 6
+
+        sub_surf = self._font_subtitle.render(
+            "A Maritime Career Simulator", True, COLOR_TEXT_SECONDARY)
+        self.surface.blit(sub_surf, (vw // 2 - sub_surf.get_width() // 2, cy))
+        cy += sub_surf.get_height() + 40
+
+        for i, (label, action) in enumerate(self.MENU_ITEMS):
+            disabled = (action == "continue" and not has_save)
+            display = f"{label}  [no save]" if disabled else label
+            if disabled:
+                col = COLOR_TEXT_DIM
+            elif i == self.selected_index:
+                col = COLOR_ACCENT
+            else:
+                col = COLOR_TEXT_PRIMARY
+
+            item_surf = self._font_menu.render(display, True, col)
+            ix = vw // 2 - item_surf.get_width() // 2
+            # Selection highlight bar behind the focused row.
+            if i == self.selected_index:
+                hl = pygame.Surface((w - 80, item_surf.get_height() + 10), pygame.SRCALPHA)
+                hl.fill((255, 255, 255, 18))
+                self.surface.blit(hl, (x + 40, cy - 5))
+                pygame.draw.rect(self.surface, COLOR_ACCENT,
+                                 (x + 40, cy - 5, w - 80, item_surf.get_height() + 10),
+                                 1, border_radius=6)
+            self.surface.blit(item_surf, (ix, cy))
+            cy += item_surf.get_height() + 22
+
+        hint = f"v{GAME_VERSION}  |  Arrow keys to select  |  ENTER to confirm"
+        hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
+        self.surface.blit(hint_surf,
+                          (vw // 2 - hint_surf.get_width() // 2, y + h - hint_surf.get_height() - 16))
 
 
 # ---------------------------------------------------------------------------

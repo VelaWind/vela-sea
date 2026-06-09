@@ -5,6 +5,22 @@ simulation is easy to balance and tweak without hunting through the code.
 """
 
 # ============================================================================
+# Game identity & persistence
+# ============================================================================
+GAME_VERSION  = "0.4.0"        # shown on the title screen and stamped into saves
+SAVE_FILEPATH = "save.json"    # career save file, relative to the working dir
+
+# ============================================================================
+# Title screen
+# ============================================================================
+TITLE_FONT_SIZE        = 52    # "MERIDIAN SEA" headline
+TITLE_SUBTITLE_SIZE    = 18    # "A Maritime Career Simulator" subtitle
+TITLE_MENU_FONT_SIZE   = 22    # menu item rows
+TITLE_PANEL_WIDTH      = 560   # centered overlay panel width (px)
+TITLE_PANEL_HEIGHT     = 420   # centered overlay panel height (px)
+TITLE_PANEL_ALPHA      = 215   # overlay darkness — chart stays faintly visible behind
+
+# ============================================================================
 # Window & Display
 # ============================================================================
 WINDOW_MIN_WIDTH = 1600
