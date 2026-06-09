@@ -449,43 +449,45 @@ class Chart:
         return surf
 
     def draw_grid(self) -> None:
-        # camera.position = world coords at screen centre.  Labels always show
-        # the real world coordinate of each line; lines only draw inside world
-        # bounds [0, WORLD_WIDTH] x [0, WORLD_HEIGHT], so no negatives ever.
-        vw, vh = self.surface.get_width(), self.surface.get_height()
-        zoom = self.camera.zoom
+        # One coordinate system, no drift: screen_to_world() finds what world
+        # region is visible, world_to_screen() places every line AND its label.
+        # Because a line and its label derive from the SAME world_to_screen()
+        # call, they can never disagree.  Visible bounds are clamped to the
+        # world, so labels only ever show real, positive world coordinates.
+        vw, vh = self.surface.get_size()
+        cam = self.camera
 
-        world_left = self.camera.position[0] - (vw / 2.0) / zoom
-        world_top  = self.camera.position[1] - (vh / 2.0) / zoom
+        top_left  = cam.screen_to_world((0, 0))
+        bot_right = cam.screen_to_world((vw, vh))
 
-        # First grid line at or after the visible top-left, never below zero.
-        first_x = math.ceil(max(0.0, world_left) / GRID_SPACING) * GRID_SPACING
-        first_y = math.ceil(max(0.0, world_top)  / GRID_SPACING) * GRID_SPACING
+        world_x_min = max(0.0, top_left[0])
+        world_x_max = min(WORLD_WIDTH,  bot_right[0])
+        world_y_min = max(0.0, top_left[1])
+        world_y_max = min(WORLD_HEIGHT, bot_right[1])
+
+        first_x = math.ceil(world_x_min / GRID_SPACING) * GRID_SPACING
+        first_y = math.ceil(world_y_min / GRID_SPACING) * GRID_SPACING
 
         x = first_x
-        while x <= WORLD_WIDTH:
-            screen_x = self.camera.world_to_screen((x, 0))[0]
-            if screen_x > vw:
-                break
-            is_major = x % GRID_LABEL_INTERVAL < 1.0
+        while x <= world_x_max:
+            sx = cam.world_to_screen((x, 0))[0]
+            is_major = int(x) % int(GRID_LABEL_INTERVAL) == 0
             color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-            pygame.draw.aaline(self.surface, color, (screen_x, 0), (screen_x, vh))
+            pygame.draw.aaline(self.surface, color, (sx, 0), (sx, vh))
             if is_major:
                 label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
-                self._blit_text_shadow(label, int(screen_x + 4), 6)
+                self._blit_text_shadow(label, int(sx + 4), 6)
             x += GRID_SPACING
 
         y = first_y
-        while y <= WORLD_HEIGHT:
-            screen_y = self.camera.world_to_screen((0, y))[1]
-            if screen_y > vh:
-                break
-            is_major = y % GRID_LABEL_INTERVAL < 1.0
+        while y <= world_y_max:
+            sy = cam.world_to_screen((0, y))[1]
+            is_major = int(y) % int(GRID_LABEL_INTERVAL) == 0
             color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-            pygame.draw.aaline(self.surface, color, (0, screen_y), (vw, screen_y))
+            pygame.draw.aaline(self.surface, color, (0, sy), (vw, sy))
             if is_major:
                 label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
-                self._blit_text_shadow(label, 6, int(screen_y + 4))
+                self._blit_text_shadow(label, 6, int(sy + 4))
             y += GRID_SPACING
 
     def draw_islands(self, world) -> None:

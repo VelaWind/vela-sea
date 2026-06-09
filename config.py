@@ -187,7 +187,7 @@ LABEL_ZOOM_THRESHOLD_SHOW_ALL = 2.0
 # port cluster, between Port Maren (105,315) in the west and Outer Reach (1320,620)
 # in the east — so the game opens on the busy heart of the sea rather than the
 # player's far-western start.  Follow-cam re-centres on the player once play begins.
-CAMERA_START_CENTER = (650.0, 450.0)
+CAMERA_START_CENTER = (700.0, 500.0)
 
 # ============================================================================
 # Compass & Scale
