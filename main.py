@@ -20,7 +20,7 @@ from typing import Optional
 from config import (
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, WINDOW_SCALE_FACTOR, WINDOW_TITLE,
     TARGET_FPS, ZOOM_MIN, ZOOM_MAX, ZOOM_SCROLL_SPEED,
-    PAN_SPEED, SIM_TIMESTEP, WORLD_WIDTH, WORLD_HEIGHT,
+    PAN_SPEED, SIM_TIMESTEP, DEFAULT_VIEW_SPAN_WU,
     MAX_SIM_STEPS_PER_FRAME,
 )
 from config import ARRIVAL_DISTANCE, PORT_DETECT_RADIUS, SHIP_SELECT_RADIUS
@@ -597,9 +597,10 @@ class Game:
         self.last_sim_steps = 0  # steps executed last frame (exposed for diagnostics)
 
     def _calculate_default_zoom(self, width: int, height: int) -> float:
-        zoom_x = width / WORLD_WIDTH
-        zoom_y = height / WORLD_HEIGHT
-        return max(ZOOM_MIN, min(min(zoom_x, zoom_y) * 0.95, ZOOM_MAX))
+        # Frame the main port cluster across the screen width, not the whole
+        # world — the follow cam keeps the player centred, so fitting the full
+        # 1400-wu sea just shrank everything into the middle of a void.
+        return max(ZOOM_MIN, min(width / DEFAULT_VIEW_SPAN_WU, ZOOM_MAX))
 
     def _find_next_port_in_route(self, vessel):
         """Return the next Port in vessel.route from route_index, or None."""

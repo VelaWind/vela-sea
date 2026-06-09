@@ -1265,9 +1265,15 @@ class Chart:
             label_surface.get_height() + 8,
         )
 
-        # Skip labels whose anchor is entirely off-screen; clamp partially-visible
-        # ones inward so text never bleeds past the viewport edge.
+        # Skip labels whose anchor is off-screen: clamping them inward would
+        # park the text at the viewport edge, where the left-side panels cover
+        # all but a few characters — stray text strips with no visible owner.
+        # Labels with an on-screen anchor are clamped inward instead so text
+        # never bleeds past the viewport edge.
         vw, vh = self.surface.get_width(), self.surface.get_height()
+        anchor_x, anchor_y = anchor_pos
+        if not (0 <= anchor_x <= vw and 0 <= anchor_y <= vh):
+            return
         if (label_rect.right < 0 or label_rect.left > vw
                 or label_rect.bottom < 0 or label_rect.top > vh):
             return

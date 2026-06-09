@@ -122,22 +122,20 @@ class VesselInfoPanel:
         return h
 
     def draw(self, vessel: Optional[object], environment: Optional[object], world: Optional[object] = None) -> None:
+        # No selection → no panel.  The fleet list and Tab already advertise
+        # how to select a vessel; an empty placeholder just blocks the chart.
+        if vessel is None:
+            return
+
         panel_margin = 20
         panel_width = min(360, max(280, self.surface.get_width() - panel_margin * 2))
-        if vessel is None:
-            panel_height = 100
-        else:
-            panel_height = min(
-                self._required_panel_height(vessel),
-                self.surface.get_height() - panel_margin * 2,
-            )
+        panel_height = min(
+            self._required_panel_height(vessel),
+            self.surface.get_height() - panel_margin * 2,
+        )
         x = self.surface.get_width() - panel_width - panel_margin
         y = panel_margin
         self._draw_panel_background(x, y, panel_width, panel_height)
-
-        if vessel is None:
-            self._draw_no_selection(x, y, panel_width)
-            return
 
         padding = 18
         current_y = y + padding
@@ -292,12 +290,6 @@ class VesselInfoPanel:
     def _draw_panel_background(self, x: int, y: int, width: int, height: int) -> None:
         pygame.draw.rect(self.surface, (*COLOR_PANEL_BG, 230), (x, y, width, height), border_radius=16)
         pygame.draw.rect(self.surface, COLOR_PANEL_BORDER, (x, y, width, height), 2, border_radius=16)
-
-    def _draw_no_selection(self, x: int, y: int, width: int) -> None:
-        text = self.font_header.render("NO VESSEL SELECTED", True, COLOR_TEXT_DIM)
-        self.surface.blit(text, (x + 24, y + 24))
-        hint = self.font_small.render("Click a vessel or press Tab.", True, COLOR_TEXT_SECONDARY)
-        self.surface.blit(hint, (x + 24, y + 24 + text.get_height() + 10))
 
     def _draw_section_header(self, x: int, y: int, title: str) -> None:
         header = self.font_header.render(title, True, COLOR_ACCENT)
@@ -883,7 +875,11 @@ class FleetStatusPanel:
         if not world or not world.vessels:
             return
 
-        vessels = world.vessels
+        # Cap the row count so the panel always ends ≥ 10 px above the bottom
+        # edge, however short the window or long the fleet.
+        vh = self.surface.get_height()
+        max_rows = max(1, (vh - self.TOP_Y - 10 - self.PAD_Y * 2) // self.ROW_H)
+        vessels = world.vessels[:max_rows]
         n = len(vessels)
         h = n * self.ROW_H + self.PAD_Y * 2
         x = 20
@@ -1145,7 +1141,8 @@ class PlayerHUDPanel:
             self._font_name.get_height() + 6   # name + badge
             + row_h                             # speed label + throttle bar
             + bar_row
-            + row_h                             # heading label
+            + row_h                             # heading label + bar
+            + bar_row
             + row_h                             # fuel label + bar
             + bar_row
             + row_h                             # hull label + bar
@@ -1210,6 +1207,10 @@ class PlayerHUDPanel:
         arc_cy = cy + self._font_value.get_height() // 2
         self._draw_compass_arc(arc_cx, arc_cy, 14, vessel.heading)
         cy += row_h
+        # Proportional heading bar: fill scales 0–360°, so 090° reads 25 % full.
+        self._draw_bar(x + pad, cy, w - pad * 2,
+                       (vessel.heading % 360.0) / 360.0, COLOR_ACCENT)
+        cy += bar_row
 
         # ── Fuel bar ─────────────────────────────────────────────────────────
         if vessel.fuel is not None and vessel.fuel_capacity:

@@ -167,9 +167,15 @@ ZOOM_MAX = 4.0
 ZOOM_DEFAULT = 1.0
 ZOOM_SCROLL_SPEED = 0.10
 PAN_SPEED = 300.0
+# Default zoom fits this many world-units of sea across the screen width:
+# the main port cluster (Port Maren x=105 → Outer Reach Terminal x=1320,
+# plus margin) rather than the whole 1400-wu world with void either side.
+DEFAULT_VIEW_SPAN_WU = 1300.0
 # Label declutter: when zoom is below this, only show ports and selected vessel labels.
-# Default zoom on 1080p ≈ 1.05, on 1440p ≈ 1.40 — threshold must be above both.
-LABEL_ZOOM_THRESHOLD_SHOW_ALL = 1.5
+# Default zoom (width / DEFAULT_VIEW_SPAN_WU) on 1080p ≈ 1.48, on 1440p ≈ 1.97 —
+# threshold sits above both so the chart opens decluttered.  Very large displays
+# (4K ≈ 2.95 default) show all labels at default, which the extra pixels can fit.
+LABEL_ZOOM_THRESHOLD_SHOW_ALL = 2.0
 
 # ============================================================================
 # Compass & Scale
