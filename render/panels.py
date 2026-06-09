@@ -860,7 +860,7 @@ class FleetStatusPanel:
     """
 
     ROW_H  = 22
-    WIDTH  = 260   # wide enough for "UNLOADING CATCH" + vessel name side-by-side
+    WIDTH  = 200   # compact; long names truncate with "…", status stays right-aligned
     PAD_X  = 10
     PAD_Y  = 6
     TOP_Y  = 130   # below compass + scale bar area
@@ -885,12 +885,17 @@ class FleetStatusPanel:
         x = 20
         y = self.TOP_Y
 
-        # Background — dark translucent panel with a themed border so the fleet
-        # list reads as a proper UI element, not text floating over the chart.
+        # Background — themed translucent panel matching the other UI panels
+        # (rounded corners, 2 px border).  A flat alpha-200 fill with a 1 px
+        # border read as "floating text" over dark water because PANEL_BG is
+        # almost the water colour; the brighter 2 px border + rounded corners
+        # outline the panel so it's legible over water and land alike, exactly
+        # like the vessel-info and mission panels.
         bg = pygame.Surface((self.WIDTH, h), pygame.SRCALPHA)
-        bg.fill((*COLOR_PANEL_BG, 200))
+        pygame.draw.rect(bg, (*COLOR_PANEL_BG, 230), bg.get_rect(), border_radius=10)
         self.surface.blit(bg, (x, y))
-        pygame.draw.rect(self.surface, COLOR_PANEL_BORDER, (x, y, self.WIDTH, h), 1)
+        pygame.draw.rect(self.surface, COLOR_PANEL_BORDER, (x, y, self.WIDTH, h), 2,
+                         border_radius=10)
 
         self._rows = []
         for i, vessel in enumerate(vessels):
