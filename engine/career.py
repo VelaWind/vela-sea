@@ -15,6 +15,9 @@ from config import (
     HULL_REPAIR_COST_PER_POINT, CONTRACT_PENALTY,
     NM_PER_WORLD_UNIT,
     GAME_VERSION, SAVE_FILEPATH,
+    HAZMAT_RATE_MULT, HAZMAT_REP_REQUIRED, HAZMAT_DEADLINE_RANGE_H,
+    CHARTER_RATE_PER_NM, CHARTER_DEADLINE_RANGE_H,
+    CONTRACT_DEADLINE_RANGE_H,
 )
 
 
@@ -22,7 +25,7 @@ from config import (
 class Contract:
     """A single job available on or accepted from the job board."""
     contract_id: str
-    job_type: str               # "delivery" | "rescue_assist" | "patrol"
+    job_type: str               # "delivery" | "rescue_assist" | "patrol" | "hazmat" | "charter"
     from_port: str
     to_port: str
     payout: float
@@ -30,6 +33,7 @@ class Contract:
     reputation_required: int
     status: str = "available"   # "available" | "active" | "completed" | "failed"
     accepted_at_sim_s: float = 0.0
+    description: str = ""       # special-requirement text shown on the panel
 
 
 # (job_type, payout_rate_per_nm, reputation_required)
@@ -38,7 +42,21 @@ _CONTRACT_TEMPLATES = [
     ("delivery",      80.0,  0),   # weighted: delivery is most common
     ("rescue_assist", 150.0, 10),
     ("patrol",        60.0,  25),
+    ("hazmat",        80.0 * HAZMAT_RATE_MULT, HAZMAT_REP_REQUIRED),
+    ("charter",       CHARTER_RATE_PER_NM, 0),
 ]
+
+# Per-type deadline windows (sim-hours); types not listed use the default.
+_DEADLINE_RANGES = {
+    "hazmat":  HAZMAT_DEADLINE_RANGE_H,
+    "charter": CHARTER_DEADLINE_RANGE_H,
+}
+
+# Special-requirement text surfaced on the career panel.
+_JOB_DESCRIPTIONS = {
+    "hazmat":  "Hazardous cargo — avoid restricted zones or double fine",
+    "charter": "Passenger charter — must maintain speed ≤ 10 kn in all zones",
+}
 
 
 class PlayerCareer:
@@ -160,7 +178,10 @@ class JobBoard:
 
     def refresh_jobs(self, world) -> None:
         """Replace all *available* contracts with fresh ones. The active stays."""
-        port_names = [p.name for p in world.ports]
+        # Draft-restricted ports (e.g. Kessock Anchorage) are excluded so the
+        # board never offers a destination the player's hull can't berth at.
+        port_names = [p.name for p in world.ports
+                      if getattr(p, "max_draft_m", None) is None]
         if len(port_names) < 2:
             return
         self._contracts = [c for c in self._contracts if c.status == "active"]
@@ -245,7 +266,8 @@ class JobBoard:
             dist_nm = 50.0
 
         payout = round(dist_nm * rate)
-        deadline_hours = random.randint(4, 12)
+        dl_min, dl_max = _DEADLINE_RANGES.get(job_type, CONTRACT_DEADLINE_RANGE_H)
+        deadline_hours = random.randint(dl_min, dl_max)
 
         return Contract(
             contract_id=cid,
@@ -255,4 +277,5 @@ class JobBoard:
             payout=float(payout),
             deadline_sim_hours=float(deadline_hours),
             reputation_required=rep_req,
+            description=_JOB_DESCRIPTIONS.get(job_type, ""),
         )

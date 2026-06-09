@@ -1239,6 +1239,14 @@ _JOB_TYPE_COLORS: dict = {
     "delivery":      (160, 210, 255),
     "rescue_assist": (255, 160, 100),
     "patrol":        (160, 230, 160),
+    "hazmat":        (255, 120,  60),
+    "charter":       (200, 170, 255),
+}
+
+# Short special-requirement tags shown beside payout/deadline on contract rows.
+_JOB_SPECIAL_NOTES: dict = {
+    "hazmat":  "2× fines",
+    "charter": "max 10 kn",
 }
 
 
@@ -1379,6 +1387,13 @@ class CareerPanel:
             pay_surf = self._font_small.render(f"Payout: \xa3{c.payout:.0f}", True, (80, 220, 120))
             self.surface.blit(pay_surf, (x + pad, cy));  cy += pay_surf.get_height() + 2
 
+            # Special-requirement line for hazmat/charter contracts.
+            if getattr(c, "description", ""):
+                desc_surf = self._font_small.render(
+                    _truncate_text(c.description, self._font_small, w - pad * 2),
+                    True, (220, 165, 50))
+                self.surface.blit(desc_surf, (x + pad, cy));  cy += desc_surf.get_height() + 2
+
             deadline_s  = c.accepted_at_sim_s + c.deadline_sim_hours * 3600.0
             remaining_s = deadline_s - sim_elapsed_s
             if remaining_s > 0:
@@ -1425,6 +1440,9 @@ class CareerPanel:
         self.surface.blit(route_surf, (rx + 4, cy + 4 + tag_surf.get_height() + 2))
 
         detail_txt = f"\xa3{contract.payout:.0f}  |  {int(contract.deadline_sim_hours)}h"
+        _note = _JOB_SPECIAL_NOTES.get(contract.job_type)
+        if _note:
+            detail_txt += f"  |  {_note}"
         detail_surf = self._font_small.render(detail_txt, True, COLOR_TEXT_SECONDARY)
         detail_y = cy + 4 + tag_surf.get_height() + 2 + route_surf.get_height() + 2
         self.surface.blit(detail_surf, (rx + 4, detail_y))

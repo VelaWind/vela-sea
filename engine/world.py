@@ -40,6 +40,9 @@ class Port:
     size: str  # "large", "medium", "small"
     refuel: bool  # whether powered vessels can take on fuel
     speed_limit: Optional[float]  # harbour approach speed limit (knots), or None
+    # Maximum vessel draft (m) the port can berth; None = no restriction.
+    # Vessels at or above this draft are refused on the docking check.
+    max_draft_m: Optional[float] = None
     # 4 berths at cardinal offsets around the port centre, initialised by World.add_port().
     # Keyed by index 0-3 (E, W, S, N).  Occupant is the vessel name string or None.
     _berth_positions: List[Position] = field(default_factory=list, repr=False)
@@ -123,7 +126,8 @@ class World:
                                    land_type=land_type))
 
     def add_port(self, name: str, x: float, y: float, port_type: str, size: str,
-                 refuel: bool, speed_limit: Optional[float] = None) -> None:
+                 refuel: bool, speed_limit: Optional[float] = None,
+                 max_draft_m: Optional[float] = None) -> None:
         """Add a port to the world and initialise its berths."""
         from config import PORT_BERTH_OFFSET
         port = Port(
@@ -133,6 +137,7 @@ class World:
             size=size,
             refuel=refuel,
             speed_limit=speed_limit,
+            max_draft_m=max_draft_m,
         )
         port._init_berths(PORT_BERTH_OFFSET)
         self.ports.append(port)

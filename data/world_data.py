@@ -109,6 +109,24 @@ ISLANDS = [
             (938, 582), (952, 574), (968, 578), (974, 594), (966, 610), (940, 606),
         ],
     },
+    {
+        # The Twins (west) — small rocky pair in the open northeast sea.
+        # Kept north of y=120 so FV North Fisher's y=150 trawl leg stays clear.
+        "name": "Twin Rock West",
+        "is_mainland": False,
+        "land_type": "rocky",
+        "polygon": [
+            (862, 52), (876, 44), (892, 50), (896, 66), (884, 78), (866, 72),
+        ],
+    },
+    {
+        "name": "Twin Rock East",
+        "is_mainland": False,
+        "land_type": "rocky",
+        "polygon": [
+            (916, 84), (932, 78), (946, 88), (942, 104), (926, 110), (912, 100),
+        ],
+    },
 ]
 
 
@@ -179,6 +197,23 @@ PORTS = [
         "refuel": True, "speed_limit": 5,
         "notes": "Southern leisure marina, popular with cruising yachts. "
                  "Well-sheltered; excellent holding ground.",
+    },
+    {
+        "name": "Kessock Anchorage",
+        "x": 845, "y": 400,
+        "type": "anchorage", "size": "small",
+        "refuel": False, "speed_limit": 4,
+        "max_draft_m": 4.0,
+        "notes": "Small-craft anchorage in the lee of the Kessock naval area. "
+                 "Shallow holding ground — vessels drawing 4 m or more refused.",
+    },
+    {
+        "name": "Outer Reach Terminal",
+        "x": 1320, "y": 620,
+        "type": "commercial", "size": "large",
+        "refuel": True, "speed_limit": 8,
+        "notes": "Large offshore deep-water terminal on the eastern reach. "
+                 "Open to all vessels; principal hub for long-haul cargo.",
     },
 ]
 
@@ -258,6 +293,13 @@ ZONES = [
         "kind": "protected", "speed_limit": 4,
         "notes": "Protected marine conservation area. Slow transit; "
                  "no anchoring outside the marina.",
+    },
+    {
+        "name": "Twin Rocks Conservation Area",
+        "x": 905, "y": 80, "radius": 60,
+        "kind": "protected", "speed_limit": 5,
+        "notes": "Protected seabird colony around The Twins. "
+                 "Slow, careful transit only.",
     },
 ]
 
@@ -568,6 +610,7 @@ def populate_world(world):
             name=p["name"], x=p["x"], y=p["y"],
             port_type=p["type"], size=p["size"],
             refuel=p["refuel"], speed_limit=p["speed_limit"],
+            max_draft_m=p.get("max_draft_m"),
         )
 
     # Zones

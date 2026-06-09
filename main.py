@@ -32,7 +32,8 @@ from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM
 from config import HULL_REPAIR_COST_PER_POINT
 from config import (ZONE_FINE_NO_ENTRY, ZONE_FINE_SPEED, ZONE_FINE_INTERVAL_S,
                     GROUNDING_HULL_DAMAGE, STORM_WAVE_THRESHOLD,
-                    STORM_HULL_DAMAGE_RATE, STORM_MAX_SPEED_KN)
+                    STORM_HULL_DAMAGE_RATE, STORM_MAX_SPEED_KN,
+                    HAZMAT_FINE_MULT, CHARTER_MAX_SPEED_KN)
 from config import (
     PORT_STAY_CARGO_LOAD_S, PORT_STAY_FERRY_BOARD_S, PORT_STAY_FISHING_UNLOAD_S,
     PORT_STAY_SAIL_ANCHOR_S, PORT_STAY_TUG_S,
@@ -1635,6 +1636,14 @@ class Game:
                             self.event_log.add(_pt, "Waypoint reached",
                                                EVENT_COLOR_WEATHER)
 
+                    # Charter clause: passenger comfort caps speed at 10 kn
+                    # everywhere for the duration of the contract.
+                    _charter_c = self.job_board.active
+                    if (_charter_c is not None
+                            and _charter_c.job_type == "charter"
+                            and vessel.target_speed > CHARTER_MAX_SPEED_KN):
+                        vessel.target_speed = CHARTER_MAX_SPEED_KN
+
                     # Departure grace: re-enable proximity docking only after
                     # the player has cleared the port they just cast off from.
                     if self._departed_port is not None:
@@ -1648,6 +1657,19 @@ class Game:
                             and vessel.current_speed <= PLAYER_DOCKING_MAX_SPEED_KN
                             and vessel.target_speed <= PLAYER_DOCKING_MAX_SPEED_KN):
                         _dock_port = vessel._port_at(vessel.position, self.world)
+                        # Draft restriction: shallow anchorages refuse deep hulls.
+                        if (_dock_port is not None
+                                and _dock_port.max_draft_m is not None
+                                and vessel.draft_m >= _dock_port.max_draft_m):
+                            if _dock_port.name != self._departed_port:
+                                self.event_log.add(
+                                    _pt,
+                                    f"REFUSED — draft too deep for {_dock_port.name}",
+                                    EVENT_COLOR_MAYDAY)
+                                # Reuse the departure grace so the refusal
+                                # doesn't repeat every sim step in the radius.
+                                self._departed_port = _dock_port.name
+                            _dock_port = None
                         if (_dock_port is not None
                                 and _dock_port.name != self._departed_port):
                             vessel.status = "in_port"
@@ -1705,6 +1727,12 @@ class Game:
                                 _fine = (ZONE_FINE_NO_ENTRY
                                          if _viol_zone.kind == "no_entry"
                                          else ZONE_FINE_SPEED)
+                                # Hazmat clause: dangerous cargo doubles every
+                                # zone fine for the duration of the contract.
+                                _active_c = self.job_board.active
+                                if (_active_c is not None
+                                        and _active_c.job_type == "hazmat"):
+                                    _fine *= HAZMAT_FINE_MULT
                                 self.career.force_spend(
                                     _fine, f"Zone fine: {_viol_zone.name}")
                                 self.career.fines_paid += _fine

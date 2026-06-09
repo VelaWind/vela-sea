@@ -762,6 +762,21 @@ FUEL_COST_PER_UNIT = 8.0
 # 2 kn ≈ bare steerage way — fast approaches sail straight through the harbour.
 PLAYER_DOCKING_MAX_SPEED_KN = 2.0
 
+# ── Special contract types ───────────────────────────────────────────────────
+# Hazmat: premium rate for dangerous cargo, short deadline, double zone fines.
+HAZMAT_RATE_MULT        = 1.8     # payout multiplier vs the standard delivery rate
+HAZMAT_REP_REQUIRED     = 40      # reputation gate (F7 lowers via tier table)
+HAZMAT_DEADLINE_RANGE_H = (4, 6)  # tight window — the cargo can't sit around
+HAZMAT_FINE_MULT        = 2.0     # zone fines double while a hazmat job is active
+
+# Charter: passenger comfort run — relaxed deadline but a hard speed ceiling.
+CHARTER_RATE_PER_NM      = 100.0    # £ per nm — between delivery (80) and rescue (150)
+CHARTER_DEADLINE_RANGE_H = (8, 12)  # generous window; speed is the constraint
+CHARTER_MAX_SPEED_KN     = 10.0     # player speed cap while a charter is active
+
+# Standard deadline window for all other contract types.
+CONTRACT_DEADLINE_RANGE_H = (4, 12)
+
 # ============================================================================
 # Player autopilot (right-click waypoint navigation)
 # ============================================================================
