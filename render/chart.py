@@ -1362,7 +1362,10 @@ class Chart:
         # ── (B2) Storm seas: scrolling wave lines + grey-green cast ──────────
         # Keyed to wave_height (not the event) so the visual always agrees with
         # the player speed cap and hull-damage consequences in main.py.
-        if environment.wave_height > STORM_WAVE_THRESHOLD:
+        # Skipped under dense fog: the fog overlay hides it completely, and
+        # stacking two full-screen alpha fills costs real frame time.
+        if (environment.wave_height > STORM_WAVE_THRESHOLD
+                and environment.visibility >= FOG_LOW_VIS_THRESHOLD_M):
             s = self._get_alpha_surf()
             s.fill((*STORM_TINT_COLOR, STORM_TINT_ALPHA))
             offset = int(time.time() * STORM_WAVE_SCROLL_PX_S) % STORM_WAVE_LINE_SPACING_PX
