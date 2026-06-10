@@ -20,6 +20,8 @@ from config import (
     CONTRACT_DEADLINE_RANGE_H,
     REP_TIER_2, REP_TIER_4, REP_TIER_TABLE, VIP_CHARTER_RATE_MULT,
     TUTORIAL_CONTRACT_DEADLINE_H,
+    DELIVERY_RATE_PER_NM, RESCUE_RATE_PER_NM, PATROL_RATE_PER_NM,
+    STARTER_JOB_MONEY_FLOOR, EARLY_CAREER_DELIVERIES, EARLY_JOB_MAX_WU,
 )
 
 
@@ -39,15 +41,46 @@ class Contract:
     is_tutorial: bool = False   # the guided first delivery — drives onboarding
 
 
+# ===========================================================================
+# ECONOMY BALANCE (v0.5.0)
+# ---------------------------------------------------------------------------
+# Goal: the loop must feel fair but not trivial.  Money has to matter against
+# the £5000 start, and a careless run has to cost real money — but fuel must
+# not become a grind (the north star is "make the loop fun", not "manage fuel").
+#
+# Payouts (DELIVERY_RATE_PER_NM = 30 £/nm, distance × rate):
+#   short hop  ~35 nm  → ~£1,050      medium ~70 nm → ~£2,100
+#   long haul ~140 nm  → ~£4,200      (specials pay more per nm, gated by rep)
+# A single delivery is a meaningful payday (~20-40% of the wallet) without
+# making the player instantly rich, so progression stays earned.
+#
+# Per-run costs:
+#   • Fuel — deliberately MINOR.  At the player's 1.0 fuel/h a typical 5 h run
+#     burns ~5% of the tank (~£40).  Clean runs therefore keep most of the
+#     payout: that high margin is the *reward for skill*, not a balance bug.
+#   • Mistakes — where the real tension lives:
+#       grounding  → 30% hull → ~£1,500 repair
+#       zone fine  → £150 (speed) / £500 (no-entry), ×2 on hazmat
+#       missed deadline → £300 + reputation hit
+#   A sloppy medium run (one grounding + one fine ≈ £2,000) lands near
+#   break-even on its ~£2,100 payout; on a cheap hop it's an outright loss.
+#   So: execute cleanly and the loop pays well; get careless and it bites.
+#
+# Easing: the tutorial gifts a guaranteed £2,000 first job, and while the
+# player is new (< EARLY_CAREER_DELIVERIES) or broke (< STARTER_JOB_MONEY_FLOOR)
+# the board always carries a short, gate-free delivery (see refresh_jobs) so
+# they can never be stranded with no way to earn.
+# ===========================================================================
+
 # (job_type, payout_rate_per_nm, reputation_required)
 _CONTRACT_TEMPLATES = [
-    ("delivery",      80.0,  0),
-    ("delivery",      80.0,  0),   # weighted: delivery is most common
-    ("rescue_assist", 150.0, REP_TIER_2),   # Tier 2 (First Mate) privilege
-    ("patrol",        60.0,  25),
-    ("hazmat",        80.0 * HAZMAT_RATE_MULT, HAZMAT_REP_REQUIRED),
+    ("delivery",      DELIVERY_RATE_PER_NM,  0),
+    ("delivery",      DELIVERY_RATE_PER_NM,  0),   # weighted: delivery is most common
+    ("rescue_assist", RESCUE_RATE_PER_NM, REP_TIER_2),   # Tier 2 (First Mate) privilege
+    ("patrol",        PATROL_RATE_PER_NM,  25),
+    ("hazmat",        DELIVERY_RATE_PER_NM * HAZMAT_RATE_MULT, HAZMAT_REP_REQUIRED),
     ("charter",       CHARTER_RATE_PER_NM, 0),
-    ("vip_charter",   80.0 * VIP_CHARTER_RATE_MULT, REP_TIER_4),  # Tier 4 exclusive
+    ("vip_charter",   DELIVERY_RATE_PER_NM * VIP_CHARTER_RATE_MULT, REP_TIER_4),  # Tier 4
 ]
 
 # Per-type deadline windows (sim-hours); types not listed use the default.
@@ -210,8 +243,14 @@ class JobBoard:
 
     # ------------------------------------------------------------------ public
 
-    def refresh_jobs(self, world) -> None:
-        """Replace all *available* contracts with fresh ones. The active stays."""
+    def refresh_jobs(self, world, career: "Optional[PlayerCareer]" = None) -> None:
+        """Replace all *available* contracts with fresh ones. The active stays.
+
+        When ``career`` is supplied, the board guarantees at least one short,
+        gate-free delivery while the player is new (< EARLY_CAREER_DELIVERIES) or
+        broke (< STARTER_JOB_MONEY_FLOOR with no active job) — the anti-broke
+        safety net, so a stranded captain always has an easy way to earn.
+        """
         # Draft-restricted ports (e.g. Kessock Anchorage) are excluded so the
         # board never offers a destination the player's hull can't berth at.
         port_names = [p.name for p in world.ports
@@ -221,6 +260,33 @@ class JobBoard:
         self._contracts = [c for c in self._contracts if c.status == "active"]
         while len(self._contracts) < self.SLOT_COUNT:
             self._contracts.append(self._generate(port_names, world))
+
+        if career is not None:
+            new_or_broke = (career.total_deliveries < EARLY_CAREER_DELIVERIES
+                            or (self._active is None
+                                and career.money < STARTER_JOB_MONEY_FLOOR))
+            has_easy = any(c.status == "available"
+                           and c.job_type == "delivery"
+                           and c.reputation_required == 0
+                           and self._leg_nm(c.from_port, c.to_port, world)
+                           <= EARLY_JOB_MAX_WU * NM_PER_WORLD_UNIT
+                           for c in self._contracts)
+            if new_or_broke and not has_easy:
+                # Swap the last available slot for a guaranteed short, easy job.
+                for i in range(len(self._contracts) - 1, -1, -1):
+                    if self._contracts[i].status == "available":
+                        self._contracts[i] = self._generate(
+                            port_names, world, easy=True)
+                        break
+
+    @staticmethod
+    def _leg_nm(from_port: str, to_port: str, world) -> float:
+        fp = next((p for p in world.ports if p.name == from_port), None)
+        tp = next((p for p in world.ports if p.name == to_port), None)
+        if fp is None or tp is None:
+            return 0.0
+        return math.hypot(tp.position[0] - fp.position[0],
+                          tp.position[1] - fp.position[1]) * NM_PER_WORLD_UNIT
 
     def create_tutorial_contract(self, from_port: str, to_port: str,
                                  payout: float,
@@ -310,12 +376,27 @@ class JobBoard:
 
     # ----------------------------------------------------------------- private
 
-    def _generate(self, port_names: List[str], world) -> Contract:
+    def _generate(self, port_names: List[str], world,
+                  easy: bool = False) -> Contract:
         self._id_counter += 1
         cid = f"C{self._id_counter:04d}"
 
-        job_type, rate, rep_req = random.choice(_CONTRACT_TEMPLATES)
-        from_port, to_port = random.sample(port_names, 2)
+        if easy:
+            # Guaranteed easy job: a short, gate-free delivery.  Prefer the
+            # shortest of a few random pairs so it's a genuine quick earner.
+            job_type, rate, rep_req = "delivery", DELIVERY_RATE_PER_NM, 0
+            best = None
+            for _ in range(8):
+                a, b = random.sample(port_names, 2)
+                d = self._leg_nm(a, b, world)
+                if best is None or d < best[0]:
+                    best = (d, a, b)
+                if d <= EARLY_JOB_MAX_WU * NM_PER_WORLD_UNIT:
+                    break
+            from_port, to_port = best[1], best[2]
+        else:
+            job_type, rate, rep_req = random.choice(_CONTRACT_TEMPLATES)
+            from_port, to_port = random.sample(port_names, 2)
 
         fp = next((p for p in world.ports if p.name == from_port), None)
         tp = next((p for p in world.ports if p.name == to_port), None)

@@ -1121,7 +1121,8 @@ class Game:
             draft_m=5.0,
             fuel=100.0,
             fuel_capacity=100.0,
-            fuel_consumption_rate=0.4,
+            fuel_consumption_rate=1.0,   # ~5% of tank per typical run — a minor
+                                         # cost; mistakes, not fuel, are the sink
             is_player=True,
             status="underway",
         )
@@ -1592,7 +1593,7 @@ class Game:
                 self.career.tutorial_complete = True
                 self._tutorial_active = False
                 self._tutorial_step = len(TUTORIAL_STEPS)
-        self.job_board.refresh_jobs(self.world)
+        self.job_board.refresh_jobs(self.world, self.career)
         # Auto-save: docking is the natural checkpoint — the contract payout
         # above is included; menu purchases re-save when they happen.
         save_career(self.career, hull_integrity=vessel.hull_integrity)
@@ -2311,7 +2312,7 @@ class Game:
         self.camera.zoom = max(ZOOM_MIN, min(ZOOM_MAX, TUTORIAL_START_ZOOM))
         self.camera.set_follow_target(pv)
         # Guaranteed, pre-accepted first delivery.
-        self.job_board.refresh_jobs(self.world)
+        self.job_board.refresh_jobs(self.world, self.career)
         self.job_board.create_tutorial_contract(
             TUTORIAL_CONTRACT_FROM, TUTORIAL_CONTRACT_TO,
             TUTORIAL_CONTRACT_PAYOUT, self.mission_manager.sim_elapsed_s)

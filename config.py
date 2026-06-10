@@ -895,12 +895,30 @@ VIP_CHARTER_RATE_MULT = 2.5
 # "Lucky Escape" achievement: survive a grounding with hull above this.
 LUCKY_ESCAPE_HULL_MIN = 0.10
 HULL_REPAIR_COST_PER_POINT = 50.0    # cost per 1 % hull integrity restored at port
-CONTRACT_PENALTY           = 200.0   # fine deducted for a missed contract deadline
+CONTRACT_PENALTY           = 300.0   # fine deducted for a missed contract deadline
+
+# ── Contract payout rates (£ per nautical mile) ──────────────────────────────
+# Tuned so money matters against the £5000 start: a typical delivery pays a
+# meaningful-but-not-fortune sum, and one mistake (grounding + fine ≈ £2000) on
+# a typical run lands near break-even.  Higher-tier types pay more per nm but
+# gate behind reputation and carry tighter deadlines / hazards.  Full balance
+# rationale lives in the economy block in engine/career.py.
+DELIVERY_RATE_PER_NM = 30.0   # bread-and-butter rep-0 work (was 80 — too rich)
+RESCUE_RATE_PER_NM   = 56.0   # Tier-2 rescue assist — premium for the privilege
+PATROL_RATE_PER_NM   = 22.0   # steady Tier-1+ patrol income
+
+# Anti-broke safety net + early-career easing.  While the player is new or low
+# on funds, the board always carries at least one short, gate-free delivery so
+# they can never get permanently stranded with no way to earn.
+STARTER_JOB_MONEY_FLOOR = 1500.0  # below this (and no active job) → guarantee an easy job
+EARLY_CAREER_DELIVERIES = 3       # first N deliveries always have an easy option on the board
+EARLY_JOB_MAX_WU        = 360.0   # "short" hop distance for guaranteed easy deliveries
 
 # Docking menu economics & behaviour
 # Fuel is priced per percentage point of tank refilled, mirroring the hull
-# formula: a full refuel from empty costs 100 × 8 = £800 — meaningful against
-# typical contract payouts (£2000–8000) without being punishing.
+# formula: a full refuel from empty costs 100 × 8 = £800.  Per-trip fuel burn is
+# deliberately a minor cost (see the economy block in engine/career.py) — fuel
+# is flavour, not a grind; mistakes are the real money sink.
 FUEL_COST_PER_UNIT = 8.0
 # Player docks by drifting into the port radius at or below this speed.
 # 2 kn ≈ bare steerage way — fast approaches sail straight through the harbour.
@@ -914,7 +932,7 @@ HAZMAT_DEADLINE_RANGE_H = (4, 6)  # tight window — the cargo can't sit around
 HAZMAT_FINE_MULT        = 2.0     # zone fines double while a hazmat job is active
 
 # Charter: passenger comfort run — relaxed deadline but a hard speed ceiling.
-CHARTER_RATE_PER_NM      = 100.0    # £ per nm — between delivery (80) and rescue (150)
+CHARTER_RATE_PER_NM      = 38.0     # £ per nm — between delivery (30) and rescue (56)
 CHARTER_DEADLINE_RANGE_H = (8, 12)  # generous window; speed is the constraint
 CHARTER_MAX_SPEED_KN     = 10.0     # player speed cap while a charter is active
 
@@ -955,7 +973,10 @@ ZONE_FINE_NO_ENTRY   = 500.0    # £ fine for entering a no-entry zone
 ZONE_FINE_SPEED      = 150.0    # £ fine for exceeding a speed-limit zone
 ZONE_FINE_INTERVAL_S = 30.0     # minimum seconds between successive fines in the same zone
 
-GROUNDING_HULL_DAMAGE  = 0.15   # hull integrity lost per grounding event (15 %)
+GROUNDING_HULL_DAMAGE  = 0.30   # hull integrity lost per grounding event (30 %).
+                                # Repairing it (~£1500) is what makes a sloppy run
+                                # — grounding + a fine — near break-even.  See the
+                                # economy block in engine/career.py.
 STORM_WAVE_THRESHOLD   = 3.5    # wave height (m) above which storm consequences apply
 STORM_HULL_DAMAGE_RATE = 0.0002 # hull integrity lost per sim-second while in storm
 
