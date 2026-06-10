@@ -853,7 +853,12 @@ TUTORIAL_STEPS = [
 # Always-on objective marker pointing at the active contract's destination port.
 COLOR_OBJECTIVE          = (80, 230, 130)  # bright green — the unmissable "go here" cue
 OBJECTIVE_MARKER_SIZE_PX = 12              # half-size of the destination diamond
-OBJECTIVE_EDGE_ARROW_PX  = 16              # size of the off-screen edge arrow (Task 4)
+OBJECTIVE_EDGE_ARROW_PX  = 16              # size of the off-screen edge arrow
+OBJECTIVE_PULSE_PERIOD   = 1.4             # s per gentle pulse of the destination marker
+# Focus dim: while a contract is active a faint dark veil drops over the chart
+# so the green destination + route read as the brightest things on screen and
+# the AI traffic recedes to flavour.  Kept low — atmospheric, never a blackout.
+OBJECTIVE_FOCUS_DIM_ALPHA = 48
 
 # ── Reward feedback: contract-complete celebration ───────────────────────────
 BANNER_DURATION_MS    = 3000   # how long a reward banner stays up before clearing

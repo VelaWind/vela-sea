@@ -60,6 +60,7 @@ from config import (
     SHIPPING_LANE_GAP_PX, SHIPPING_LANE_MIN_ZOOM,
     AUTOPILOT_MARKER_SIZE_PX,
     COLOR_OBJECTIVE, OBJECTIVE_MARKER_SIZE_PX, OBJECTIVE_EDGE_ARROW_PX,
+    OBJECTIVE_PULSE_PERIOD, OBJECTIVE_FOCUS_DIM_ALPHA,
     SCREEN_VIGNETTE_DEPTH_PX, SCREEN_VIGNETTE_MAX_ALPHA, SCREEN_VIGNETTE_STEPS,
     PORT_NEAR_PULSE_RANGE_WU,
     FOG_LOW_VIS_THRESHOLD_M, FOG_VESSEL_HIDE_RANGE_WU, FOG_OVERLAY_MAX_ALPHA,
@@ -528,15 +529,28 @@ class Chart:
         on_screen = (0 <= dx <= vw and 0 <= dy <= vh)
         if on_screen:
             r = OBJECTIVE_MARKER_SIZE_PX
+            og = COLOR_OBJECTIVE
+            # Gentle expanding pulse ring so the destination quietly draws the eye.
+            ph = (time.time() % OBJECTIVE_PULSE_PERIOD) / OBJECTIVE_PULSE_PERIOD
+            pulse = abs(math.sin(ph * math.pi))
+            pygame.gfxdraw.aacircle(self.surface, dx, dy, int(r + 6 + pulse * 10),
+                                    (og[0], og[1], og[2], int(150 * (1.0 - pulse))))
             diamond = [(dx, dy - r), (dx + r, dy), (dx, dy + r), (dx - r, dy)]
-            pygame.gfxdraw.filled_polygon(self.surface, diamond, (*COLOR_OBJECTIVE, 70))
-            pygame.gfxdraw.aapolygon(self.surface, diamond, COLOR_OBJECTIVE)
-            pygame.draw.circle(self.surface, COLOR_OBJECTIVE, (dx, dy), r + 5, 2)
-            txt = self.font_label.render(f"{label}   {distance_nm:.0f} nm",
-                                         True, COLOR_OBJECTIVE)
+            pygame.gfxdraw.filled_polygon(self.surface, diamond, (*og, 80))
+            pygame.gfxdraw.aapolygon(self.surface, diamond, og)
+            pygame.draw.circle(self.surface, og, (dx, dy), r + 5, 2)
+            txt = self.font_label.render(f"{label}   {distance_nm:.0f} nm", True, og)
             self._blit_text_shadow(txt, dx + r + 8, dy - 8)
         else:
             self._draw_edge_arrow(ds, f"{distance_nm:.0f} nm")
+
+    def draw_focus_dim(self, alpha: int = OBJECTIVE_FOCUS_DIM_ALPHA) -> None:
+        """Drop a faint dark veil over the chart so the objective marker and
+        route (drawn after this) read as the brightest things on screen and the
+        AI traffic recedes to flavour.  Subtle by design — never a blackout."""
+        s = self._get_alpha_surf()
+        s.fill((4, 10, 18, alpha))
+        self.surface.blit(s, (0, 0))
 
     def _draw_edge_arrow(self, target_screen, label: str) -> None:
         """Pin an arrow to the screen edge pointing at an off-screen target."""

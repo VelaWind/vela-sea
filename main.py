@@ -2164,6 +2164,9 @@ class Game:
         if _ac is not None and self.player_vessel is not None:
             _dest = self.world.find_port(_ac.to_port)
             if _dest is not None:
+                # Focus dim first so the green destination + route (drawn next)
+                # are the brightest things on screen and the traffic recedes.
+                self.chart.draw_focus_dim()
                 _dist_nm = (self.player_vessel.distance_to(_dest.position)
                             * NM_PER_WORLD_UNIT)
                 # During the tutorial the guide line follows the safe waypoint
@@ -2171,8 +2174,9 @@ class Game:
                 _route = (self._tutorial_route[self._tutorial_wp_index:]
                           if self._tutorial_active and self._tutorial_route
                           else None)
+                _obj_label = f"{_ac.to_port} — \xa3{_ac.payout:,.0f}"
                 self.chart.draw_objective(self.player_vessel.position,
-                                          _dest.position, _ac.to_port, _dist_nm,
+                                          _dest.position, _obj_label, _dist_nm,
                                           route=_route)
 
         # Draw UI panels
