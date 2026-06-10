@@ -810,12 +810,83 @@ def scenario_14():
 
 
 # ===========================================================================
+# Step 15 — Scenario 15: a brand-new player's first five minutes
+# ===========================================================================
+
+def scenario_15():
+    """Simulate a new captain's first session end-to-end: the onboarding
+    tutorial activates, the bot throttles up, follows the guided route, and
+    docks at Port Ardent — the contract pays out and the tutorial retires."""
+    from config import TUTORIAL_STEPS
+
+    game = make_game()
+    game._begin_tutorial()             # what run() does for a brand-new career
+
+    contract = game.job_board.active
+    setup_ok = (contract is not None and getattr(contract, "is_tutorial", False)
+                and game._tutorial_active and not game.career.tutorial_complete)
+
+    money_before = game.career.money
+    steps_seen = set()
+
+    def _drive(g):
+        pv = g.player_vessel
+        route = g._tutorial_route
+        if not route:
+            return
+        steps_seen.add(g._tutorial_step)
+        idx = g._tutorial_wp_index
+        target = route[idx]
+        on_final = idx >= len(route) - 1
+        dfin = pv.distance_to(route[-1])
+        # Steer toward the current guided waypoint like a human on the helm;
+        # ease right down on the final leg to drift into the berth.
+        pv.turn_toward(pv.bearing_to(target), SIM_TIMESTEP)
+        if on_final:
+            pv.destination = route[-1]
+            pv.player_commanded = False
+            pv.target_speed = 1.5 if dfin < 28.0 else 6.0
+        else:
+            pv.target_speed = pv.max_speed
+
+    _, sim_s = run_sim(game, 900.0, on_step=_drive,
+                       until=lambda g: g.career.tutorial_complete)
+    sim_hours = sim_s / 3600.0
+
+    # The four guided steps must all have been the active step at some point,
+    # and the run must finish: contract paid, money up, flag persisted.
+    steps_ok    = steps_seen.issuperset({0, 1, 2, 3})
+    complete_ok = game.career.tutorial_complete is True
+    money_ok    = game.career.money > money_before
+    delivery_ok = game.career.total_deliveries == 1
+    # "Shouldn't take forever": the verified clean run is ~11.5 sim-h.
+    time_ok     = 0.0 < sim_hours < 18.0
+    passed = (setup_ok and steps_ok and complete_ok and money_ok
+              and delivery_ok and time_ok)
+
+    earned = game.career.money - money_before
+    summary = (f"new player paid {POUND}{earned:.0f} in {sim_hours:.1f} sim-h; "
+               f"steps {sorted(steps_seen)}, clear guided path to Ardent")
+    return Result(
+        15, "First-five-minutes", passed, summary=summary,
+        expected=("tutorial active→4 steps seen, contract paid, money up, "
+                  "total_deliveries=1, tutorial_complete=True, <18 sim-h"),
+        got=(f"setup={setup_ok}, steps={sorted(steps_seen)}, "
+             f"complete={game.career.tutorial_complete}, "
+             f"earned={POUND}{earned:.0f}, deliveries={game.career.total_deliveries}, "
+             f"sim_h={sim_hours:.1f}"),
+        cause=("onboarding in Game._begin_tutorial/_update_tutorial, guided route, "
+               "or proximity docking (must dock from underway/avoiding at ≤2 kn)"),
+    )
+
+
+# ===========================================================================
 # Step 16 — Final report
 # ===========================================================================
 
 SCENARIOS = [scenario_1, scenario_2, scenario_3, scenario_4, scenario_5,
              scenario_6, scenario_7, scenario_8, scenario_9, scenario_10,
-             scenario_11, scenario_12, scenario_13, scenario_14]
+             scenario_11, scenario_12, scenario_13, scenario_14, scenario_15]
 
 
 def run_all_scenarios():
