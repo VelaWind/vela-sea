@@ -805,7 +805,16 @@ VESSEL_COLOR_TENDER = (240, 240, 240)
 PLAYER_THROTTLE_STEP = 1.0    # knots per key press for throttle up/down
 PLAYER_TURN_RATE     = 2.5    # degrees per sim-second while turn key held
 PLAYER_FOLLOW_CAM    = True   # follow player vessel on startup
-PLAYER_PULSE_PERIOD  = 1.5    # seconds per full pulse cycle on the player ring
+PLAYER_PULSE_PERIOD  = 1.5    # seconds per full pulse cycle on the player ring (at rest)
+
+# ── Game feel: tactile feedback on the player vessel ─────────────────────────
+THROTTLE_FLASH_MS        = 220    # ms the SPD label stays lit after a throttle change
+PLAYER_PULSE_PERIOD_MIN  = 0.55   # s per pulse at full speed — the ring beats faster
+                                  # as the ship speeds up (period lerps from the
+                                  # at-rest PLAYER_PULSE_PERIOD down to this)
+PLAYER_WAKE_SEGMENTS     = 8      # max fading wake segments trailing the stern
+PLAYER_WAKE_MIN_SPEED_KN = 1.0    # wake appears only once the ship is making way
+PLAYER_WAKE_ALPHA        = 150    # alpha of the freshest wake segment (fades to 0)
 
 # ── Onboarding / first-five-minutes tutorial ─────────────────────────────────
 # A brand-new career opens zoomed in on the player with a guaranteed, pre-
@@ -923,6 +932,7 @@ SOUND_RELATIVE_VOLUMES = {
     "docking":     0.90,
     "warning":     0.90,
     "mayday":      1.00,
+    "throttle_click": 0.35,   # soft helm click on each throttle change
 }
 
 # ============================================================================

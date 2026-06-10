@@ -1121,7 +1121,8 @@ class PlayerHUDPanel:
     # ------------------------------------------------------------------ public
 
     def draw(self, vessel, career=None, zone_violation=False, frame_count=0,
-             low_visibility=False, active_contract=None, world=None) -> None:
+             low_visibility=False, active_contract=None, world=None,
+             throttle_flash=False) -> None:
         if vessel is None:
             return
 
@@ -1198,7 +1199,9 @@ class PlayerHUDPanel:
         tgt_str  = f"/ {vessel.target_speed:.1f}"
         spd_surf = self._font_value.render(spd_str, True, COLOR_TEXT_PRIMARY)
         tgt_surf = self._font_label.render(tgt_str, True, COLOR_TEXT_SECONDARY)
-        lbl_surf = self._font_label.render("SPD", True, COLOR_TEXT_DIM)
+        # Flash the SPD label bright on a throttle change so input registers.
+        _spd_col = COLOR_ACCENT if throttle_flash else COLOR_TEXT_DIM
+        lbl_surf = self._font_label.render("SPD", True, _spd_col)
         self.surface.blit(lbl_surf, (x + pad, cy))
         self.surface.blit(spd_surf, (x + pad + 36, cy - 2))
         self.surface.blit(tgt_surf, (x + pad + 36 + spd_surf.get_width() + 4, cy))

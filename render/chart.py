@@ -51,7 +51,8 @@ from config import (
     SHALLOW_WATER_MID_BAND_OFFSET_PX, SHALLOW_WATER_MID_BAND_ALPHA,
     COLOR_COLLISION_AVOID,
     SAR_PULSE_PERIOD, COLOR_SAR_DISTRESS, PORT_ACTIVITY_PULSE_PERIOD,
-    PLAYER_PULSE_PERIOD,
+    PLAYER_PULSE_PERIOD, PLAYER_PULSE_PERIOD_MIN,
+    PLAYER_WAKE_SEGMENTS, PLAYER_WAKE_MIN_SPEED_KN, PLAYER_WAKE_ALPHA,
     VESSEL_COLOR_CARGO, VESSEL_COLOR_FERRY, VESSEL_COLOR_FISHING,
     VESSEL_COLOR_SAILBOAT, VESSEL_COLOR_TUG, VESSEL_COLOR_SELECTED,
     VESSEL_COLOR_TANKER, VESSEL_COLOR_COAST_GUARD,
@@ -1034,12 +1035,38 @@ class Chart:
         if in_irons:
             color = COLOR_WARNING
 
+        # ── Player wake trail ─────────────────────────────────────────────────
+        # A few fading foam dots off the stern that lengthen and brighten with
+        # speed — a cheap motion cue (≤8 circles) that makes the ship feel alive.
+        # Uses the vessel's sampled trail (sample spacing already grows with
+        # speed), drawn first so the rings and hull sit on top.
+        if (_is_player and vessel.current_speed > PLAYER_WAKE_MIN_SPEED_KN
+                and len(vessel.trail) >= 2):
+            _spd_frac = min(1.0, vessel.current_speed / max(0.1, vessel.max_speed))
+            _wake_pts = vessel.trail[-PLAYER_WAKE_SEGMENTS:]
+            _m = len(_wake_pts)
+            wr, wg, wb = COLOR_ACCENT
+            for _i, _wp in enumerate(_wake_pts):
+                _frac = (_i + 1) / _m            # freshest (nearest ship) brightest
+                _wa = int(PLAYER_WAKE_ALPHA * _frac * _spd_frac)
+                if _wa <= 4:
+                    continue
+                _wx, _wy = self.camera.world_to_screen(_wp)
+                _wrad = max(1, int(2 + _frac * 3))
+                pygame.gfxdraw.filled_circle(self.surface, int(_wx), int(_wy),
+                                             _wrad, (wr, wg, wb, _wa))
+
         # ── Player vessel pulsing ring ────────────────────────────────────────
         # Distinct ACCENT-colored pulse so the player ship is immediately obvious.
+        # The ring beats faster as the ship speeds up (period lerps from the
+        # at-rest value down to the full-speed minimum).
         # Drawn before SAR ring so SAR overlays on top when player is in distress.
         if _is_player and not vessel.distress:
+            _spd_frac = min(1.0, vessel.current_speed / max(0.1, vessel.max_speed))
+            _period = (PLAYER_PULSE_PERIOD
+                       + (PLAYER_PULSE_PERIOD_MIN - PLAYER_PULSE_PERIOD) * _spd_frac)
             p_base_r = size + 8
-            p_phase  = (time.time() % PLAYER_PULSE_PERIOD) / PLAYER_PULSE_PERIOD
+            p_phase  = (time.time() % _period) / _period
             p_pulse  = abs(math.sin(p_phase * math.pi))
             p_outer  = int(p_base_r + p_pulse * 10)
             ca, cb, cc = COLOR_ACCENT

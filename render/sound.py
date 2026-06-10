@@ -22,7 +22,8 @@ from config import (
 
 SAMPLE_RATE = 22050
 
-SOUND_NAMES = ("engine_loop", "docking", "warning", "mayday", "ambient_sea")
+SOUND_NAMES = ("engine_loop", "docking", "warning", "mayday", "ambient_sea",
+               "throttle_click")
 
 
 # ---------------------------------------------------------------------------
@@ -122,12 +123,28 @@ def _gen_ambient_sea():
     return out
 
 
+def _gen_throttle_click():
+    """Soft helm click: a brief, gentle blip fired on each throttle change.
+
+    60 ms with a fast exponential decay — felt more than heard, so repeated
+    throttle taps never become annoying.
+    """
+    n = int(SAMPLE_RATE * 0.06)
+    out = []
+    for i in range(n):
+        t = i / SAMPLE_RATE
+        env = math.exp(-t * 60.0)
+        out.append(0.25 * env * math.sin(2 * math.pi * 520.0 * t))
+    return out
+
+
 _GENERATORS = {
     "engine_loop": _gen_engine_loop,
     "docking":     _gen_docking,
     "warning":     _gen_warning,
     "mayday":      _gen_mayday,
     "ambient_sea": _gen_ambient_sea,
+    "throttle_click": _gen_throttle_click,
 }
 
 

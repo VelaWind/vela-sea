@@ -28,7 +28,7 @@ from config import TIME_COMPRESSION
 from config import DRAFT_SAFETY_MARGIN_M
 from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR, FUEL_EMERGENCY_REFUEL_FRACTION
 from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
-from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM
+from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM, THROTTLE_FLASH_MS
 from config import HULL_REPAIR_COST_PER_POINT
 from config import (ZONE_FINE_NO_ENTRY, ZONE_FINE_SPEED, ZONE_FINE_INTERVAL_S,
                     GROUNDING_HULL_DAMAGE, STORM_WAVE_THRESHOLD,
@@ -581,6 +581,9 @@ class Game:
         self._tutorial_step: int = 0
         self._tutorial_route: list = []
         self._tutorial_wp_index: int = 0
+
+        # SPD-label flash: ticks (ms) until which the HUD throttle label stays lit.
+        self._throttle_flash_until: int = 0
 
         # Simulation state
         self.world = World()
@@ -1159,6 +1162,11 @@ class Game:
                         else:
                             pv.target_speed = max(0.0,
                                                   pv.target_speed - PLAYER_THROTTLE_STEP)
+                        # Tactile feedback: soft click + a brief SPD-label flash
+                        # so each throttle press audibly and visibly registers.
+                        self.sound.play("throttle_click")
+                        self._throttle_flash_until = (
+                            pygame.time.get_ticks() + THROTTLE_FLASH_MS)
                     else:
                         # No player vessel — arrow keys pan map; S opens settings
                         if event.key == pygame.K_UP:
@@ -2170,6 +2178,7 @@ class Game:
             low_visibility=self.environment.visibility < FOG_LOW_VIS_THRESHOLD_M,
             active_contract=self.job_board.active,
             world=self.world,
+            throttle_flash=pygame.time.get_ticks() < self._throttle_flash_until,
         )
         if not self.settings_panel.is_visible:
             self.career_panel.draw(self.career, self.job_board,
