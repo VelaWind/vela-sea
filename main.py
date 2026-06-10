@@ -47,7 +47,7 @@ from engine.environment import Environment
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, TutorialOverlayPanel, RewardBannerPanel, SettingsScreen
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, TutorialOverlayPanel, RewardBannerPanel, SettingsScreen, PauseMenu
 from config import COLOR_OBJECTIVE, BANNER_PROMOTE_COLOR, BANNER_DURATION_MS
 from config import (FLAVOR_COOLDOWN_S, FLAVOR_PORT_RANGE_WU,
                     FLAVOR_VESSEL_RANGE_WU, FLAVOR_OPEN_WATER_WU)
@@ -1189,7 +1189,10 @@ class Game:
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    self.running = False
+                    if self.game_over:
+                        self.running = False     # game over: Esc exits
+                    else:
+                        self._run_pause_menu()    # in-game: Esc opens pause menu
                 elif event.key == pygame.K_r and self.game_over:
                     self._restart_requested = True
                     self.running = False
@@ -2401,6 +2404,51 @@ class Game:
                       self.docking_menu, self.minimap, self.tutorial_overlay,
                       self.reward_banner, self._game_over_screen):
             panel.surface = self.display
+
+    def _run_pause_menu(self) -> None:
+        """Modal in-game pause menu (Esc): Resume / Settings / Save & Quit to
+        Title.  Freezes the sim (it never ticks update_simulation here); Settings
+        reuses the settings screen; Save & Quit persists the career and returns
+        to the title with the save intact (Continue then loads it)."""
+        menu = PauseMenu(self.display)
+        self.is_paused = True
+        self.environment.time_speed_multiplier = 0.0
+        while True:
+            self.clock.tick(TARGET_FPS)
+            mouse_pos = pygame.mouse.get_pos()
+            chosen = None
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    return
+                elif event.type == pygame.KEYDOWN:
+                    chosen = menu.handle_key(event.key)
+                elif event.type == pygame.MOUSEMOTION:
+                    menu.handle_motion(event.pos)
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    chosen = menu.handle_click(event.pos)
+                if chosen:
+                    break
+
+            if chosen == "resume":
+                self.is_paused = False
+                self.environment.time_speed_multiplier = 1.0
+                return
+            if chosen == "settings":
+                self._run_settings_screen()        # may re-init the display
+                menu.surface = self.display
+            elif chosen == "quit_title":
+                if self.player_vessel is not None:
+                    save_career(self.career,
+                                hull_integrity=self.player_vessel.hull_integrity)
+                self._restart_requested = True     # main() builds a fresh Game -> title
+                self.running = False
+                return
+
+            self.chart.draw_all(world=self.world, environment=self.environment)
+            menu.surface = self.display
+            menu.draw(mouse_pos)
+            pygame.display.flip()
 
     def _load_save(self) -> None:
         """Restore career state and player hull from save.json.

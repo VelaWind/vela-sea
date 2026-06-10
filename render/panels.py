@@ -2391,6 +2391,85 @@ class SettingsScreen:
         self._back.draw(self.surface)
 
 
+class PauseMenu:
+    """In-game pause overlay: Resume / Settings / Save & Quit to Title.
+
+    Mouse-driven (hover + click) with keyboard fallback; Esc resumes.  Draws a
+    dim veil over the frozen game so the world stays visible behind the menu.
+    """
+
+    MENU_ITEMS = [
+        ("Resume",                "resume"),
+        ("Settings",              "settings"),
+        ("Save & Quit to Title",  "quit_title"),
+    ]
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self.selected_index = 0
+        self._font_title = pygame.font.SysFont(FONT_UI_NAME, TITLE_FONT_SIZE, bold=True)
+        self._font_menu  = pygame.font.SysFont(FONT_UI_NAME, TITLE_MENU_FONT_SIZE, bold=True)
+        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self._buttons = [Button(label, font=self._font_menu)
+                         for label, _ in self.MENU_ITEMS]
+
+    def handle_key(self, key: int):
+        n = len(self.MENU_ITEMS)
+        if key == pygame.K_ESCAPE:
+            return "resume"
+        if key == pygame.K_UP:
+            self.selected_index = (self.selected_index - 1) % n
+        elif key == pygame.K_DOWN:
+            self.selected_index = (self.selected_index + 1) % n
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+            return self.MENU_ITEMS[self.selected_index][1]
+        return None
+
+    def handle_motion(self, pos) -> None:
+        for i, b in enumerate(self._buttons):
+            if b.hit(pos):
+                self.selected_index = i
+                break
+
+    def handle_click(self, pos):
+        for i, b in enumerate(self._buttons):
+            if b.hit(pos):
+                return self.MENU_ITEMS[i][1]
+        return None
+
+    def draw(self, mouse_pos=(-1, -1)) -> None:
+        vw, vh = self.surface.get_size()
+        dim = pygame.Surface((vw, vh), pygame.SRCALPHA)
+        dim.fill((4, 8, 14, 150))
+        self.surface.blit(dim, (0, 0))
+
+        row_h = self._font_menu.get_height() + 12
+        w = 460
+        h = 96 + len(self.MENU_ITEMS) * (row_h + 10) + 24
+        x = vw // 2 - w // 2
+        y = vh // 2 - h // 2
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (*COLOR_PANEL_BG[:3], 246), panel.get_rect(), border_radius=18)
+        pygame.draw.rect(panel, COLOR_PANEL_BORDER, panel.get_rect(), 2, border_radius=18)
+        self.surface.blit(panel, (x, y))
+
+        t = self._font_title.render("PAUSED", True, COLOR_ACCENT)
+        self.surface.blit(t, (vw // 2 - t.get_width() // 2, y + 26))
+
+        cy = y + 92
+        for i, (label, _action) in enumerate(self.MENU_ITEMS):
+            b = self._buttons[i]
+            b.rect = pygame.Rect(x + 30, cy - 5, w - 60, row_h)
+            b.label = label
+            b.update(mouse_pos)
+            b.draw(self.surface, focused=(i == self.selected_index))
+            cy += row_h + 10
+
+        hint = self._font_hint.render("Esc to resume  ·  click or Arrows + Enter",
+                                      True, COLOR_TEXT_DIM)
+        self.surface.blit(hint, (vw // 2 - hint.get_width() // 2, y + h - 30))
+
+
 # ---------------------------------------------------------------------------
 # Game Over screen
 # ---------------------------------------------------------------------------
