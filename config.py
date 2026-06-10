@@ -818,35 +818,37 @@ PLAYER_WAKE_ALPHA        = 150    # alpha of the freshest wake segment (fades to
 
 # ── Onboarding / first-five-minutes tutorial ─────────────────────────────────
 # A brand-new career opens zoomed in on the player with a guaranteed, pre-
-# accepted first delivery and a 4-step guided overlay.  All copy + thresholds
-# live here so onboarding can be retuned without touching logic.
+# accepted first delivery and a 5-step guided overlay.  All copy + thresholds
+# live here so onboarding can be retuned without touching logic.  The target is
+# Saltgate Harbour — the nearest port (~29 nm) — so the first payout lands fast.
 TUTORIAL_START_ZOOM          = 1.8     # close framing so the player ship reads as "you"
-TUTORIAL_CONTRACT_FROM       = "Port Maren"    # player spawns beside Maren
-TUTORIAL_CONTRACT_TO         = "Port Ardent"   # short open run east to Carrow
+TUTORIAL_CONTRACT_FROM       = "Port Maren"        # player spawns beside Maren
+TUTORIAL_CONTRACT_TO         = "Saltgate Harbour"  # nearest port — a quick first run
 TUTORIAL_CONTRACT_PAYOUT     = 2000.0  # guaranteed, generous first payout (hook)
 TUTORIAL_CONTRACT_DEADLINE_H = 96.0    # effectively no deadline while learning
 # Step-advance thresholds — each step lights as the player performs it:
-TUTORIAL_THROTTLE_SPEED_KN   = 2.0     # step 1→2: throttle past bare steerage way
-TUTORIAL_HEADING_TOLERANCE   = 30.0    # step 2→3: heading within this of the bearing
-TUTORIAL_APPROACH_FRACTION   = 0.5     # step 3→4: closed half the start distance
+TUTORIAL_THROTTLE_SPEED_KN   = 2.0     # step 0→1: throttle past bare steerage way
+TUTORIAL_HEADING_TOLERANCE   = 30.0    # step 1→2: heading within this of the bearing
 TUTORIAL_PANEL_ALPHA         = 224     # onboarding card background opacity
 TUTORIAL_WAYPOINT_RADIUS     = 45.0    # wu within which a guided waypoint counts as reached
-# Guided route: the depth-verified safe Maren→Ardent leg of the ferry loop
-# (mirrors VESSEL_ROUTE_FERRY; checked by tests/verify_new_routes.py).  These
-# waypoints thread the gap south of Skerry Bank and around Carrow Island so the
-# green dashed guide line — and a new captain following it — stay in deep water.
+# Auto-bump time compression while sailing the transit so even a passive captain
+# reaches port in ~1-2 real minutes; reset to 1× for the final docking approach.
+TUTORIAL_TRANSIT_TIME_SPEED  = 3.0
+# Guided route Maren→Saltgate: due-south-of-Saltgate corridor (x=300) is deep
+# (≥ 60 m) all the way down to the harbour mouth; only the berth itself sits at
+# the shallow coast edge (docking snaps in within the 2 wu radius, in 7 m water).
+# Approaching — and departing — from the SOUTH keeps the deep-draft player clear.
 TUTORIAL_ROUTE = [
-    (350.0, 460.0),   # SE open sea, clear of the mainland coast
-    (380.0, 460.0),   # Skerry Bank clearance (depth ≥ 60 m)
-    (500.0, 565.0),   # south of Carrow Island
-    (640.0, 500.0),   # Ardent approach — gap between Carrow and Brattlin North
-    (648.0, 460.0),   # Port Ardent (berth)
+    (300.0, 320.0),   # _WP_SALTGATE_S — east along the clear y=320 line, deep water
+    (300.0, 260.0),   # mid-approach, due south of Saltgate
+    (300.0, 225.0),   # Saltgate Harbour (berth — approached from the deep south)
 ]
-# The 4 guided steps, in order.  Step index N is the one currently lit.
+# The 5 guided steps, in order.  Step index N is the one currently lit.
 TUTORIAL_STEPS = [
     "Press  W  to increase your throttle",
-    "Press  D  or  A  to steer toward the green marker",
-    "Follow the dashed line to Port Ardent",
+    "Press  A  or  D  to steer toward the green marker",
+    "Press  3  or  4  to speed up time",
+    "Follow the dashed line to Saltgate Harbour",
     "Drift in slowly (under 2 kn) to dock and get paid",
 ]
 

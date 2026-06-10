@@ -52,7 +52,8 @@ from config import COLOR_OBJECTIVE, BANNER_PROMOTE_COLOR, BANNER_DURATION_MS
 from config import (TUTORIAL_START_ZOOM, TUTORIAL_CONTRACT_FROM, TUTORIAL_CONTRACT_TO,
                     TUTORIAL_CONTRACT_PAYOUT, TUTORIAL_THROTTLE_SPEED_KN,
                     TUTORIAL_HEADING_TOLERANCE, TUTORIAL_STEPS,
-                    TUTORIAL_ROUTE, TUTORIAL_WAYPOINT_RADIUS)
+                    TUTORIAL_ROUTE, TUTORIAL_WAYPOINT_RADIUS,
+                    TUTORIAL_TRANSIT_TIME_SPEED)
 from render.sound import SoundManager
 from config import MINIMAP_HEIGHT_PX, MINIMAP_MARGIN_PX
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
@@ -1227,6 +1228,9 @@ class Game:
                     self._tutorial_active = False
                     self.career.tutorial_complete = True
                     self._tutorial_step = len(TUTORIAL_STEPS)
+                    # Drop any transit time-bump back to normal speed on skip.
+                    self.environment.time_speed_multiplier = 1.0
+                    self.is_paused = False
                     if self.player_vessel is not None:
                         save_career(self.career,
                                     hull_integrity=self.player_vessel.hull_integrity)
@@ -2299,8 +2303,8 @@ class Game:
         """Open the guided first-five-minutes onboarding for a new captain.
 
         Zooms in close on the player, follows them, and boards a guaranteed,
-        pre-accepted Maren→Ardent delivery so there is exactly one obvious thing
-        to do from the first second.  Step progression is tracked per frame in
+        pre-accepted Maren→Saltgate delivery (the nearest port, ~29 nm) so the
+        first payout lands fast.  Step progression is tracked per frame in
         _update_tutorial(); the persistent flag is set on completion.
         """
         pv = self.player_vessel
@@ -2316,8 +2320,8 @@ class Game:
         self.job_board.create_tutorial_contract(
             TUTORIAL_CONTRACT_FROM, TUTORIAL_CONTRACT_TO,
             TUTORIAL_CONTRACT_PAYOUT, self.mission_manager.sim_elapsed_s)
-        # Verified safe waypoint route Maren→Ardent (deep water around the
-        # islands); the green guide line follows it so the player never has to
+        # Verified safe waypoint route Maren→Saltgate (deep south-of-Saltgate
+        # corridor); the green guide line follows it so the player never has to
         # plot a course on their first run.  Final waypoint is the berth.
         self._tutorial_route = [tuple(map(float, wp)) for wp in TUTORIAL_ROUTE]
         self._tutorial_wp_index = 0
@@ -2326,10 +2330,14 @@ class Game:
                            EVENT_COLOR_WEATHER)
 
     def _update_tutorial(self) -> None:
-        """Advance the onboarding waypoint and step as the player performs each
-        action.  Steps light as the player throttles up (0→1), steers toward the
-        green marker (1→2), and reaches the final approach (2→3); step 3 clears
-        on docking in _on_player_docked()."""
+        """Advance the onboarding step/waypoint as the player acts, and manage
+        the transit time-compression handoff.
+
+        Steps: throttle up (0→1), steer toward the marker (1→2), the time-speed
+        hint clears once real progress is made (2→3), then the player follows the
+        line until the final leg (3→4).  On entering step 2 the sim auto-bumps to
+        3× so the sail isn't dead time; on entering step 4 it drops back to 1× so
+        the docking approach is controllable.  Step 4 completes on docking."""
         if not self._tutorial_active:
             return
         pv = self.player_vessel
@@ -2345,6 +2353,7 @@ class Game:
             self._tutorial_wp_index += 1
             target = route[self._tutorial_wp_index]
 
+        prev_step = self._tutorial_step
         if self._tutorial_step == 0:
             if pv.current_speed > TUTORIAL_THROTTLE_SPEED_KN:
                 self._tutorial_step = 1
@@ -2354,10 +2363,25 @@ class Game:
             if diff <= TUTORIAL_HEADING_TOLERANCE:
                 self._tutorial_step = 2
         elif self._tutorial_step == 2:
-            # On the final leg to the destination port.
-            if self._tutorial_wp_index >= last:
+            # "Speed up time" — clears once the player has made real progress
+            # (passed the first waypoint); the auto-bump below does the work.
+            if self._tutorial_wp_index >= 1:
                 self._tutorial_step = 3
-        # Step 3 (the final "dock" step) completes in _on_player_docked().
+        elif self._tutorial_step == 3:
+            if self._tutorial_wp_index >= last:
+                self._tutorial_step = 4
+
+        # Time-compression handoff on step transitions.
+        if self._tutorial_step != prev_step:
+            if self._tutorial_step == 2:
+                # Entering the sail — fast-forward so transit isn't dead time.
+                self.environment.time_speed_multiplier = TUTORIAL_TRANSIT_TIME_SPEED
+                self.is_paused = False
+            elif self._tutorial_step == 4:
+                # Final approach — hand control back at normal speed to dock.
+                self.environment.time_speed_multiplier = 1.0
+                self.is_paused = False
+        # Step 4 (the final "dock" step) completes in _on_player_docked().
 
     def run(self, skip_title: bool = False) -> None:
         """Run the title menu, then the main game loop until quit."""
