@@ -451,12 +451,16 @@ class Chart:
         self._depth_key = key
         return surf
 
-    def draw_grid(self) -> None:
+    def draw_grid(self, y_label_x: int = 4) -> None:
         # One coordinate system, no drift: screen_to_world() finds what world
         # region is visible, world_to_screen() places every line AND its label.
         # Because a line and its label derive from the SAME world_to_screen()
         # call, they can never disagree.  Visible bounds are clamped to the
         # world, so labels only ever show real, positive world coordinates.
+        #
+        # Labels are the LITERAL world coordinate (f"{int(x)}") — never scaled.
+        # X labels hug the top edge; Y labels hug the left edge but inset to
+        # y_label_x (passed in) so the fleet panel can't clip them.
         vw, vh = self.surface.get_size()
         cam = self.camera
 
@@ -479,7 +483,7 @@ class Chart:
             pygame.draw.aaline(self.surface, color, (sx, 0), (sx, vh))
             if is_major:
                 label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
-                self._blit_text_shadow(label, int(sx + 4), 6)
+                self._blit_text_shadow(label, int(sx + 4), 4)   # top edge
             x += GRID_SPACING
 
         y = first_y
@@ -490,12 +494,9 @@ class Chart:
             pygame.draw.aaline(self.surface, color, (0, sy), (vw, sy))
             if is_major:
                 label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
-                # Right-aligned at the right edge.  The fleet panel hugs the LEFT
-                # edge (x=20, 200 px wide) and would clip the trailing digit of a
-                # left-side label — "200" reading as "20".  Right edge is clear
-                # by default (vessel-info only shows when a vessel is selected).
-                self._blit_text_shadow(label, vw - label.get_width() - 4,
-                                       int(sy + 4))
+                # Left edge, inset past the fleet panel when it's showing so the
+                # trailing digit is never clipped; sits right on its own line.
+                self._blit_text_shadow(label, y_label_x, int(sy + 4))
             y += GRID_SPACING
 
     def draw_objective(self, player_world_pos, dest_world_pos,
@@ -1532,7 +1533,7 @@ class Chart:
                     self.surface, sx, sy, 1, (210, 215, 230, 110))
 
     def draw_all(self, world=None, environment=None, selected_vessel=None,
-                 hover_vessel=None) -> None:
+                 hover_vessel=None, y_label_x: int = 4) -> None:
         self._label_candidates = []
         self.draw_background(world)
         # Open-ocean vignette sits directly on the water fill, before everything else
@@ -1544,7 +1545,7 @@ class Chart:
         # Depth zone fills (before islands so land polygons cover the inward part)
         if world and environment:
             self.draw_depth_zones(world, environment)
-        self.draw_grid()
+        self.draw_grid(y_label_x=y_label_x)
         # Shipping lane overlay — below islands and zones, just above the grid
         self.draw_shipping_lanes(world)
         # Depth contour lines (before islands so land naturally covers any coastal overhang)

@@ -2168,9 +2168,15 @@ class Game:
         if self.environment.visibility < FOG_LOW_VIS_THRESHOLD_M:
             self.hover_vessel = None
 
+        # Inset the Y-axis grid labels past the fleet panel (left edge, x=20,
+        # WIDTH wide) when it's showing, so the panel can't clip them; else hug
+        # the left edge.  The fleet panel is drawn whenever settings is hidden.
+        _fleet_visible = not self.settings_panel.is_visible
+        _y_label_x = (20 + self.fleet_panel.WIDTH + 8) if _fleet_visible else 4
         self.chart.draw_all(world=self.world, environment=self.environment,
                             selected_vessel=self.selected_vessel,
-                            hover_vessel=self.hover_vessel)
+                            hover_vessel=self.hover_vessel,
+                            y_label_x=_y_label_x)
 
         # Always-on objective marker pointing at the active contract's
         # destination — the single clear "go here" cue (on-screen marker +
