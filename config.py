@@ -4,11 +4,45 @@ This file centralizes all magic numbers, colors, sizes, and rates so the
 simulation is easy to balance and tweak without hunting through the code.
 """
 
+import os
+import sys
+
+
+def resource_path(relative: str) -> str:
+    """Absolute path to a bundled read-only resource (e.g. the sound wavs).
+
+    Works from source AND from a PyInstaller build: PyInstaller unpacks bundled
+    data under ``sys._MEIPASS``; from source we anchor to this file's directory
+    (the project root) so the path is correct no matter the working directory.
+    """
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, relative)
+
+
+def user_data_dir() -> str:
+    """A user-writable directory for the save file.
+
+    Frozen (.exe): ``%APPDATA%/MeridianSea`` on Windows (``~/.local/share`` on
+    *nix) — always writable, even if the app is installed under Program Files
+    where the bundle itself is read-only.  From source: the empty string, so
+    ``SAVE_FILEPATH`` stays cwd-relative and the dev workflow / tests are
+    unchanged.
+    """
+    if getattr(sys, "frozen", False):
+        base = os.environ.get("APPDATA") or os.path.expanduser("~/.local/share")
+        path = os.path.join(base, "MeridianSea")
+        os.makedirs(path, exist_ok=True)
+        return path
+    return ""
+
+
 # ============================================================================
 # Game identity & persistence
 # ============================================================================
 GAME_VERSION  = "0.5.1"        # shown on the title screen and stamped into saves
-SAVE_FILEPATH = "save.json"    # career save file, relative to the working dir
+# Career save lives in a user-writable location: %APPDATA%/MeridianSea when
+# frozen (the bundle dir is read-only), cwd-relative "save.json" from source.
+SAVE_FILEPATH = os.path.join(user_data_dir(), "save.json")
 
 # ============================================================================
 # Title screen
@@ -961,7 +995,7 @@ AUTOPILOT_MARKER_SIZE_PX = 6    # half-size of the diamond waypoint marker
 # ============================================================================
 SOUND_ENABLED = True
 SOUND_VOLUME  = 0.6              # master volume 0.0–1.0 (UI slider adjusts this)
-SOUND_DIR     = "assets/sounds"  # generated .wav files live here
+SOUND_DIR     = resource_path(os.path.join("assets", "sounds"))  # bundled .wav files
 # Engine hum plays only while the player is underway above this speed.
 ENGINE_SOUND_MIN_SPEED_KN = 2.0
 # Per-sound mix levels, multiplied by the master volume.  The loops sit low

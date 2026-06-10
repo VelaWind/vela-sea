@@ -1,0 +1,5 @@
+# Development / packaging dependencies (players DON'T need these — see requirements.txt).
+#   pip install -r requirements-dev.txt
+#   pyinstaller meridian_sea.spec
+-r requirements.txt
+pyinstaller==6.20.0
