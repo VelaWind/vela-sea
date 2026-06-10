@@ -381,13 +381,23 @@ class Chart:
         if not polygon:
             return []
 
-        avg_x = sum(x for x, _ in polygon) / len(polygon)
-        avg_y = sum(y for _, y in polygon) / len(polygon)
-        scale = 1.0 + offset_pixels / max(1.0, math.hypot(polygon[0][0] - avg_x, polygon[0][1] - avg_y))
+        # Expand/shrink about the BBOX CENTRE, not the vertex centroid.  For an
+        # irregular outline the vertex centroid sits off-centre (pulled toward
+        # wherever vertices cluster), so scaling from it shifts the offset rings
+        # off-centre — the depth glow then looks offset from the island even
+        # though both come from the same world→screen polygon.  Scaling about the
+        # bbox centre keeps every ring concentric with the polygon the island is
+        # filled from, so the halo stays centred on the coastline at any zoom/pan.
+        xs = [x for x, _ in polygon]
+        ys = [y for _, y in polygon]
+        cx = (min(xs) + max(xs)) / 2.0
+        cy = (min(ys) + max(ys)) / 2.0
+        radius = max(1.0, math.hypot(polygon[0][0] - cx, polygon[0][1] - cy))
+        scale = 1.0 + offset_pixels / radius
 
         return [(
-            int(avg_x + (x - avg_x) * scale),
-            int(avg_y + (y - avg_y) * scale),
+            int(cx + (x - cx) * scale),
+            int(cy + (y - cy) * scale),
         ) for x, y in polygon]
 
     def _build_depth_layer(self, world) -> pygame.Surface:
