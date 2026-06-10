@@ -23,7 +23,7 @@ from config import (
 SAMPLE_RATE = 22050
 
 SOUND_NAMES = ("engine_loop", "docking", "warning", "mayday", "ambient_sea",
-               "throttle_click")
+               "throttle_click", "success_chime")
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +138,26 @@ def _gen_throttle_click():
     return out
 
 
+def _gen_success_chime():
+    """Bright rising two-note reward sting (≈660 Hz → 880 Hz), 0.34 s total.
+
+    Each note has its own attack/release envelope dipping to zero at the
+    boundary, so the frequency jump is click-free.  Played after the docking
+    thud when a contract is paid out.
+    """
+    n = int(SAMPLE_RATE * 0.34)
+    out = []
+    for i in range(n):
+        t = i / SAMPLE_RATE
+        if t < 0.16:
+            freq, seg_t, seg_len = 660.0, t, 0.16
+        else:
+            freq, seg_t, seg_len = 880.0, t - 0.16, 0.18
+        env = min(1.0, seg_t / 0.01, max(0.0, (seg_len - seg_t) / 0.04))
+        out.append(0.38 * env * math.sin(2 * math.pi * freq * t))
+    return out
+
+
 _GENERATORS = {
     "engine_loop": _gen_engine_loop,
     "docking":     _gen_docking,
@@ -145,6 +165,7 @@ _GENERATORS = {
     "mayday":      _gen_mayday,
     "ambient_sea": _gen_ambient_sea,
     "throttle_click": _gen_throttle_click,
+    "success_chime": _gen_success_chime,
 }
 
 

@@ -47,7 +47,8 @@ from engine.environment import Environment
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, ControlsScreen, TutorialOverlayPanel
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, ControlsScreen, TutorialOverlayPanel, RewardBannerPanel
+from config import COLOR_OBJECTIVE, BANNER_PROMOTE_COLOR, BANNER_DURATION_MS
 from config import (TUTORIAL_START_ZOOM, TUTORIAL_CONTRACT_FROM, TUTORIAL_CONTRACT_TO,
                     TUTORIAL_CONTRACT_PAYOUT, TUTORIAL_THROTTLE_SPEED_KN,
                     TUTORIAL_HEADING_TOLERANCE, TUTORIAL_STEPS,
@@ -551,6 +552,9 @@ class Game:
         self.docking_menu = DockingMenuPanel(self.display)
         self.minimap = MinimapPanel(self.display)
         self.tutorial_overlay = TutorialOverlayPanel(self.display)
+        self.reward_banner = RewardBannerPanel(self.display)
+        # Active celebratory banners: list of {label, big, color, start_ms}.
+        self._banners: list = []
 
         # Audio — constructed after pygame.init(); falls back to silence on
         # any mixer failure.  Ambient sea bed starts immediately.
@@ -1557,12 +1561,22 @@ class Game:
         if not _docked_at:
             return
         self.sound.play("docking")
+        _tier_before = self.career.tier_name
         _done = self.job_board.complete_job(_docked_at, self.career)
         if _done:
             self.event_log.add(
                 _t,
                 f"Contract complete — \xa3{_done.payout:.0f} earned",
                 EVENT_COLOR_REFLOAT)
+            # Reward moment: chime + a centered celebratory banner with the
+            # payout — the payoff of the whole loop, not just a log line.
+            self.sound.play("success_chime")
+            self._add_banner("CONTRACT COMPLETE",
+                             f"+\xa3{_done.payout:,.0f}", COLOR_OBJECTIVE)
+            # Promotion banner when the +5 rep crossed into a new tier.
+            if self.career.tier_name != _tier_before:
+                self._add_banner("PROMOTED", self.career.tier_name,
+                                 BANNER_PROMOTE_COLOR)
             # Achievement checks tied to contract completion.
             if self.career.total_deliveries >= 1:
                 self._award_achievement("First Delivery")
@@ -1582,6 +1596,13 @@ class Game:
         # Auto-save: docking is the natural checkpoint — the contract payout
         # above is included; menu purchases re-save when they happen.
         save_career(self.career, hull_integrity=vessel.hull_integrity)
+
+    def _add_banner(self, label: str, big: str, color: tuple) -> None:
+        """Queue a centered celebratory banner (fades out; rendered each frame)."""
+        self._banners.append({
+            "label": label, "big": big, "color": color,
+            "start_ms": pygame.time.get_ticks(),
+        })
 
     def _award_achievement(self, name: str) -> None:
         """Unlock an achievement once; log the moment it happens."""
@@ -2187,13 +2208,21 @@ class Game:
                 self.docking_menu.draw(
                     self.player_vessel,
                     self.player_vessel._docked_port_name or "IN PORT",
-                    self.career)
+                    self.career, job_board=self.job_board)
 
         # Onboarding card — drawn above the chart/HUD so the next step is always
         # readable, but hidden behind the settings panel.
         if (self._tutorial_active and not self.career.tutorial_complete
                 and not self.settings_panel.is_visible):
             self.tutorial_overlay.draw(self._tutorial_step)
+
+        # Reward banners — fade out, pruned once past their lifetime.  Drawn on
+        # top of everything except the game-over overlay.
+        if self._banners:
+            _now = pygame.time.get_ticks()
+            self._banners = [b for b in self._banners
+                             if _now - b["start_ms"] <= BANNER_DURATION_MS]
+            self.reward_banner.draw(self._banners, _now)
 
         if self.game_over:
             self._game_over_screen.draw(

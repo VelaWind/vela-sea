@@ -34,6 +34,7 @@ from config import (
     MINIMAP_WIDTH_PX, MINIMAP_HEIGHT_PX, MINIMAP_MARGIN_PX,
     WORLD_WIDTH, WORLD_HEIGHT, LAND_COLORS, COLOR_WATER,
     TUTORIAL_STEPS, TUTORIAL_PANEL_ALPHA, COLOR_OBJECTIVE,
+    BANNER_DURATION_MS, BANNER_FADE_MS, MONEY_COUNTUP_EASE,
 )
 
 
@@ -1350,6 +1351,7 @@ class CareerPanel:
         self.surface = surface
         self.is_visible = False
         self._job_rects: list = []   # [(pygame.Rect, contract), ...] for click detection
+        self._display_money = None   # eased value for the count-up animation
 
         self._font_title  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_TITLE,   bold=True)
         self._font_header = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
@@ -1415,7 +1417,15 @@ class CareerPanel:
         self.surface.blit(hdr, (x + pad, cy))
         cy += hdr.get_height() + 6
 
-        self._lv(x, cy, w, "Balance", f"\xa3{career.money:.0f}")
+        # Money count-up: ease the shown balance toward the real one so a payout
+        # visibly ticks up instead of snapping.  Snaps when within £1.
+        if self._display_money is None:
+            self._display_money = float(career.money)
+        else:
+            self._display_money += (career.money - self._display_money) * MONEY_COUNTUP_EASE
+            if abs(career.money - self._display_money) < 1.0:
+                self._display_money = float(career.money)
+        self._lv(x, cy, w, "Balance", f"\xa3{self._display_money:.0f}")
         cy += 22
 
         rep_col = (COLOR_ACCENT if career.reputation >= 50
@@ -1593,6 +1603,65 @@ class CareerPanel:
         val  = self._font_value.render(value, True, value_color)
         self.surface.blit(lbl, (px + pad, y))
         self.surface.blit(val, (px + pad + iw - val.get_width(), y - 2))
+
+
+# ---------------------------------------------------------------------------
+# Reward banners
+# ---------------------------------------------------------------------------
+
+class RewardBannerPanel:
+    """Centred celebratory banners that fade out — the payoff of the loop.
+
+    The Game appends banner dicts ({label, big, color, start_ms}) on a contract
+    completion or promotion; this panel renders the live ones, stacked, fading
+    over their final BANNER_FADE_MS.  It owns no state.
+    """
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self._font_big   = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_BIG, bold=True)
+        self._font_label = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+
+    def draw(self, banners: list, now_ms: int) -> None:
+        if not banners:
+            return
+        vw = self.surface.get_width()
+        cy = self.surface.get_height() // 4
+        for b in banners:
+            t = now_ms - b["start_ms"]
+            if t < 0 or t > BANNER_DURATION_MS:
+                continue
+            frac = 1.0
+            if t > BANNER_DURATION_MS - BANNER_FADE_MS:
+                frac = max(0.0, (BANNER_DURATION_MS - t) / BANNER_FADE_MS)
+            alpha = int(255 * frac)
+            col = b["color"]
+
+            label_surf = self._font_label.render(b["label"], True, col)
+            big_surf = (self._font_big.render(b["big"], True, col)
+                        if b.get("big") else None)
+            inner_w = max(label_surf.get_width(),
+                          big_surf.get_width() if big_surf else 0)
+            w = inner_w + 64
+            h = 28 + label_surf.get_height() + (
+                big_surf.get_height() + 8 if big_surf else 0)
+            x = vw // 2 - w // 2
+
+            bg = pygame.Surface((w, h), pygame.SRCALPHA)
+            pygame.draw.rect(bg, (*COLOR_PANEL_BG, int(215 * frac)),
+                             bg.get_rect(), border_radius=16)
+            pygame.draw.rect(bg, (*col, alpha), bg.get_rect(), 3, border_radius=16)
+            self.surface.blit(bg, (x, cy))
+
+            ty = cy + 14
+            label_surf.set_alpha(alpha)
+            self.surface.blit(label_surf, (vw // 2 - label_surf.get_width() // 2, ty))
+            if big_surf is not None:
+                ty += label_surf.get_height() + 8
+                big_surf.set_alpha(alpha)
+                self.surface.blit(big_surf, (vw // 2 - big_surf.get_width() // 2, ty))
+
+            cy += h + 14   # stack a second banner (e.g. PROMOTED) below the first
 
 
 # ---------------------------------------------------------------------------
@@ -1855,15 +1924,20 @@ class DockingMenuPanel:
 
     # ------------------------------------------------------------------ draw
 
-    def draw(self, vessel, port_name: str, career) -> None:
+    def draw(self, vessel, port_name: str, career, job_board=None) -> None:
         if not self.visible or vessel is None or career is None:
             return
 
         items = self._menu_items(vessel, career)
+        # Keep the loop spinning: show the next few jobs right here so the player
+        # immediately sees another delivery to take after getting paid.
+        jobs = list(job_board.available[:3]) if job_board is not None else []
         vw, vh = self.surface.get_size()
         pad = self.PAD
         w   = self.WIDTH
-        h   = pad * 2 + self._font_title.get_height() + 14 + len(items) * (self.ROW_H + 6) + 24
+        jobs_h = (16 + self._font_item.get_height() + len(jobs) * 20) if jobs else 0
+        h   = (pad * 2 + self._font_title.get_height() + 14
+               + len(items) * (self.ROW_H + 6) + 24 + jobs_h)
         x   = vw // 2 - w // 2
         y   = vh // 2 - h // 2
         self.panel_rect = pygame.Rect(x, y, w, h)
@@ -1911,6 +1985,22 @@ class DockingMenuPanel:
         hint = "UP/DOWN select  |  ENTER confirm  |  W or SPACE depart"
         hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
         self.surface.blit(hint_surf, (x + w // 2 - hint_surf.get_width() // 2, cy + 4))
+
+        # Next-jobs teaser so the player lines up another delivery before leaving.
+        if jobs:
+            jy = cy + 26
+            hdr = self._font_item.render("NEXT JOBS", True, COLOR_OBJECTIVE)
+            self.surface.blit(hdr, (x + pad, jy))
+            tip = self._font_hint.render("open Job Board to accept", True, COLOR_TEXT_DIM)
+            self.surface.blit(tip, (x + w - pad - tip.get_width(),
+                                    jy + hdr.get_height() - tip.get_height() - 1))
+            jy += hdr.get_height() + 6
+            for c in jobs:
+                ls = self._font_hint.render(f"→ {c.to_port}", True, COLOR_TEXT_PRIMARY)
+                ps = self._font_cost.render(f"\xa3{c.payout:.0f}", True, (80, 220, 120))
+                self.surface.blit(ls, (x + pad + 6, jy))
+                self.surface.blit(ps, (x + w - pad - ps.get_width(), jy))
+                jy += 20
 
 
 # ---------------------------------------------------------------------------

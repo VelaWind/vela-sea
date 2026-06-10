@@ -855,6 +855,13 @@ COLOR_OBJECTIVE          = (80, 230, 130)  # bright green — the unmissable "go
 OBJECTIVE_MARKER_SIZE_PX = 12              # half-size of the destination diamond
 OBJECTIVE_EDGE_ARROW_PX  = 16              # size of the off-screen edge arrow (Task 4)
 
+# ── Reward feedback: contract-complete celebration ───────────────────────────
+BANNER_DURATION_MS    = 3000   # how long a reward banner stays up before clearing
+BANNER_FADE_MS        = 800    # fade-out window at the end of that duration
+BANNER_PROMOTE_COLOR  = (255, 210, 63)   # gold — reputation promotion banner
+MONEY_COUNTUP_EASE    = 0.12   # per-frame lerp of the displayed balance toward actual
+                               # (large jump after a payout visibly counts up)
+
 # ============================================================================
 # Career System
 # ============================================================================
@@ -933,6 +940,7 @@ SOUND_RELATIVE_VOLUMES = {
     "warning":     0.90,
     "mayday":      1.00,
     "throttle_click": 0.35,   # soft helm click on each throttle change
+    "success_chime":  0.85,   # reward sting when a contract is paid
 }
 
 # ============================================================================
