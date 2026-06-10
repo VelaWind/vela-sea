@@ -49,6 +49,8 @@ from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
 from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, ControlsScreen, TutorialOverlayPanel, RewardBannerPanel
 from config import COLOR_OBJECTIVE, BANNER_PROMOTE_COLOR, BANNER_DURATION_MS
+from config import (FLAVOR_COOLDOWN_S, FLAVOR_PORT_RANGE_WU,
+                    FLAVOR_VESSEL_RANGE_WU, FLAVOR_OPEN_WATER_WU)
 from config import (TUTORIAL_START_ZOOM, TUTORIAL_CONTRACT_FROM, TUTORIAL_CONTRACT_TO,
                     TUTORIAL_CONTRACT_PAYOUT, TUTORIAL_THROTTLE_SPEED_KN,
                     TUTORIAL_HEADING_TOLERANCE, TUTORIAL_STEPS,
@@ -589,6 +591,11 @@ class Game:
 
         # SPD-label flash: ticks (ms) until which the HUD throttle label stays lit.
         self._throttle_flash_until: int = 0
+
+        # Voyage flavour: cosmetic log lines, throttled by sim-time, de-duped per
+        # voyage.  Reset on departure / tutorial start (see _reset_voyage_flavor).
+        self._flavor_seen: set = set()
+        self._flavor_last_s: float = 0.0
 
         # Simulation state
         self.world = World()
@@ -1552,6 +1559,7 @@ class Game:
         pv.port_stay_timer = 0.0
         pv.status = "underway"
         self.docking_menu.visible = False
+        self._reset_voyage_flavor()   # fresh flavour log for the new voyage
         save_career(self.career, hull_integrity=pv.hull_integrity)
 
     def _on_player_docked(self, vessel) -> None:
@@ -2131,6 +2139,8 @@ class Game:
 
         # Onboarding step progression (once per frame, reads live player state).
         self._update_tutorial()
+        # Cosmetic voyage flavour in the event log (throttled, de-duped).
+        self._update_voyage_flavor()
 
         # Update the camera follow target (if any)
         self.camera.update_follow()
@@ -2325,6 +2335,7 @@ class Game:
         # plot a course on their first run.  Final waypoint is the berth.
         self._tutorial_route = [tuple(map(float, wp)) for wp in TUTORIAL_ROUTE]
         self._tutorial_wp_index = 0
+        self._reset_voyage_flavor()
         self.event_log.add(_sim_time_str(self.environment),
                            f"New contract — deliver to {TUTORIAL_CONTRACT_TO}",
                            EVENT_COLOR_WEATHER)
@@ -2382,6 +2393,64 @@ class Game:
                 self.environment.time_speed_multiplier = 1.0
                 self.is_paused = False
         # Step 4 (the final "dock" step) completes in _on_player_docked().
+
+    def _reset_voyage_flavor(self) -> None:
+        """Start a fresh voyage's flavour log (clear de-dup, restart cooldown)."""
+        self._flavor_seen = set()
+        self._flavor_last_s = self.mission_manager.sim_elapsed_s
+
+    def _update_voyage_flavor(self) -> None:
+        """Occasionally drop a cosmetic log line during a sail — passing a
+        vessel, nearing a port, or open water — so transit isn't dead air.
+        Throttled by FLAVOR_COOLDOWN_S of sim-time and de-duped per voyage."""
+        pv = self.player_vessel
+        if pv is None or pv.status not in ("underway", "avoiding"):
+            return
+        now_s = self.mission_manager.sim_elapsed_s
+        if now_s - self._flavor_last_s < FLAVOR_COOLDOWN_S:
+            return
+
+        msg = None
+        # 1) Nearest un-announced vessel within range → "Passing X to <side>".
+        best_v, best_d = None, FLAVOR_VESSEL_RANGE_WU
+        for v in self.world.vessels:
+            if v is pv or f"v:{v.name}" in self._flavor_seen:
+                continue
+            d = pv.distance_to(v.position)
+            if d < best_d:
+                best_v, best_d = v, d
+        if best_v is not None:
+            rel = (pv.bearing_to(best_v.position) - pv.heading + 180.0) % 360.0 - 180.0
+            side = "starboard" if rel > 0 else "port"
+            msg = f"Passing {best_v.name} to {side}"
+            self._flavor_seen.add(f"v:{best_v.name}")
+        else:
+            # 2) Nearest un-announced port within range → "approaching X".
+            best_p, best_pd = None, FLAVOR_PORT_RANGE_WU
+            for p in self.world.ports:
+                if f"p:{p.name}" in self._flavor_seen or p.name == self._departed_port:
+                    continue
+                d = pv.distance_to(p.position)
+                if d < best_pd:
+                    best_p, best_pd = p, d
+            if best_p is not None:
+                _ac = self.job_board.active
+                if _ac is not None and _ac.to_port == best_p.name:
+                    msg = f"Entering {best_p.name} approach"
+                else:
+                    msg = f"Passing {best_p.name} off the bow"
+                self._flavor_seen.add(f"p:{best_p.name}")
+            elif "open_water" not in self._flavor_seen:
+                nearest = min((pv.distance_to(p.position) for p in self.world.ports),
+                              default=0.0)
+                if nearest > FLAVOR_OPEN_WATER_WU:
+                    msg = "Open water — steady as she goes"
+                    self._flavor_seen.add("open_water")
+
+        if msg is not None:
+            self.event_log.add(_sim_time_str(self.environment), msg,
+                               EVENT_COLOR_WEATHER)
+            self._flavor_last_s = now_s
 
     def run(self, skip_title: bool = False) -> None:
         """Run the title menu, then the main game loop until quit."""

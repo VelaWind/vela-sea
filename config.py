@@ -862,6 +862,14 @@ OBJECTIVE_PULSE_PERIOD   = 1.4             # s per gentle pulse of the destinati
 # the AI traffic recedes to flavour.  Kept low — atmospheric, never a blackout.
 OBJECTIVE_FOCUS_DIM_ALPHA = 48
 
+# ── Voyage flavour: cosmetic event-log colour during a sail ──────────────────
+# Light, occasional log lines (passing a vessel, nearing a port, open water) so
+# the transit feels alive.  Purely cosmetic — no gameplay effect.
+FLAVOR_COOLDOWN_S      = 1500.0  # min sim-seconds between flavour lines (~25 sim-min)
+FLAVOR_PORT_RANGE_WU   = 95.0    # announce a port when within this range
+FLAVOR_VESSEL_RANGE_WU = 70.0    # announce another vessel when within this range
+FLAVOR_OPEN_WATER_WU   = 220.0   # beyond this from every port → "open water" line
+
 # ── Reward feedback: contract-complete celebration ───────────────────────────
 BANNER_DURATION_MS    = 3000   # how long a reward banner stays up before clearing
 BANNER_FADE_MS        = 800    # fade-out window at the end of that duration
