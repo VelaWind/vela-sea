@@ -1,3 +1,24 @@
+# PLAYTEST NOTES
+
+## v0.5.1 update — pacing fixed (the #1 issue below)
+
+The biggest gap called out in v0.5.0 — "the first delivery is long (~8 real
+minutes)" — is resolved:
+- Tutorial destination moved from Port Ardent (84 nm) to **Saltgate Harbour**,
+  the nearest port (~29 nm), reached via the deep south-of-Saltgate corridor.
+- A 5th guided step teaches the time-compression keys, and the sim **auto-bumps
+  to 3× during the transit** (back to 1× for the docking approach).
+- Result: first payout now lands in **~1.2–2.8 real minutes** (clean vs
+  weather-affected runs) instead of ~8. Bot Scenario 15 confirms <4 sim-hours.
+- Transit is also less dead: cosmetic flavour lines ("Passing FV Skerrywatch to
+  starboard", "Entering Saltgate Harbour approach") plus the live HUD distance
+  countdown keep the sail feeling alive.
+
+Everything below is the original v0.5.0 assessment, kept for context. The "first
+delivery is long" item under *What still feels flat* is now addressed.
+
+---
+
 # PLAYTEST NOTES — v0.5.0 "First Five Minutes" pass
 
 Brutally honest assessment of the new-player experience after the onboarding +

@@ -7,7 +7,7 @@ simulation is easy to balance and tweak without hunting through the code.
 # ============================================================================
 # Game identity & persistence
 # ============================================================================
-GAME_VERSION  = "0.5.0"        # shown on the title screen and stamped into saves
+GAME_VERSION  = "0.5.1"        # shown on the title screen and stamped into saves
 SAVE_FILEPATH = "save.json"    # career save file, relative to the working dir
 
 # ============================================================================
