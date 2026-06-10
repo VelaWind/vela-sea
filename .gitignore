@@ -32,5 +32,6 @@ Thumbs.db
 # ── Claude Code local config (machine-specific, not project state) ───────────
 .claude/
 
-# ── Save data (player-local, never committed) ──
+# ── Player-local state (never committed) ──
 save.json
+settings.json
