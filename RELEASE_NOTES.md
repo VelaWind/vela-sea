@@ -1,3 +1,38 @@
+# Meridian Sea — v0.6.0 Release Notes
+
+Clickable menus and a complete, persisted settings system, reachable from the
+title screen and in-game.
+
+## New in this build
+
+### Clickable menus
+- The title menu (New Career / Continue / **Settings** / Quit) is fully
+  mouse-driven with hover states; keyboard navigation still works as a fallback.
+- New in-game **pause menu** (Esc): Resume / Settings / Save & Quit to Title.
+  Opening it freezes the sim; Save & Quit persists your career and returns to the
+  title with the save intact.
+
+### Settings (persisted to `settings.json`)
+- **Audio:** master / effects / music volume sliders, applied live.
+- **Display:** windowed/fullscreen toggle + resolution selector — changes re-init
+  the window and rebuild the view without losing your game.
+- **Controls:** rebind any core action (throttle, helm, pause, follow-cam, etc.)
+  — click a row and press the new key. Duplicate and reserved keys are rejected
+  with a warning.
+- **Gameplay:** difficulty preset (Easy / Normal / Hard — scales zone fines and
+  grounding damage by 0.5× / 1.0× / 1.5×) and a voyage-flavour log toggle.
+- Settings save to the same user-writable place as the career save
+  (`%APPDATA%/MeridianSea/settings.json` in the packaged build); defaults exactly
+  reproduce prior behaviour, so an absent file changes nothing.
+
+### Under the hood
+- `engine/settings.py` (pure Python) is the single source of truth; input now
+  routes through a rebindable action→key map instead of hardcoded keys.
+- Tests: pytest 16/16; gameplay bot 16/16 (new Scenario 16 covers settings
+  save/load and a remapped key driving the throttle).
+
+---
+
 # Meridian Sea — v0.4.0 Release Notes
 
 This release turns the passive traffic simulator into a full maritime career

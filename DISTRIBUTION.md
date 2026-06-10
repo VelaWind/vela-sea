@@ -36,7 +36,7 @@ What the spec does:
 
 ```
 python -c "import zipfile,os; src='dist/MeridianSea'; \
-z=zipfile.ZipFile('MeridianSea_v0.5.1.zip','w',zipfile.ZIP_DEFLATED,compresslevel=9); \
+z=zipfile.ZipFile('MeridianSea_v0.6.0.zip','w',zipfile.ZIP_DEFLATED,compresslevel=9); \
 [z.write(os.path.join(r,f),'MeridianSea/'+os.path.relpath(os.path.join(r,f),src).replace(os.sep,'/')) \
 for r,_,fs in os.walk(src) for f in fs]; z.close()"
 ```
@@ -51,12 +51,12 @@ for r,_,fs in os.walk(src) for f in fs]; z.close()"
 ## Version naming
 
 `MeridianSea_v<MAJOR>.<MINOR>.<PATCH>.zip`, matching `GAME_VERSION` in
-`config.py` (e.g. `MeridianSea_v0.5.1.zip`). Bump `GAME_VERSION` first, rebuild,
+`config.py` (e.g. `MeridianSea_v0.6.0.zip`). Bump `GAME_VERSION` first, rebuild,
 then zip — the version shows on the title screen and is stamped into saves.
 
 ## For testers
 
-1. Download `MeridianSea_v0.5.1.zip`.
+1. Download `MeridianSea_v0.6.0.zip`.
 2. Unzip anywhere (Desktop, Downloads — anywhere writable).
 3. Open the `MeridianSea` folder and run **`MeridianSea.exe`**.
 
@@ -70,16 +70,18 @@ occasionally quarantines unsigned PyInstaller exes as a false positive. This is
 normal for indie PyInstaller builds; the real fix is an Authenticode code-signing
 certificate (paid) for a public release.
 
-## Where the game keeps its save
+## Where the game keeps its save & settings
 
-- **Frozen (.exe):** `%APPDATA%\MeridianSea\save.json`
-  (e.g. `C:\Users\<you>\AppData\Roaming\MeridianSea\save.json`) — always
-  writable, even if the app is unzipped under `Program Files`.
-- **From source:** `save.json` in the working directory (dev/test behaviour
-  unchanged).
+- **Frozen (.exe):** `%APPDATA%\MeridianSea\` — both `save.json` (career) and
+  `settings.json` (audio/display/keybinds/gameplay) live here
+  (e.g. `C:\Users\<you>\AppData\Roaming\MeridianSea\`) — always writable, even if
+  the app is unzipped under `Program Files`.
+- **From source:** `save.json` / `settings.json` in the working directory
+  (dev/test behaviour unchanged).
 
 This split is handled by `config.user_data_dir()` (keyed on `sys.frozen`), so the
-bundle directory itself is never written to. Sounds are likewise **read** from
+bundle directory itself is never written to. A missing `settings.json` just means
+defaults (identical to prior behaviour). Sounds are likewise **read** from
 the bundle (`config.resource_path('assets/sounds')` → `sys._MEIPASS`); the wavs
 are pre-generated and bundled, so the sound layer never needs to write into the
 read-only bundle at runtime.

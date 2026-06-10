@@ -886,12 +886,84 @@ def scenario_15():
 
 
 # ===========================================================================
-# Step 16 — Final report
+# Step 16 — Scenario 16: settings persist + a remapped key drives gameplay
+# ===========================================================================
+
+def scenario_16():
+    """The settings system: save/load round-trips exactly, the difficulty preset
+    changes the fine/damage multipliers, and a REMAPPED key actually drives the
+    throttle action through handle_events (while the old key no longer does)."""
+    import pygame
+    from engine.settings import Settings
+
+    # 1) save/load round-trip to a temp file (never touches the player's settings)
+    path = os.path.join(tempfile.gettempdir(), "ms_settings_scenario16.json")
+    s = Settings()
+    s.master_volume = 0.25
+    s.sfx_volume = 0.4
+    s.difficulty = "hard"
+    s.voyage_flavour = False
+    s.fullscreen = True
+    s.resolution = (1600, 900)
+    s.keybinds["throttle_up"] = "k"
+    s.save(path)
+    s2 = Settings.load(path)
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    roundtrip_ok = (
+        s2.master_volume == 0.25 and s2.sfx_volume == 0.4
+        and s2.difficulty == "hard" and s2.voyage_flavour is False
+        and s2.fullscreen is True and s2.resolution == (1600, 900)
+        and s2.keybinds["throttle_up"] == "k")
+
+    # 2) difficulty preset measurably changes the multipliers main.py applies
+    diff_ok = (s2.fine_multiplier() == 1.5 and s2.damage_multiplier() == 1.5
+               and Settings().fine_multiplier() == 1.0)
+
+    # 3) a remapped key drives the throttle action through handle_events
+    game = make_game()
+    pv = game.player_vessel
+    game.settings.keybinds["throttle_up"] = "k"
+    game._rebuild_keybinds()
+    pv.status = "underway"
+    pv.target_speed = 0.0
+    pygame.event.clear()
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_k))
+    game.handle_events()
+    remap_ok = pv.target_speed > 0.0
+    speed_after_remap = pv.target_speed
+
+    # the OLD default throttle key (w) no longer drives throttle after remapping
+    pv.target_speed = 0.0
+    pygame.event.clear()
+    pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_w))
+    game.handle_events()
+    old_key_dead = pv.target_speed == 0.0
+
+    passed = roundtrip_ok and diff_ok and remap_ok and old_key_dead
+    return Result(
+        16, "Settings & rebind", passed,
+        summary=(f"settings round-trip + hard preset (x1.5); remapped K drove "
+                 f"throttle to {speed_after_remap:.0f} kn, old W is inert"),
+        expected=("save/load exact, difficulty mult 1.5, remapped key throttles, "
+                  "old key inert"),
+        got=(f"roundtrip={roundtrip_ok}, diff={diff_ok}, remap_drove={remap_ok}, "
+             f"old_key_dead={old_key_dead}"),
+        cause=("engine/settings.py save/load, difficulty multipliers, or "
+               "Game._rebuild_keybinds / keybind lookup in handle_events"),
+    )
+
+
+# ===========================================================================
+# Step 17 — Final report
 # ===========================================================================
 
 SCENARIOS = [scenario_1, scenario_2, scenario_3, scenario_4, scenario_5,
              scenario_6, scenario_7, scenario_8, scenario_9, scenario_10,
-             scenario_11, scenario_12, scenario_13, scenario_14, scenario_15]
+             scenario_11, scenario_12, scenario_13, scenario_14, scenario_15,
+             scenario_16]
 
 
 def run_all_scenarios():

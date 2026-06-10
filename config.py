@@ -39,7 +39,7 @@ def user_data_dir() -> str:
 # ============================================================================
 # Game identity & persistence
 # ============================================================================
-GAME_VERSION  = "0.5.1"        # shown on the title screen and stamped into saves
+GAME_VERSION  = "0.6.0"        # shown on the title screen and stamped into saves
 # Career save lives in a user-writable location: %APPDATA%/MeridianSea when
 # frozen (the bundle dir is read-only), cwd-relative "save.json" from source.
 SAVE_FILEPATH = os.path.join(user_data_dir(), "save.json")
