@@ -2334,6 +2334,7 @@ class Game:
 
             self.update_simulation(dt)
             self.chart.draw_all(world=self.world, environment=self.environment)
+            title.surface = self.display   # follow any display re-init from settings
             title.draw(has_save, mouse_pos)
             pygame.display.flip()
 
@@ -2353,18 +2354,53 @@ class Game:
                     self.running = False
                     return
                 elif event.type == pygame.KEYDOWN:
-                    if screen.handle_key(event.key) == "back":
-                        self.settings.save()
+                    result = screen.handle_key(event.key, self.settings)
+                    if result == "rebind":
+                        self._rebuild_keybinds()   # remap drives input immediately
+                    elif result == "back":
+                        self._exit_settings(screen)
                         return
                 elif event.type == pygame.MOUSEMOTION:
                     screen.handle_motion(event.pos)
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    screen.end_drag()
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if screen.handle_click(event.pos, self.settings) == "back":
-                        self.settings.save()
+                        self._exit_settings(screen)
                         return
+            # Live-apply audio volumes each frame (cheap, idempotent).
+            self.sound.set_volumes(self.settings.master_volume,
+                                   self.settings.sfx_volume,
+                                   self.settings.music_volume)
+            # Keep this screen pointed at the live surface (display may have just
+            # been re-created by an earlier display change).
+            screen.surface = self.display
             self.chart.draw_all(world=self.world, environment=self.environment)
             screen.draw(self.settings, mouse_pos)
             pygame.display.flip()
+
+    def _exit_settings(self, screen) -> None:
+        """Persist settings on leaving; re-init the display if resolution or
+        fullscreen changed (camera + panels rebuilt without losing game state)."""
+        self.settings.save()
+        if getattr(screen, "_display_dirty", False):
+            self._apply_display_settings()
+
+    def _apply_display_settings(self) -> None:
+        """Re-create the window from the current display settings and re-point the
+        camera viewport + every panel + the chart at the new surface, WITHOUT
+        losing game state.  Size-keyed caches (chart depth layer, etc.) rebuild
+        on the new dimensions."""
+        self.display, w, h = self._create_display()
+        self.camera.viewport_width = w
+        self.camera.viewport_height = h
+        self.chart.surface = self.display
+        for panel in (self.vessel_info_panel, self.tech_systems_panel,
+                      self.settings_panel, self.event_log, self.fleet_panel,
+                      self.mission_panel, self.player_hud, self.career_panel,
+                      self.docking_menu, self.minimap, self.tutorial_overlay,
+                      self.reward_banner, self._game_over_screen):
+            panel.surface = self.display
 
     def _load_save(self) -> None:
         """Restore career state and player hull from save.json.

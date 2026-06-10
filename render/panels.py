@@ -12,6 +12,7 @@ from math import atan2, degrees
 
 import math
 from render.chart import _vessel_hull_points, _rotate_points
+from engine.settings import KEYBIND_ACTIONS, DIFFICULTIES, RESOLUTION_CHOICES
 from config import (
     COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_DIM, COLOR_WARNING,
     COLOR_PANEL_BG, COLOR_PANEL_BORDER, COLOR_ACCENT, COLOR_FRAME,
@@ -2152,56 +2153,242 @@ class TitleScreen:
 
 class SettingsScreen:
     """Full-screen settings menu — reachable from the title menu and the in-game
-    pause menu.  Stage 2 provides the shell (title + clickable Back); Stage 3
-    fills the body with audio / display / keybind / gameplay controls.
+    pause menu.  Clickable audio sliders, a windowed/fullscreen toggle +
+    resolution selector, a key-rebind row per action (captures the next keypress,
+    guarded against duplicates), difficulty, and a gameplay toggle.
 
-    Immediate-mode like TitleScreen: caller draws the chart, calls draw(settings,
-    mouse_pos), feeds motion/click/key.  handle_click/handle_key return "back"
-    (the caller then saves) or None.
+    Immediate-mode: the caller draws the chart, calls draw(settings, mouse_pos)
+    each frame, and feeds motion / click / (button-up) / key.  It MUTATES the
+    plain-data settings object directly; the caller live-applies side effects
+    (volumes every frame; display re-init on Back if ._display_dirty).
+    handle_click / handle_key return "back" (caller saves) or None.
     """
+
+    # Key names that may not be rebound (reserved for menu/camera/time control).
+    RESERVED_KEYS = frozenset({"escape", "return", "enter", "tab",
+                               "up", "down", "left", "right",
+                               "1", "2", "3", "4", "z"})
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_title = pygame.font.SysFont(FONT_UI_NAME, TITLE_FONT_SIZE, bold=True)
+        self._font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
+        self._font_hdr   = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self._font_lbl   = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self._font_val   = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL, bold=True)
         self._font_hint  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
-        self._font_btn   = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
-        self._back = Button("Back", font=self._font_btn)
+        self._back = Button("Back", font=self._font_hdr)
+        # Per-frame control rects (immediate-mode hit-testing).
+        self._sliders: dict = {}   # key -> track Rect ("master"/"sfx"/"music")
+        self._toggles: dict = {}   # key -> Rect ("fullscreen"/"voyage_flavour")
+        self._cyclers: dict = {}   # key -> Rect ("resolution"/"difficulty")
+        self._rebinds: dict = {}   # action -> Rect
+        # Interaction state.
+        self._capturing = None     # action name awaiting a keypress, or None
+        self._drag = None          # slider key being dragged, or None
+        self._warn = ""            # transient warning (conflict / reserved key)
+        self._warn_until = 0
+        self._display_dirty = False  # set when fullscreen/resolution change
 
+    # ------------------------------------------------------------------ helpers
+    def _set_warn(self, msg: str) -> None:
+        self._warn = msg
+        self._warn_until = pygame.time.get_ticks() + 2500
+
+    @staticmethod
+    def _res_label(res) -> str:
+        return "Auto (default)" if not res else f"{res[0]} x {res[1]}"
+
+    # ------------------------------------------------------------------ input
     def handle_motion(self, pos) -> None:
         self._back.update(pos)
+        if self._drag is not None:
+            self._apply_slider(self._drag, pos, self._drag_settings)
+
+    def end_drag(self) -> None:
+        self._drag = None
+
+    def _apply_slider(self, key, pos, settings) -> None:
+        track = self._sliders.get(key)
+        if track is None:
+            return
+        frac = max(0.0, min(1.0, (pos[0] - track.x) / max(1, track.width)))
+        if key == "master":
+            settings.master_volume = frac
+        elif key == "sfx":
+            settings.sfx_volume = frac
+        elif key == "music":
+            settings.music_volume = frac
 
     def handle_click(self, pos, settings):
+        # A click anywhere cancels an in-progress key capture.
+        if self._capturing is not None:
+            self._capturing = None
         if self._back.hit(pos):
             return "back"
+        for key, track in self._sliders.items():
+            if track.inflate(8, 16).collidepoint(pos):
+                self._drag = key
+                self._drag_settings = settings
+                self._apply_slider(key, pos, settings)
+                return None
+        for key, rect in self._toggles.items():
+            if rect.collidepoint(pos):
+                if key == "fullscreen":
+                    settings.fullscreen = not settings.fullscreen
+                    self._display_dirty = True
+                elif key == "voyage_flavour":
+                    settings.voyage_flavour = not settings.voyage_flavour
+                return None
+        for key, rect in self._cyclers.items():
+            if rect.collidepoint(pos):
+                if key == "resolution":
+                    i = RESOLUTION_CHOICES.index(settings.resolution) \
+                        if settings.resolution in RESOLUTION_CHOICES else 0
+                    settings.resolution = RESOLUTION_CHOICES[(i + 1) % len(RESOLUTION_CHOICES)]
+                    self._display_dirty = True
+                elif key == "difficulty":
+                    i = DIFFICULTIES.index(settings.difficulty) \
+                        if settings.difficulty in DIFFICULTIES else 1
+                    settings.difficulty = DIFFICULTIES[(i + 1) % len(DIFFICULTIES)]
+                return None
+        for action, rect in self._rebinds.items():
+            if rect.collidepoint(pos):
+                self._capturing = action     # next keypress sets this bind
+                return None
         return None
 
-    def handle_key(self, key: int):
+    def handle_key(self, key, settings):
+        """In capture mode, bind the pressed key to the action (with conflict
+        guard).  Otherwise Esc/Enter returns "back"."""
+        if self._capturing is not None:
+            if key == pygame.K_ESCAPE:
+                self._capturing = None
+                return None
+            name = pygame.key.name(key)
+            if name in self.RESERVED_KEYS:
+                self._set_warn(f"'{name}' is reserved — pick another key")
+                return None
+            for other, bound in settings.keybinds.items():
+                if other != self._capturing and bound == name:
+                    self._set_warn(f"'{name}' already bound to {other.replace('_', ' ')}")
+                    return None
+            settings.keybinds[self._capturing] = name
+            self._capturing = None
+            return "rebind"
         if key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER):
             return "back"
         return None
 
+    # ------------------------------------------------------------------ draw
+    def _slider(self, label, key, value, lx, cy, col_w, mouse_pos):
+        self.surface.blit(self._font_lbl.render(label, True, COLOR_TEXT_PRIMARY), (lx, cy))
+        track = pygame.Rect(lx + 96, cy + 7, col_w - 150, 8)
+        self._sliders[key] = track
+        pygame.draw.rect(self.surface, COLOR_FRAME, track, border_radius=4)
+        fill_w = int(track.width * max(0.0, min(1.0, value)))
+        if fill_w > 0:
+            pygame.draw.rect(self.surface, COLOR_ACCENT,
+                             (track.x, track.y, fill_w, track.height), border_radius=4)
+        kx = track.x + fill_w
+        pygame.draw.circle(self.surface, COLOR_TEXT_PRIMARY, (kx, track.centery), 6)
+        pct = self._font_val.render(f"{int(round(value * 100))}%", True, COLOR_TEXT_SECONDARY)
+        self.surface.blit(pct, (track.right + 12, cy))
+        return cy + 32
+
+    def _pill(self, label, key, on, store, lx, cy, col_w, mouse_pos):
+        self.surface.blit(self._font_lbl.render(label, True, COLOR_TEXT_PRIMARY), (lx, cy))
+        rect = pygame.Rect(lx + col_w - 96, cy - 2, 84, 26)
+        store[key] = rect
+        hover = rect.collidepoint(mouse_pos)
+        col = COLOR_OBJECTIVE if on else COLOR_TEXT_DIM
+        pygame.draw.rect(self.surface, (*COLOR_PANEL_BG, 255), rect, border_radius=13)
+        pygame.draw.rect(self.surface, COLOR_ACCENT if hover else col, rect, 2, border_radius=13)
+        t = self._font_val.render("On" if on else "Off", True, col)
+        self.surface.blit(t, (rect.centerx - t.get_width() // 2, rect.centery - t.get_height() // 2))
+        return cy + 32
+
+    def _cycler(self, label, key, value_text, lx, cy, col_w, mouse_pos):
+        self.surface.blit(self._font_lbl.render(label, True, COLOR_TEXT_PRIMARY), (lx, cy))
+        rect = pygame.Rect(lx + col_w - 176, cy - 2, 164, 26)
+        self._cyclers[key] = rect
+        hover = rect.collidepoint(mouse_pos)
+        pygame.draw.rect(self.surface, COLOR_ACCENT if hover else COLOR_FRAME, rect, 1, border_radius=6)
+        t = self._font_val.render(f"◀  {value_text}  ▶", True,
+                                  COLOR_ACCENT if hover else COLOR_TEXT_PRIMARY)
+        self.surface.blit(t, (rect.centerx - t.get_width() // 2, rect.centery - t.get_height() // 2))
+        return cy + 32
+
+    def _rebind(self, action, label, name, lx, cy, col_w, mouse_pos):
+        self.surface.blit(self._font_lbl.render(label, True, COLOR_TEXT_PRIMARY), (lx, cy))
+        rect = pygame.Rect(lx + col_w - 132, cy - 2, 120, 24)
+        self._rebinds[action] = rect
+        capturing = (self._capturing == action)
+        hover = rect.collidepoint(mouse_pos)
+        border = COLOR_WARNING if capturing else (COLOR_ACCENT if hover else COLOR_FRAME)
+        pygame.draw.rect(self.surface, border, rect, 1, border_radius=6)
+        text = "press a key..." if capturing else name
+        col = COLOR_WARNING if capturing else COLOR_TEXT_PRIMARY
+        t = self._font_val.render(text, True, col)
+        self.surface.blit(t, (rect.centerx - t.get_width() // 2, rect.centery - t.get_height() // 2))
+        return cy + 27
+
     def draw(self, settings, mouse_pos=(-1, -1)) -> None:
         vw, vh = self.surface.get_size()
-        w, h = min(720, vw - 80), min(620, vh - 80)
+        w, h = min(960, vw - 60), min(680, vh - 50)
         x = vw // 2 - w // 2
         y = vh // 2 - h // 2
 
         panel = pygame.Surface((w, h), pygame.SRCALPHA)
-        pygame.draw.rect(panel, (*COLOR_PANEL_BG[:3], 244), panel.get_rect(), border_radius=18)
+        pygame.draw.rect(panel, (*COLOR_PANEL_BG[:3], 248), panel.get_rect(), border_radius=18)
         pygame.draw.rect(panel, COLOR_PANEL_BORDER, panel.get_rect(), 2, border_radius=18)
         self.surface.blit(panel, (x, y))
 
         title_surf = self._font_title.render("SETTINGS", True, COLOR_ACCENT)
-        self.surface.blit(title_surf, (vw // 2 - title_surf.get_width() // 2, y + 28))
+        self.surface.blit(title_surf, (vw // 2 - title_surf.get_width() // 2, y + 20))
 
-        # Back button, bottom-right of the panel.
-        self._back.rect = pygame.Rect(x + w - 150, y + h - 58, 120, 38)
+        self._sliders.clear(); self._toggles.clear()
+        self._cyclers.clear(); self._rebinds.clear()
+
+        top = y + 64
+        col_w = (w - 110) // 2
+        lx = x + 36
+        rx = x + w // 2 + 18
+
+        # ── Left column: AUDIO / DISPLAY / GAMEPLAY ──
+        cy = top
+        self.surface.blit(self._font_hdr.render("AUDIO", True, COLOR_TEXT_SECONDARY), (lx, cy)); cy += 30
+        cy = self._slider("Master", "master", settings.master_volume, lx, cy, col_w, mouse_pos)
+        cy = self._slider("Effects", "sfx", settings.sfx_volume, lx, cy, col_w, mouse_pos)
+        cy = self._slider("Music", "music", settings.music_volume, lx, cy, col_w, mouse_pos)
+        cy += 14
+        self.surface.blit(self._font_hdr.render("DISPLAY", True, COLOR_TEXT_SECONDARY), (lx, cy)); cy += 30
+        cy = self._pill("Fullscreen", "fullscreen", settings.fullscreen, self._toggles, lx, cy, col_w, mouse_pos)
+        cy = self._cycler("Resolution", "resolution", self._res_label(settings.resolution), lx, cy, col_w, mouse_pos)
+        cy += 14
+        self.surface.blit(self._font_hdr.render("GAMEPLAY", True, COLOR_TEXT_SECONDARY), (lx, cy)); cy += 30
+        cy = self._cycler("Difficulty", "difficulty", settings.difficulty.capitalize(), lx, cy, col_w, mouse_pos)
+        cy = self._pill("Voyage flavour", "voyage_flavour", settings.voyage_flavour, self._toggles, lx, cy, col_w, mouse_pos)
+
+        # ── Right column: CONTROLS (rebind rows) ──
+        cy = top
+        self.surface.blit(self._font_hdr.render("CONTROLS", True, COLOR_TEXT_SECONDARY), (rx, cy))
+        tip = self._font_hint.render("click a key to rebind", True, COLOR_TEXT_DIM)
+        self.surface.blit(tip, (rx + col_w - tip.get_width(), cy + 4)); cy += 30
+        for action, label in KEYBIND_ACTIONS:
+            cy = self._rebind(action, label, settings.keybinds.get(action, "?"),
+                              rx, cy, col_w, mouse_pos)
+
+        # ── Footer: warning + Back ──
+        if self._warn and pygame.time.get_ticks() < self._warn_until:
+            wsurf = self._font_hint.render(self._warn, True, COLOR_WARNING)
+            self.surface.blit(wsurf, (x + 36, y + h - 38))
+        else:
+            hint = self._font_hint.render("Esc / Back to return  ·  changes save on Back",
+                                          True, COLOR_TEXT_DIM)
+            self.surface.blit(hint, (x + 36, y + h - 38))
+        self._back.rect = pygame.Rect(x + w - 150, y + h - 52, 120, 38)
         self._back.update(mouse_pos)
         self._back.draw(self.surface)
-
-        hint = "Click Back or press Esc to return"
-        hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
-        self.surface.blit(hint_surf, (x + 30, y + h - hint_surf.get_height() - 20))
 
 
 # ---------------------------------------------------------------------------
