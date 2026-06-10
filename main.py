@@ -78,6 +78,7 @@ from config import NM_PER_WORLD_UNIT
 from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
+from engine.settings import Settings, DEFAULT_KEYBINDS
 
 
 # ---------------------------------------------------------------------------
@@ -523,14 +524,17 @@ class Game:
     def __init__(self):
         """Initialize Pygame and the game state."""
         pygame.init()
-        display_info = pygame.display.Info()
-        display_width = min(max(WINDOW_MIN_WIDTH, int(display_info.current_w * WINDOW_SCALE_FACTOR)), display_info.current_w)
-        display_height = min(max(WINDOW_MIN_HEIGHT, int(display_info.current_h * WINDOW_SCALE_FACTOR)), display_info.current_h)
-        self.display = pygame.display.set_mode((display_width, display_height))
+        # Persisted preferences (audio/display/keybinds/gameplay).  Defaults match
+        # the old hardcoded behaviour, so an absent settings.json changes nothing.
+        self.settings = Settings.load()
+        self.display, display_width, display_height = self._create_display()
         pygame.display.set_caption(WINDOW_TITLE)
         self.clock = pygame.time.Clock()
         self.running = True
         self.is_paused = False
+
+        # Rebindable input: action -> keycode maps built from the keybind settings.
+        self._rebuild_keybinds()
 
         # Camera and rendering
         self.camera = Camera(display_width, display_height)
@@ -562,6 +566,9 @@ class Game:
         # Audio — constructed after pygame.init(); falls back to silence on
         # any mixer failure.  Ambient sea bed starts immediately.
         self.sound = SoundManager()
+        self.sound.set_volumes(self.settings.master_volume,
+                               self.settings.sfx_volume,
+                               self.settings.music_volume)
         self.sound.start_ambient()
 
         # Game-over state
@@ -625,6 +632,43 @@ class Game:
         # Time tracking for fixed timesteps
         self.accumulator = 0.0  # accumulated time for simulation
         self.last_sim_steps = 0  # steps executed last frame (exposed for diagnostics)
+
+    def _create_display(self):
+        """Create the window surface from settings (resolution + fullscreen),
+        falling back to the desktop-scaled default.  Returns (surface, w, h).
+
+        resolution=None + windowed reproduces the original behaviour exactly.
+        Used at startup and re-used when the player changes display settings.
+        """
+        info = pygame.display.Info()
+        if self.settings.resolution:
+            w, h = self.settings.resolution
+            w = min(w, info.current_w)
+            h = min(h, info.current_h)
+        else:
+            w = min(max(WINDOW_MIN_WIDTH,
+                        int(info.current_w * WINDOW_SCALE_FACTOR)), info.current_w)
+            h = min(max(WINDOW_MIN_HEIGHT,
+                        int(info.current_h * WINDOW_SCALE_FACTOR)), info.current_h)
+        flags = pygame.FULLSCREEN if self.settings.fullscreen else 0
+        surface = pygame.display.set_mode((w, h), flags)
+        return surface, w, h
+
+    def _rebuild_keybinds(self) -> None:
+        """(Re)build the action<->keycode maps from settings.keybinds (key names).
+
+        Keeps engine/settings.py pygame-free: it stores key NAMES, and the
+        conversion to keycodes happens here.  Call after any keybind change.
+        """
+        self.keys: dict = {}            # action -> keycode
+        self._action_by_key: dict = {}  # keycode -> action
+        for action, name in self.settings.keybinds.items():
+            try:
+                code = pygame.key.key_code(name)
+            except (ValueError, TypeError):
+                code = pygame.key.key_code(DEFAULT_KEYBINDS.get(action, "a"))
+            self.keys[action] = code
+            self._action_by_key[code] = action
 
     def _calculate_default_zoom(self, width: int, height: int) -> float:
         # Frame the main port cluster across the screen width, not the whole
@@ -1159,17 +1203,18 @@ class Game:
                                           pygame.K_SPACE, pygame.K_w)):
                     self._handle_docking_key(event.key)
 
-                elif event.key == pygame.K_SPACE:
+                elif event.key == self.keys["pause"]:
                     self.is_paused = not self.is_paused
                     self.environment.time_speed_multiplier = 0.0 if self.is_paused else 1.0
 
-                # Player throttle — W/S and UP/DOWN when player vessel active
-                elif event.key in (pygame.K_w, pygame.K_UP, pygame.K_s, pygame.K_DOWN):
+                # Player throttle — bound throttle keys / UP-DOWN when player active
+                elif event.key in (self.keys["throttle_up"], pygame.K_UP,
+                                   self.keys["throttle_down"], pygame.K_DOWN):
                     _pv_active = (self.player_vessel is not None
                                   and not self.settings_panel.is_visible)
                     if _pv_active:
                         pv = self.player_vessel
-                        if event.key in (pygame.K_w, pygame.K_UP):
+                        if event.key in (self.keys["throttle_up"], pygame.K_UP):
                             pv.target_speed = min(pv.max_speed,
                                                   pv.target_speed + PLAYER_THROTTLE_STEP)
                         else:
@@ -1181,12 +1226,12 @@ class Game:
                         self._throttle_flash_until = (
                             pygame.time.get_ticks() + THROTTLE_FLASH_MS)
                     else:
-                        # No player vessel — arrow keys pan map; S opens settings
+                        # No player vessel — arrows pan map; throttle-down opens settings
                         if event.key == pygame.K_UP:
                             self.camera.pan(0, PAN_SPEED * (1.0 / TARGET_FPS))
                         elif event.key == pygame.K_DOWN:
                             self.camera.pan(0, -PAN_SPEED * (1.0 / TARGET_FPS))
-                        elif event.key == pygame.K_s:
+                        elif event.key == self.keys["throttle_down"]:
                             self.settings_panel.toggle_visibility()
                             self.environment.weather_drift_enabled = not self.settings_panel.is_visible
 
@@ -1212,26 +1257,26 @@ class Game:
                     self._cycle_vessel_selection()
 
                 # Toggle technical systems panel
-                elif event.key == pygame.K_t:
+                elif event.key == self.keys["tech"]:
                     self.tech_systems_panel.toggle_visibility()
 
                 # Toggle follow cam on/off for player vessel
-                elif event.key == pygame.K_f and self.player_vessel is not None:
+                elif event.key == self.keys["follow_cam"] and self.player_vessel is not None:
                     if self.camera.follow_target is self.player_vessel:
                         self.camera.set_follow_target(None)
                     else:
                         self.camera.set_follow_target(self.player_vessel)
 
                 # Toggle career panel
-                elif event.key == pygame.K_j and self.player_vessel is not None:
+                elif event.key == self.keys["career"] and self.player_vessel is not None:
                     self.career_panel.toggle_visibility()
 
                 # Toggle minimap
-                elif event.key == pygame.K_m:
+                elif event.key == self.keys["minimap"]:
                     self.minimap.is_visible = not self.minimap.is_visible
 
-                # Skip onboarding (H) — persisted so it never returns this save.
-                elif event.key == pygame.K_h and self._tutorial_active:
+                # Skip onboarding — persisted so it never returns this save.
+                elif event.key == self.keys["skip_tutorial"] and self._tutorial_active:
                     self._tutorial_active = False
                     self.career.tutorial_complete = True
                     self._tutorial_step = len(TUTORIAL_STEPS)
@@ -1244,11 +1289,8 @@ class Game:
                     self.event_log.add(_sim_time_str(self.environment),
                                        "Tutorial skipped", EVENT_COLOR_WEATHER)
 
-                # Toggle settings panel — E always; S only when no player vessel
-                elif event.key == pygame.K_e:
-                    self.settings_panel.toggle_visibility()
-                    self.environment.weather_drift_enabled = not self.settings_panel.is_visible
-                elif event.key == pygame.K_s and self.player_vessel is None:
+                # Toggle settings panel — bound settings key always
+                elif event.key == self.keys["settings"]:
                     self.settings_panel.toggle_visibility()
                     self.environment.weather_drift_enabled = not self.settings_panel.is_visible
 
@@ -1727,9 +1769,9 @@ class Game:
                     if not self.settings_panel.is_visible:
                         _keys = pygame.key.get_pressed()
                         _turn = 0.0
-                        if _keys[pygame.K_a] or _keys[pygame.K_LEFT]:
+                        if _keys[self.keys["helm_left"]] or _keys[pygame.K_LEFT]:
                             _turn -= PLAYER_TURN_RATE
-                        if _keys[pygame.K_d] or _keys[pygame.K_RIGHT]:
+                        if _keys[self.keys["helm_right"]] or _keys[pygame.K_RIGHT]:
                             _turn += PLAYER_TURN_RATE
                         if _turn and vessel.status == "underway":
                             # Manual helm overrides and cancels the autopilot.
@@ -1855,6 +1897,8 @@ class Game:
                                 if (_active_c is not None
                                         and _active_c.job_type == "hazmat"):
                                     _fine *= HAZMAT_FINE_MULT
+                                # Difficulty preset scales fines (Easy 0.5x / Hard 1.5x).
+                                _fine *= self.settings.fine_multiplier()
                                 self.career.force_spend(
                                     _fine, f"Zone fine: {_viol_zone.name}")
                                 self.career.fines_paid += _fine
@@ -2062,7 +2106,8 @@ class Game:
                     # Player hull damage on grounding.
                     if _is_player:
                         vessel.hull_integrity = max(
-                            0.0, vessel.hull_integrity - GROUNDING_HULL_DAMAGE)
+                            0.0, vessel.hull_integrity
+                            - GROUNDING_HULL_DAMAGE * self.settings.damage_multiplier())
                         self.event_log.add(
                             _t,
                             f"HULL DAMAGE — integrity {vessel.hull_integrity * 100:.0f}%",
@@ -2409,6 +2454,8 @@ class Game:
         """Occasionally drop a cosmetic log line during a sail — passing a
         vessel, nearing a port, or open water — so transit isn't dead air.
         Throttled by FLAVOR_COOLDOWN_S of sim-time and de-duped per voyage."""
+        if not self.settings.voyage_flavour:   # gameplay toggle
+            return
         pv = self.player_vessel
         if pv is None or pv.status not in ("underway", "avoiding"):
             return

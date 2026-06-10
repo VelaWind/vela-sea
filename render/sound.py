@@ -25,6 +25,9 @@ SAMPLE_RATE = 22050
 SOUND_NAMES = ("engine_loop", "docking", "warning", "mayday", "ambient_sea",
                "throttle_click", "success_chime")
 
+# Loops/ambience scale with the MUSIC slider; everything else with the SFX slider.
+MUSIC_SOUNDS = frozenset({"engine_loop", "ambient_sea"})
+
 
 # ---------------------------------------------------------------------------
 # WAV synthesis — pure stdlib, deterministic output
@@ -192,7 +195,9 @@ class SoundManager:
 
     def __init__(self, sound_dir: str = SOUND_DIR) -> None:
         self.enabled = SOUND_ENABLED
-        self.volume = SOUND_VOLUME
+        self.volume = SOUND_VOLUME       # master
+        self.sfx_volume = 1.0            # one-shot effects category
+        self.music_volume = 1.0          # loops / ambience category
         self._sounds: dict = {}
         self._engine_channel = None
         self._ambient_channel = None
@@ -214,6 +219,14 @@ class SoundManager:
     def set_volume(self, volume: float) -> None:
         """Set the master volume (0.0–1.0) and reapply the per-sound mix."""
         self.volume = max(0.0, min(1.0, volume))
+        if self.enabled:
+            self._apply_volumes()
+
+    def set_volumes(self, master: float, sfx: float, music: float) -> None:
+        """Set master + per-category (sfx / music) volumes and reapply the mix."""
+        self.volume = max(0.0, min(1.0, master))
+        self.sfx_volume = max(0.0, min(1.0, sfx))
+        self.music_volume = max(0.0, min(1.0, music))
         if self.enabled:
             self._apply_volumes()
 
@@ -272,5 +285,8 @@ class SoundManager:
     # ----------------------------------------------------------------- private
 
     def _apply_volumes(self) -> None:
+        # Effective per-sound = master x category (music/sfx) x relative mix.
         for name, snd in self._sounds.items():
-            snd.set_volume(self.volume * SOUND_RELATIVE_VOLUMES.get(name, 1.0))
+            category = self.music_volume if name in MUSIC_SOUNDS else self.sfx_volume
+            snd.set_volume(self.volume * category
+                           * SOUND_RELATIVE_VOLUMES.get(name, 1.0))
