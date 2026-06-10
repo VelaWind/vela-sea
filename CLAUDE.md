@@ -1,7 +1,7 @@
 # CLAUDE.md — AI Context for gps-simulator (Meridian Sea)
 
 ## Project Overview
-**Meridian Sea** — a Python + Pygame maritime career simulator (v0.4.0,
+**Meridian Sea** — a Python + Pygame maritime career simulator (v0.5.0,
 Steam release candidate). The player captains MV Velawind on a 210 nm
 fictional sea: accept contracts, navigate, dock, earn money and reputation,
 unlock higher-tier work. 15 AI vessels run autonomous schedules around them
