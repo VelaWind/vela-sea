@@ -2007,21 +2007,63 @@ class DockingMenuPanel:
 # Title screen
 # ---------------------------------------------------------------------------
 
+class Button:
+    """A clickable rectangular control with a label and hover/focus highlight.
+
+    Reused by every menu (title, settings, pause).  Immediate-mode: the owner
+    sets .rect during its draw(), calls update(mouse_pos) to refresh hover, and
+    hit(pos) to test a click.  `focused` mirrors keyboard selection so mouse and
+    keyboard share one highlight.  Disabled buttons render dim and never hit.
+    """
+
+    def __init__(self, label: str = "", rect=None, enabled: bool = True,
+                 font: Optional[pygame.font.Font] = None) -> None:
+        self.label = label
+        self.rect = pygame.Rect(rect) if rect is not None else pygame.Rect(0, 0, 0, 0)
+        self.enabled = enabled
+        self.hover = False
+        self._font = font or pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+
+    def update(self, mouse_pos) -> None:
+        self.hover = self.enabled and self.rect.collidepoint(mouse_pos)
+
+    def hit(self, pos) -> bool:
+        return self.enabled and self.rect.collidepoint(pos)
+
+    def draw(self, surface: pygame.Surface, focused: bool = False,
+             label: Optional[str] = None) -> None:
+        active = self.enabled and (self.hover or focused)
+        if not self.enabled:
+            col = COLOR_TEXT_DIM
+        elif active:
+            col = COLOR_ACCENT
+        else:
+            col = COLOR_TEXT_PRIMARY
+        if active:
+            hl = pygame.Surface(self.rect.size, pygame.SRCALPHA)
+            hl.fill((255, 255, 255, 30))
+            surface.blit(hl, self.rect.topleft)
+            pygame.draw.rect(surface, COLOR_ACCENT, self.rect, 1, border_radius=6)
+        lbl = self._font.render(label if label is not None else self.label, True, col)
+        surface.blit(lbl, (self.rect.centerx - lbl.get_width() // 2,
+                           self.rect.centery - lbl.get_height() // 2))
+
+
 class TitleScreen:
     """Main-menu overlay drawn over the live chart before the game starts.
 
-    The caller owns the loop: it draws the chart first, then calls draw(),
-    and feeds KEYDOWN events to handle_key().  handle_key() returns an action
-    string ("new" | "continue" | "quit") when a menu item is confirmed, or
-    None while the player is still browsing.
+    Fully mouse-driven (hover + click) with keyboard navigation as a fallback.
+    The caller draws the chart, then calls draw(has_save, mouse_pos) each frame,
+    feeds motion to handle_motion() and clicks to handle_click(); both return an
+    action string ("new" | "continue" | "settings" | "quit") or None.
+    handle_key() keeps arrow/Enter/Esc working.
     """
 
-    # (label, action) in display order.  "Continue" is greyed out when no
-    # save file exists; confirming it then is a no-op.
+    # (label, action) in display order.  "Continue" greys out with no save.
     MENU_ITEMS = [
         ("New Career", "new"),
         ("Continue",   "continue"),
-        ("Controls",   "controls"),
+        ("Settings",   "settings"),
         ("Quit",       "quit"),
     ]
 
@@ -2032,17 +2074,21 @@ class TitleScreen:
         self._font_subtitle = pygame.font.SysFont(FONT_UI_NAME, TITLE_SUBTITLE_SIZE)
         self._font_menu     = pygame.font.SysFont(FONT_UI_NAME, TITLE_MENU_FONT_SIZE, bold=True)
         self._font_hint     = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self._buttons = [Button(label, font=self._font_menu)
+                         for label, _ in self.MENU_ITEMS]
 
+    def _action(self, i: int) -> str:
+        return self.MENU_ITEMS[i][1]
+
+    # -- keyboard fallback --
     def handle_key(self, key: int, has_save: bool):
-        """Process one KEYDOWN. Returns an action string on confirm, else None."""
         n = len(self.MENU_ITEMS)
         if key == pygame.K_UP:
             self.selected_index = (self.selected_index - 1) % n
         elif key == pygame.K_DOWN:
             self.selected_index = (self.selected_index + 1) % n
         elif key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-            action = self.MENU_ITEMS[self.selected_index][1]
-            # Continue without a save is disabled — stay on the title.
+            action = self._action(self.selected_index)
             if action == "continue" and not has_save:
                 return None
             return action
@@ -2050,7 +2096,23 @@ class TitleScreen:
             return "quit"
         return None
 
-    def draw(self, has_save: bool) -> None:
+    # -- mouse --
+    def handle_motion(self, pos) -> None:
+        for i, b in enumerate(self._buttons):
+            if b.hit(pos):
+                self.selected_index = i      # keyboard highlight follows the mouse
+                break
+
+    def handle_click(self, pos, has_save: bool):
+        for i, b in enumerate(self._buttons):
+            if b.hit(pos):
+                action = self._action(i)
+                if action == "continue" and not has_save:
+                    return None
+                return action
+        return None
+
+    def draw(self, has_save: bool, mouse_pos=(-1, -1)) -> None:
         vw, vh = self.surface.get_size()
         w, h = TITLE_PANEL_WIDTH, TITLE_PANEL_HEIGHT
         x = vw // 2 - w // 2
@@ -2063,43 +2125,83 @@ class TitleScreen:
         self.surface.blit(panel, (x, y))
 
         cy = y + 44
-
         title_surf = self._font_title.render("MERIDIAN SEA", True, COLOR_ACCENT)
         self.surface.blit(title_surf, (vw // 2 - title_surf.get_width() // 2, cy))
         cy += title_surf.get_height() + 6
-
         sub_surf = self._font_subtitle.render(
             "A Maritime Career Simulator", True, COLOR_TEXT_SECONDARY)
         self.surface.blit(sub_surf, (vw // 2 - sub_surf.get_width() // 2, cy))
         cy += sub_surf.get_height() + 40
 
+        row_h = self._font_menu.get_height() + 10
         for i, (label, action) in enumerate(self.MENU_ITEMS):
             disabled = (action == "continue" and not has_save)
-            display = f"{label}  [no save]" if disabled else label
-            if disabled:
-                col = COLOR_TEXT_DIM
-            elif i == self.selected_index:
-                col = COLOR_ACCENT
-            else:
-                col = COLOR_TEXT_PRIMARY
+            b = self._buttons[i]
+            b.rect = pygame.Rect(x + 40, cy - 5, w - 80, row_h)
+            b.enabled = not disabled
+            b.label = f"{label}  [no save]" if disabled else label
+            b.update(mouse_pos)
+            b.draw(self.surface, focused=(i == self.selected_index))
+            cy += row_h + 12
 
-            item_surf = self._font_menu.render(display, True, col)
-            ix = vw // 2 - item_surf.get_width() // 2
-            # Selection highlight bar behind the focused row.
-            if i == self.selected_index:
-                hl = pygame.Surface((w - 80, item_surf.get_height() + 10), pygame.SRCALPHA)
-                hl.fill((255, 255, 255, 18))
-                self.surface.blit(hl, (x + 40, cy - 5))
-                pygame.draw.rect(self.surface, COLOR_ACCENT,
-                                 (x + 40, cy - 5, w - 80, item_surf.get_height() + 10),
-                                 1, border_radius=6)
-            self.surface.blit(item_surf, (ix, cy))
-            cy += item_surf.get_height() + 22
-
-        hint = f"v{GAME_VERSION}  |  Arrow keys to select  |  ENTER to confirm"
+        hint = f"v{GAME_VERSION}  |  Click or use Arrow keys + Enter"
         hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
         self.surface.blit(hint_surf,
                           (vw // 2 - hint_surf.get_width() // 2, y + h - hint_surf.get_height() - 16))
+
+
+class SettingsScreen:
+    """Full-screen settings menu — reachable from the title menu and the in-game
+    pause menu.  Stage 2 provides the shell (title + clickable Back); Stage 3
+    fills the body with audio / display / keybind / gameplay controls.
+
+    Immediate-mode like TitleScreen: caller draws the chart, calls draw(settings,
+    mouse_pos), feeds motion/click/key.  handle_click/handle_key return "back"
+    (the caller then saves) or None.
+    """
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self._font_title = pygame.font.SysFont(FONT_UI_NAME, TITLE_FONT_SIZE, bold=True)
+        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self._font_btn   = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self._back = Button("Back", font=self._font_btn)
+
+    def handle_motion(self, pos) -> None:
+        self._back.update(pos)
+
+    def handle_click(self, pos, settings):
+        if self._back.hit(pos):
+            return "back"
+        return None
+
+    def handle_key(self, key: int):
+        if key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER):
+            return "back"
+        return None
+
+    def draw(self, settings, mouse_pos=(-1, -1)) -> None:
+        vw, vh = self.surface.get_size()
+        w, h = min(720, vw - 80), min(620, vh - 80)
+        x = vw // 2 - w // 2
+        y = vh // 2 - h // 2
+
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (*COLOR_PANEL_BG[:3], 244), panel.get_rect(), border_radius=18)
+        pygame.draw.rect(panel, COLOR_PANEL_BORDER, panel.get_rect(), 2, border_radius=18)
+        self.surface.blit(panel, (x, y))
+
+        title_surf = self._font_title.render("SETTINGS", True, COLOR_ACCENT)
+        self.surface.blit(title_surf, (vw // 2 - title_surf.get_width() // 2, y + 28))
+
+        # Back button, bottom-right of the panel.
+        self._back.rect = pygame.Rect(x + w - 150, y + h - 58, 120, 38)
+        self._back.update(mouse_pos)
+        self._back.draw(self.surface)
+
+        hint = "Click Back or press Esc to return"
+        hint_surf = self._font_hint.render(hint, True, COLOR_TEXT_DIM)
+        self.surface.blit(hint_surf, (x + 30, y + h - hint_surf.get_height() - 20))
 
 
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ from engine.environment import Environment
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, ControlsScreen, TutorialOverlayPanel, RewardBannerPanel
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, TutorialOverlayPanel, RewardBannerPanel, SettingsScreen
 from config import COLOR_OBJECTIVE, BANNER_PROMOTE_COLOR, BANNER_DURATION_MS
 from config import (FLAVOR_COOLDOWN_S, FLAVOR_PORT_RANGE_WU,
                     FLAVOR_VESSEL_RANGE_WU, FLAVOR_OPEN_WATER_WU)
@@ -2309,34 +2309,61 @@ class Game:
         or "quit".
         """
         title = TitleScreen(self.display)
-        controls = ControlsScreen(self.display)
-        showing_controls = False
         while True:
             dt = self.clock.tick(TARGET_FPS) / 1000.0
             has_save = os.path.exists(SAVE_FILEPATH)
+            mouse_pos = pygame.mouse.get_pos()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return "quit"
                 elif event.type == pygame.KEYDOWN:
-                    if showing_controls:
-                        # Any dismissal key returns to the menu.
-                        if event.key in (pygame.K_ESCAPE, pygame.K_RETURN,
-                                         pygame.K_SPACE):
-                            showing_controls = False
-                        continue
                     action = title.handle_key(event.key, has_save)
-                    if action == "controls":
-                        showing_controls = True
+                    if action == "settings":
+                        self._run_settings_screen()
+                    elif action is not None:
+                        return action
+                elif event.type == pygame.MOUSEMOTION:
+                    title.handle_motion(event.pos)
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    action = title.handle_click(event.pos, has_save)
+                    if action == "settings":
+                        self._run_settings_screen()
                     elif action is not None:
                         return action
 
             self.update_simulation(dt)
             self.chart.draw_all(world=self.world, environment=self.environment)
-            if showing_controls:
-                controls.draw()
-            else:
-                title.draw(has_save)
+            title.draw(has_save, mouse_pos)
+            pygame.display.flip()
+
+    def _run_settings_screen(self) -> None:
+        """Run the settings screen modally until Back, then persist settings.json.
+
+        Reused by the title menu and the in-game pause menu.  Volume changes
+        apply live (Stage 3); the chart stays drawn underneath, but the sim does
+        not advance — settings is a modal sub-screen.
+        """
+        screen = SettingsScreen(self.display)
+        while True:
+            self.clock.tick(TARGET_FPS)
+            mouse_pos = pygame.mouse.get_pos()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    return
+                elif event.type == pygame.KEYDOWN:
+                    if screen.handle_key(event.key) == "back":
+                        self.settings.save()
+                        return
+                elif event.type == pygame.MOUSEMOTION:
+                    screen.handle_motion(event.pos)
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if screen.handle_click(event.pos, self.settings) == "back":
+                        self.settings.save()
+                        return
+            self.chart.draw_all(world=self.world, environment=self.environment)
+            screen.draw(self.settings, mouse_pos)
             pygame.display.flip()
 
     def _load_save(self) -> None:
