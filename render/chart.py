@@ -401,12 +401,21 @@ class Chart:
           3. Shallow bands — 8 tight rings of COLOR_SHALLOW_BAND fading outward,
              starting 1 step out from the polygon so none bleeds inside the land.
 
-        Cached by (zoom_bucket, vw, vh); rebuilt only when zoom or window changes.
+        Cached by (zoom_bucket, camera position, vw, vh).  The layer is rendered
+        in SCREEN space (world_to_screen per vertex), so the camera POSITION must
+        be in the key — otherwise a pan (including the follow-cam, which moves
+        nearly every frame) returns a stale surface and the glow detaches from
+        the coastline and smears.  Rebuilt when zoom, pan, or the window changes.
         """
         vw = self.surface.get_width()
         vh = self.surface.get_height()
         zoom_key = round(self.camera.zoom, 1)
-        key = (zoom_key, vw, vh)
+        # Position rounded to 0.01 wu — under 0.05 px even at max zoom, so the
+        # glow stays pixel-locked while imperceptible float jitter (a docked,
+        # idle camera) doesn't thrash the cache.
+        pos_key = (round(self.camera.position[0], 2),
+                   round(self.camera.position[1], 2))
+        key = (zoom_key, pos_key, vw, vh)
         if self._depth_key == key and self._depth_surf is not None:
             return self._depth_surf
 
