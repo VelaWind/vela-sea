@@ -47,7 +47,11 @@ from engine.environment import Environment
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
-from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, ControlsScreen
+from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, ControlsScreen, TutorialOverlayPanel
+from config import (TUTORIAL_START_ZOOM, TUTORIAL_CONTRACT_FROM, TUTORIAL_CONTRACT_TO,
+                    TUTORIAL_CONTRACT_PAYOUT, TUTORIAL_THROTTLE_SPEED_KN,
+                    TUTORIAL_HEADING_TOLERANCE, TUTORIAL_STEPS,
+                    TUTORIAL_ROUTE, TUTORIAL_WAYPOINT_RADIUS)
 from render.sound import SoundManager
 from config import MINIMAP_HEIGHT_PX, MINIMAP_MARGIN_PX
 from render.panels import EVENT_COLOR_MAYDAY, EVENT_COLOR_RESCUE, EVENT_COLOR_REFLOAT, EVENT_COLOR_WEATHER, EVENT_COLOR_MEDICAL
@@ -546,6 +550,7 @@ class Game:
         self.career_panel = CareerPanel(self.display)
         self.docking_menu = DockingMenuPanel(self.display)
         self.minimap = MinimapPanel(self.display)
+        self.tutorial_overlay = TutorialOverlayPanel(self.display)
 
         # Audio — constructed after pygame.init(); falls back to silence on
         # any mixer failure.  Ambient sea bed starts immediately.
@@ -569,6 +574,13 @@ class Game:
         self._zone_fine_cooldown: float = 0.0  # seconds until next fine can fire
         self._zone_warning_sent: bool = False  # one-time entry-warning flag
         self._storm_speed_warning_sent: bool = False
+
+        # Onboarding state — Game owns step progression, career owns the
+        # persistent tutorial_complete flag.  Activated in _begin_tutorial().
+        self._tutorial_active: bool = False
+        self._tutorial_step: int = 0
+        self._tutorial_route: list = []
+        self._tutorial_wp_index: int = 0
 
         # Simulation state
         self.world = World()
@@ -1197,6 +1209,17 @@ class Game:
                 elif event.key == pygame.K_m:
                     self.minimap.is_visible = not self.minimap.is_visible
 
+                # Skip onboarding (H) — persisted so it never returns this save.
+                elif event.key == pygame.K_h and self._tutorial_active:
+                    self._tutorial_active = False
+                    self.career.tutorial_complete = True
+                    self._tutorial_step = len(TUTORIAL_STEPS)
+                    if self.player_vessel is not None:
+                        save_career(self.career,
+                                    hull_integrity=self.player_vessel.hull_integrity)
+                    self.event_log.add(_sim_time_str(self.environment),
+                                       "Tutorial skipped", EVENT_COLOR_WEATHER)
+
                 # Toggle settings panel — E always; S only when no player vessel
                 elif event.key == pygame.K_e:
                     self.settings_panel.toggle_visibility()
@@ -1541,6 +1564,12 @@ class Game:
             if (self.career.total_deliveries >= 5
                     and self.career.fines_paid == 0):
                 self._award_achievement("Clean Record")
+            # Onboarding: completing the guided first delivery retires the
+            # tutorial for good (persisted in the auto-save below).
+            if getattr(_done, "is_tutorial", False):
+                self.career.tutorial_complete = True
+                self._tutorial_active = False
+                self._tutorial_step = len(TUTORIAL_STEPS)
         self.job_board.refresh_jobs(self.world)
         # Auto-save: docking is the natural checkpoint — the contract payout
         # above is included; menu purchases re-save when they happen.
@@ -1695,7 +1724,9 @@ class Game:
 
                     # Proximity docking: drifting into a port radius at low
                     # speed berths the ship — no destination click required.
-                    if (vessel.status == "underway"
+                    # "avoiding" counts too: collision-avoidance near a busy port
+                    # must not lock a slow, careful approach out of docking.
+                    if (vessel.status in ("underway", "avoiding")
                             and vessel.current_speed <= PLAYER_DOCKING_MAX_SPEED_KN
                             and vessel.target_speed <= PLAYER_DOCKING_MAX_SPEED_KN):
                         _dock_port = vessel._port_at(vessel.position, self.world)
@@ -1767,8 +1798,12 @@ class Game:
                                     _pt,
                                     f"WARNING — entering restricted zone: {_viol_zone.name}",
                                     EVENT_COLOR_MAYDAY)
+                            # Training wheels: the onboarding tutorial warns but
+                            # never fines — a learning captain isn't bankrupted
+                            # by the Maren approach speed limit on their first run.
                             if (self._zone_timer >= 10.0
-                                    and self._zone_fine_cooldown <= 0.0):
+                                    and self._zone_fine_cooldown <= 0.0
+                                    and not self._tutorial_active):
                                 _fine = (ZONE_FINE_NO_ENTRY
                                          if _viol_zone.kind == "no_entry"
                                          else ZONE_FINE_SPEED)
@@ -1965,7 +2000,11 @@ class Game:
                 depth = self.world.water_depth_at(
                     vessel.position, self.environment.tide_level
                 )
-                if depth < vessel.draft_m + DRAFT_SAFETY_MARGIN_M:
+                # Training wheels: the player can't run aground during the
+                # guided tutorial — the green route already keeps them in deep
+                # water; this just forgives a stray first-timer.
+                if (depth < vessel.draft_m + DRAFT_SAFETY_MARGIN_M
+                        and not (_is_player and self._tutorial_active)):
                     vessel.status = "aground"
                     vessel.current_speed = 0.0
                     vessel.distress = True   # triggers SAR dispatch next step
@@ -2056,6 +2095,9 @@ class Game:
         # One call per frame is sufficient: positions update smoothly at 60 FPS.
         update_collision_avoidance(self.world.vessels)
 
+        # Onboarding step progression (once per frame, reads live player state).
+        self._update_tutorial()
+
         # Update the camera follow target (if any)
         self.camera.update_follow()
 
@@ -2085,7 +2127,25 @@ class Game:
         self.chart.draw_all(world=self.world, environment=self.environment,
                             selected_vessel=self.selected_vessel,
                             hover_vessel=self.hover_vessel)
-        
+
+        # Always-on objective marker pointing at the active contract's
+        # destination — the single clear "go here" cue (on-screen marker +
+        # dashed line, or an edge arrow when the port is off-screen).
+        _ac = self.job_board.active
+        if _ac is not None and self.player_vessel is not None:
+            _dest = self.world.find_port(_ac.to_port)
+            if _dest is not None:
+                _dist_nm = (self.player_vessel.distance_to(_dest.position)
+                            * NM_PER_WORLD_UNIT)
+                # During the tutorial the guide line follows the safe waypoint
+                # route (remaining legs); otherwise it points straight at the port.
+                _route = (self._tutorial_route[self._tutorial_wp_index:]
+                          if self._tutorial_active and self._tutorial_route
+                          else None)
+                self.chart.draw_objective(self.player_vessel.position,
+                                          _dest.position, _ac.to_port, _dist_nm,
+                                          route=_route)
+
         # Draw UI panels
         self.vessel_info_panel.draw(self.selected_vessel, self.environment, self.world)  # Phase 2
         self.tech_systems_panel.draw(self.world, self.environment, self.selected_vessel)  # Phase 3
@@ -2119,6 +2179,12 @@ class Game:
                     self.player_vessel,
                     self.player_vessel._docked_port_name or "IN PORT",
                     self.career)
+
+        # Onboarding card — drawn above the chart/HUD so the next step is always
+        # readable, but hidden behind the settings panel.
+        if (self._tutorial_active and not self.career.tutorial_complete
+                and not self.settings_panel.is_visible):
+            self.tutorial_overlay.draw(self._tutorial_step)
 
         if self.game_over:
             self._game_over_screen.draw(
@@ -2181,8 +2247,74 @@ class Game:
         self.career.fines_paid        = data["fines_paid"]
         self.career.hull_repairs_paid = data["hull_repairs_paid"]
         self.career.achievements      = set(data.get("achievements", []))
+        # .get() so saves written before the flag existed still load cleanly.
+        self.career.tutorial_complete = bool(data.get("tutorial_complete", False))
         if self.player_vessel is not None:
             self.player_vessel.hull_integrity = data["hull_integrity"]
+
+    def _begin_tutorial(self) -> None:
+        """Open the guided first-five-minutes onboarding for a new captain.
+
+        Zooms in close on the player, follows them, and boards a guaranteed,
+        pre-accepted Maren→Ardent delivery so there is exactly one obvious thing
+        to do from the first second.  Step progression is tracked per frame in
+        _update_tutorial(); the persistent flag is set on completion.
+        """
+        pv = self.player_vessel
+        if pv is None:
+            return
+        self._tutorial_active = True
+        self._tutorial_step = 0
+        # Close, ship-filling framing so the player ship reads as "you".
+        self.camera.zoom = max(ZOOM_MIN, min(ZOOM_MAX, TUTORIAL_START_ZOOM))
+        self.camera.set_follow_target(pv)
+        # Guaranteed, pre-accepted first delivery.
+        self.job_board.refresh_jobs(self.world)
+        self.job_board.create_tutorial_contract(
+            TUTORIAL_CONTRACT_FROM, TUTORIAL_CONTRACT_TO,
+            TUTORIAL_CONTRACT_PAYOUT, self.mission_manager.sim_elapsed_s)
+        # Verified safe waypoint route Maren→Ardent (deep water around the
+        # islands); the green guide line follows it so the player never has to
+        # plot a course on their first run.  Final waypoint is the berth.
+        self._tutorial_route = [tuple(map(float, wp)) for wp in TUTORIAL_ROUTE]
+        self._tutorial_wp_index = 0
+        self.event_log.add(_sim_time_str(self.environment),
+                           f"New contract — deliver to {TUTORIAL_CONTRACT_TO}",
+                           EVENT_COLOR_WEATHER)
+
+    def _update_tutorial(self) -> None:
+        """Advance the onboarding waypoint and step as the player performs each
+        action.  Steps light as the player throttles up (0→1), steers toward the
+        green marker (1→2), and reaches the final approach (2→3); step 3 clears
+        on docking in _on_player_docked()."""
+        if not self._tutorial_active:
+            return
+        pv = self.player_vessel
+        if pv is None or not self._tutorial_route:
+            return
+
+        route = self._tutorial_route
+        last = len(route) - 1
+        # Advance to the next waypoint once the current one is reached.
+        target = route[self._tutorial_wp_index]
+        if (self._tutorial_wp_index < last
+                and pv.distance_to(target) < TUTORIAL_WAYPOINT_RADIUS):
+            self._tutorial_wp_index += 1
+            target = route[self._tutorial_wp_index]
+
+        if self._tutorial_step == 0:
+            if pv.current_speed > TUTORIAL_THROTTLE_SPEED_KN:
+                self._tutorial_step = 1
+        elif self._tutorial_step == 1:
+            bearing = pv.bearing_to(target)
+            diff = abs((pv.heading - bearing + 180.0) % 360.0 - 180.0)
+            if diff <= TUTORIAL_HEADING_TOLERANCE:
+                self._tutorial_step = 2
+        elif self._tutorial_step == 2:
+            # On the final leg to the destination port.
+            if self._tutorial_wp_index >= last:
+                self._tutorial_step = 3
+        # Step 3 (the final "dock" step) completes in _on_player_docked().
 
     def run(self, skip_title: bool = False) -> None:
         """Run the title menu, then the main game loop until quit."""
@@ -2192,6 +2324,10 @@ class Game:
                 self.running = False
             elif action == "continue":
                 self._load_save()
+        # A brand-new career (tutorial not yet finished) opens zoomed in on the
+        # player with a guided first contract; a returning captain skips it.
+        if self.player_vessel is not None and not self.career.tutorial_complete:
+            self._begin_tutorial()
         # Engage follow-cam now the title overview is done: gameplay tracks the
         # player ship, while the title screen kept the port cluster framed.
         if self.player_vessel is not None and PLAYER_FOLLOW_CAM:

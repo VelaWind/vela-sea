@@ -19,6 +19,7 @@ from config import (
     CHARTER_RATE_PER_NM, CHARTER_DEADLINE_RANGE_H,
     CONTRACT_DEADLINE_RANGE_H,
     REP_TIER_2, REP_TIER_4, REP_TIER_TABLE, VIP_CHARTER_RATE_MULT,
+    TUTORIAL_CONTRACT_DEADLINE_H,
 )
 
 
@@ -35,6 +36,7 @@ class Contract:
     status: str = "available"   # "available" | "active" | "completed" | "failed"
     accepted_at_sim_s: float = 0.0
     description: str = ""       # special-requirement text shown on the panel
+    is_tutorial: bool = False   # the guided first delivery — drives onboarding
 
 
 # (job_type, payout_rate_per_nm, reputation_required)
@@ -92,6 +94,7 @@ class PlayerCareer:
         self.hull_repairs_paid: float = 0.0
         self.achievements: set = set()  # unlocked achievement names
         self._history: List[str] = []   # capped at 20 entries
+        self.tutorial_complete: bool = False  # first-delivery onboarding finished
 
     @property
     def tier_name(self) -> str:
@@ -158,6 +161,8 @@ def save_career(career: "PlayerCareer", filepath: str = SAVE_FILEPATH,
         "hull_integrity": hull_integrity,
         # Sorted for a stable file diff; restored as a set on load.
         "achievements": sorted(career.achievements),
+        # Onboarding flag — read back with .get() so pre-flag saves still load.
+        "tutorial_complete": career.tutorial_complete,
     }
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -216,6 +221,33 @@ class JobBoard:
         self._contracts = [c for c in self._contracts if c.status == "active"]
         while len(self._contracts) < self.SLOT_COUNT:
             self._contracts.append(self._generate(port_names, world))
+
+    def create_tutorial_contract(self, from_port: str, to_port: str,
+                                 payout: float,
+                                 sim_elapsed_s: float = 0.0) -> Contract:
+        """Build, activate, and board a guaranteed first delivery for onboarding.
+
+        Bypasses the reputation gate and the random generator so a brand-new
+        player always has exactly one obvious, already-accepted objective from
+        the first second.  Returns the contract (also set as the active job).
+        """
+        self._id_counter += 1
+        c = Contract(
+            contract_id=f"C{self._id_counter:04d}",
+            job_type="delivery",
+            from_port=from_port,
+            to_port=to_port,
+            payout=float(payout),
+            deadline_sim_hours=float(TUTORIAL_CONTRACT_DEADLINE_H),
+            reputation_required=0,
+            status="active",
+            accepted_at_sim_s=sim_elapsed_s,
+            description="Guided first delivery — follow the green marker and dock.",
+            is_tutorial=True,
+        )
+        self._active = c
+        self._contracts.insert(0, c)
+        return c
 
     def accept_job(self, contract_id: str, career: "PlayerCareer",
                    sim_elapsed_s: float) -> bool:

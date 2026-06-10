@@ -58,6 +58,7 @@ from config import (
     SHIPPING_LANE_ALPHA, SHIPPING_LANE_DASH_PX,
     SHIPPING_LANE_GAP_PX, SHIPPING_LANE_MIN_ZOOM,
     AUTOPILOT_MARKER_SIZE_PX,
+    COLOR_OBJECTIVE, OBJECTIVE_MARKER_SIZE_PX, OBJECTIVE_EDGE_ARROW_PX,
     SCREEN_VIGNETTE_DEPTH_PX, SCREEN_VIGNETTE_MAX_ALPHA, SCREEN_VIGNETTE_STEPS,
     PORT_NEAR_PULSE_RANGE_WU,
     FOG_LOW_VIS_THRESHOLD_M, FOG_VESSEL_HIDE_RANGE_WU, FOG_OVERLAY_MAX_ALPHA,
@@ -494,6 +495,78 @@ class Chart:
                 self._blit_text_shadow(label, vw - label.get_width() - 4,
                                        int(sy + 4))
             y += GRID_SPACING
+
+    def draw_objective(self, player_world_pos, dest_world_pos,
+                       label: str, distance_nm: float, route=None) -> None:
+        """Always-on green destination marker for the active contract.
+
+        Draws a dashed guide line from the player to the destination port (or,
+        when ``route`` is given, a polyline along those safe waypoints), a bright
+        diamond marker at the port, and the label + distance beside it.  If the
+        destination is off-screen, an arrow is pinned to the screen edge pointing
+        toward it so the player always knows which way to steer.
+        """
+        vw, vh = self.surface.get_size()
+        ps = self.camera.world_to_screen(player_world_pos)
+        ds = self.camera.world_to_screen(dest_world_pos)
+        dx, dy = int(ds[0]), int(ds[1])
+
+        # Dashed guide: a polyline through the safe route when one is given,
+        # else a straight line from the player to the destination.
+        if route:
+            prev = ps
+            for wp in route:
+                nxt = self.camera.world_to_screen(wp)
+                self._draw_dashed_line(prev, nxt, COLOR_OBJECTIVE,
+                                       dash_length=10.0, gap_length=7.0)
+                prev = nxt
+        else:
+            self._draw_dashed_line(ps, ds, COLOR_OBJECTIVE,
+                                   dash_length=10.0, gap_length=7.0)
+
+        on_screen = (0 <= dx <= vw and 0 <= dy <= vh)
+        if on_screen:
+            r = OBJECTIVE_MARKER_SIZE_PX
+            diamond = [(dx, dy - r), (dx + r, dy), (dx, dy + r), (dx - r, dy)]
+            pygame.gfxdraw.filled_polygon(self.surface, diamond, (*COLOR_OBJECTIVE, 70))
+            pygame.gfxdraw.aapolygon(self.surface, diamond, COLOR_OBJECTIVE)
+            pygame.draw.circle(self.surface, COLOR_OBJECTIVE, (dx, dy), r + 5, 2)
+            txt = self.font_label.render(f"{label}   {distance_nm:.0f} nm",
+                                         True, COLOR_OBJECTIVE)
+            self._blit_text_shadow(txt, dx + r + 8, dy - 8)
+        else:
+            self._draw_edge_arrow(ds, f"{distance_nm:.0f} nm")
+
+    def _draw_edge_arrow(self, target_screen, label: str) -> None:
+        """Pin an arrow to the screen edge pointing at an off-screen target."""
+        vw, vh = self.surface.get_size()
+        cx, cy = vw / 2.0, vh / 2.0
+        tx, ty = target_screen
+        dxr, dyr = tx - cx, ty - cy
+        if dxr == 0 and dyr == 0:
+            return
+        # Scale the direction vector so it lands on the nearest screen edge,
+        # inset by a margin so the whole arrowhead stays visible.
+        margin = 34.0
+        sx = (vw / 2.0 - margin) / abs(dxr) if dxr != 0 else float("inf")
+        sy = (vh / 2.0 - margin) / abs(dyr) if dyr != 0 else float("inf")
+        s = min(sx, sy)
+        ex, ey = cx + dxr * s, cy + dyr * s
+        ang = math.atan2(dyr, dxr)
+        a = OBJECTIVE_EDGE_ARROW_PX
+        tip = (ex + math.cos(ang) * a, ey + math.sin(ang) * a)
+        left = (ex + math.cos(ang + 2.5) * a, ey + math.sin(ang + 2.5) * a)
+        right = (ex + math.cos(ang - 2.5) * a, ey + math.sin(ang - 2.5) * a)
+        pts = [(int(tip[0]), int(tip[1])), (int(left[0]), int(left[1])),
+               (int(right[0]), int(right[1]))]
+        pygame.gfxdraw.filled_polygon(self.surface, pts, (*COLOR_OBJECTIVE, 220))
+        pygame.gfxdraw.aapolygon(self.surface, pts, COLOR_OBJECTIVE)
+        txt = self.font_label.render(label, True, COLOR_OBJECTIVE)
+        lx = int(ex - math.cos(ang) * 30 - txt.get_width() / 2)
+        ly = int(ey - math.sin(ang) * 30 - txt.get_height() / 2)
+        lx = max(4, min(vw - txt.get_width() - 4, lx))
+        ly = max(4, min(vh - txt.get_height() - 4, ly))
+        self._blit_text_shadow(txt, lx, ly)
 
     def draw_islands(self, world) -> None:
         if not world or not world.islands:

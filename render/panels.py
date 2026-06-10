@@ -33,6 +33,7 @@ from config import (
     TITLE_PANEL_WIDTH, TITLE_PANEL_HEIGHT, TITLE_PANEL_ALPHA,
     MINIMAP_WIDTH_PX, MINIMAP_HEIGHT_PX, MINIMAP_MARGIN_PX,
     WORLD_WIDTH, WORLD_HEIGHT, LAND_COLORS, COLOR_WATER,
+    TUTORIAL_STEPS, TUTORIAL_PANEL_ALPHA, COLOR_OBJECTIVE,
 )
 
 
@@ -1589,6 +1590,63 @@ class CareerPanel:
         val  = self._font_value.render(value, True, value_color)
         self.surface.blit(lbl, (px + pad, y))
         self.surface.blit(val, (px + pad + iw - val.get_width(), y - 2))
+
+
+# ---------------------------------------------------------------------------
+# Tutorial overlay
+# ---------------------------------------------------------------------------
+
+class TutorialOverlayPanel:
+    """Top-centre onboarding card listing the 4 first-delivery steps.
+
+    The Game owns the current step index and advances it as the player acts;
+    this panel only renders.  Completed steps are green, the current step is
+    bright accent, upcoming steps are dimmed — so the eye always lands on the
+    one thing to do next.
+    """
+
+    PAD     = 16
+    LINE_H  = 26
+    WIDTH   = 480
+    TOP_Y   = 56     # below the top edge, clear of the X-axis grid labels
+
+    def __init__(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self._font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self._font_step  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self._font_hint  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL)
+
+    def draw(self, step_index: int) -> None:
+        vw = self.surface.get_width()
+        steps = TUTORIAL_STEPS
+        h = self.PAD * 2 + 30 + len(steps) * self.LINE_H + 20
+        x = vw // 2 - self.WIDTH // 2
+        y = self.TOP_Y
+
+        bg = pygame.Surface((self.WIDTH, h), pygame.SRCALPHA)
+        pygame.draw.rect(bg, (*COLOR_PANEL_BG, TUTORIAL_PANEL_ALPHA),
+                         bg.get_rect(), border_radius=14)
+        pygame.draw.rect(bg, COLOR_ACCENT, bg.get_rect(), 2, border_radius=14)
+        self.surface.blit(bg, (x, y))
+
+        cy = y + self.PAD
+        title = self._font_title.render("GETTING UNDERWAY", True, COLOR_ACCENT)
+        self.surface.blit(title, (x + self.PAD, cy))
+        cy += 32
+
+        for i, text in enumerate(steps):
+            if i < step_index:
+                prefix, col = "[done]", COLOR_OBJECTIVE
+            elif i == step_index:
+                prefix, col = "  >>  ", COLOR_ACCENT
+            else:
+                prefix, col = "      ", COLOR_TEXT_DIM
+            line = self._font_step.render(f"{prefix}  {i + 1}. {text}", True, col)
+            self.surface.blit(line, (x + self.PAD, cy))
+            cy += self.LINE_H
+
+        hint = self._font_hint.render("H: skip tutorial", True, COLOR_TEXT_DIM)
+        self.surface.blit(hint, (x + self.PAD, cy + 2))
 
 
 # ---------------------------------------------------------------------------

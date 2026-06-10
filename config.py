@@ -807,6 +807,45 @@ PLAYER_TURN_RATE     = 2.5    # degrees per sim-second while turn key held
 PLAYER_FOLLOW_CAM    = True   # follow player vessel on startup
 PLAYER_PULSE_PERIOD  = 1.5    # seconds per full pulse cycle on the player ring
 
+# ── Onboarding / first-five-minutes tutorial ─────────────────────────────────
+# A brand-new career opens zoomed in on the player with a guaranteed, pre-
+# accepted first delivery and a 4-step guided overlay.  All copy + thresholds
+# live here so onboarding can be retuned without touching logic.
+TUTORIAL_START_ZOOM          = 1.8     # close framing so the player ship reads as "you"
+TUTORIAL_CONTRACT_FROM       = "Port Maren"    # player spawns beside Maren
+TUTORIAL_CONTRACT_TO         = "Port Ardent"   # short open run east to Carrow
+TUTORIAL_CONTRACT_PAYOUT     = 2000.0  # guaranteed, generous first payout (hook)
+TUTORIAL_CONTRACT_DEADLINE_H = 96.0    # effectively no deadline while learning
+# Step-advance thresholds — each step lights as the player performs it:
+TUTORIAL_THROTTLE_SPEED_KN   = 2.0     # step 1→2: throttle past bare steerage way
+TUTORIAL_HEADING_TOLERANCE   = 30.0    # step 2→3: heading within this of the bearing
+TUTORIAL_APPROACH_FRACTION   = 0.5     # step 3→4: closed half the start distance
+TUTORIAL_PANEL_ALPHA         = 224     # onboarding card background opacity
+TUTORIAL_WAYPOINT_RADIUS     = 45.0    # wu within which a guided waypoint counts as reached
+# Guided route: the depth-verified safe Maren→Ardent leg of the ferry loop
+# (mirrors VESSEL_ROUTE_FERRY; checked by tests/verify_new_routes.py).  These
+# waypoints thread the gap south of Skerry Bank and around Carrow Island so the
+# green dashed guide line — and a new captain following it — stay in deep water.
+TUTORIAL_ROUTE = [
+    (350.0, 460.0),   # SE open sea, clear of the mainland coast
+    (380.0, 460.0),   # Skerry Bank clearance (depth ≥ 60 m)
+    (500.0, 565.0),   # south of Carrow Island
+    (640.0, 500.0),   # Ardent approach — gap between Carrow and Brattlin North
+    (648.0, 460.0),   # Port Ardent (berth)
+]
+# The 4 guided steps, in order.  Step index N is the one currently lit.
+TUTORIAL_STEPS = [
+    "Press  W  to increase your throttle",
+    "Press  D  or  A  to steer toward the green marker",
+    "Follow the dashed line to Port Ardent",
+    "Drift in slowly (under 2 kn) to dock and get paid",
+]
+
+# Always-on objective marker pointing at the active contract's destination port.
+COLOR_OBJECTIVE          = (80, 230, 130)  # bright green — the unmissable "go here" cue
+OBJECTIVE_MARKER_SIZE_PX = 12              # half-size of the destination diamond
+OBJECTIVE_EDGE_ARROW_PX  = 16              # size of the off-screen edge arrow (Task 4)
+
 # ============================================================================
 # Career System
 # ============================================================================
