@@ -640,18 +640,34 @@ class Game:
         resolution=None + windowed reproduces the original behaviour exactly.
         Used at startup and re-used when the player changes display settings.
         """
-        info = pygame.display.Info()
-        if self.settings.resolution:
-            w, h = self.settings.resolution
-            w = min(w, info.current_w)
-            h = min(h, info.current_h)
+        # True desktop size.  pygame.display.Info().current_* returns the CURRENT
+        # mode after the first set_mode (NOT the desktop), so it can't be trusted
+        # at runtime — a runtime fullscreen toggle would size off the current
+        # window, not the screen.  get_desktop_sizes() is mode-independent.
+        try:
+            dw, dh = pygame.display.get_desktop_sizes()[0]
+        except (pygame.error, IndexError, AttributeError):
+            info = pygame.display.Info()
+            dw, dh = info.current_w, info.current_h
+
+        if self.settings.fullscreen:
+            if self.settings.resolution:
+                w = min(self.settings.resolution[0], dw)
+                h = min(self.settings.resolution[1], dh)
+            else:
+                w, h = dw, dh                      # native desktop resolution
+            surface = pygame.display.set_mode((w, h), pygame.FULLSCREEN)
         else:
-            w = min(max(WINDOW_MIN_WIDTH,
-                        int(info.current_w * WINDOW_SCALE_FACTOR)), info.current_w)
-            h = min(max(WINDOW_MIN_HEIGHT,
-                        int(info.current_h * WINDOW_SCALE_FACTOR)), info.current_h)
-        flags = pygame.FULLSCREEN if self.settings.fullscreen else 0
-        surface = pygame.display.set_mode((w, h), flags)
+            if self.settings.resolution:
+                w = min(self.settings.resolution[0], dw)
+                h = min(self.settings.resolution[1], dh)
+            else:
+                w = min(max(WINDOW_MIN_WIDTH, int(dw * WINDOW_SCALE_FACTOR)), dw)
+                h = min(max(WINDOW_MIN_HEIGHT, int(dh * WINDOW_SCALE_FACTOR)), dh)
+            surface = pygame.display.set_mode((w, h))
+
+        # Read back the REAL size SDL gave us (authoritative for camera/panels).
+        w, h = surface.get_size()
         return surface, w, h
 
     def _rebuild_keybinds(self) -> None:
