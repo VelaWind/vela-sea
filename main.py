@@ -1361,6 +1361,7 @@ class Game:
                     cx, cy = self.camera.position
                     self.camera.position = (cx - dx / self.camera.zoom,
                                             cy - dy / self.camera.zoom)
+                    self.camera.clamp_position()
                     self._drag_last_pos = event.pos
 
             elif event.type == pygame.MOUSEBUTTONUP:

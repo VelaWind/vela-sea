@@ -222,6 +222,11 @@ LABEL_ZOOM_THRESHOLD_SHOW_ALL = 2.0
 # in the east — so the game opens on the busy heart of the sea rather than the
 # player's far-western start.  Follow-cam re-centres on the player once play begins.
 CAMERA_START_CENTER = (700.0, 500.0)
+# How far beyond the world edge the camera centre may pan (world units).  Bounds
+# free-pan / drag so the view can't wander into the void, and keeps on-screen
+# coordinates well within SDL's signed-short draw range (prevents gfxdraw
+# OverflowError when circles would otherwise be drawn at huge off-screen coords).
+CAMERA_PAN_MARGIN_WU = 400.0
 
 # ============================================================================
 # Compass & Scale

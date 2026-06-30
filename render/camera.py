@@ -13,6 +13,8 @@ The camera is defined by:
 from dataclasses import dataclass
 from typing import Tuple
 
+from config import WORLD_WIDTH, WORLD_HEIGHT, CAMERA_PAN_MARGIN_WU
+
 Position = Tuple[float, float]
 
 
@@ -72,6 +74,19 @@ class Camera:
         world_dx = dx / self.zoom
         world_dy = dy / self.zoom
         self.position = (self.position[0] - world_dx, self.position[1] - world_dy)
+        self.clamp_position()
+
+    def clamp_position(self) -> None:
+        """Bound the camera centre to the world plus a margin.
+
+        Keeps free-pan from wandering into the void and, crucially, keeps every
+        on-screen coordinate within SDL's signed-short draw range so the circle
+        primitives in the chart can't raise OverflowError.
+        """
+        m = CAMERA_PAN_MARGIN_WU
+        x = max(-m, min(WORLD_WIDTH + m, self.position[0]))
+        y = max(-m, min(WORLD_HEIGHT + m, self.position[1]))
+        self.position = (x, y)
 
     def zoom_at(self, screen_pos: Position, zoom_factor: float) -> None:
         """Zoom in or out, keeping a screen position fixed on the world.
@@ -97,6 +112,7 @@ class Camera:
         pan_x = world_pos_before[0] - world_pos_after[0]
         pan_y = world_pos_before[1] - world_pos_after[1]
         self.position = (self.position[0] + pan_x, self.position[1] + pan_y)
+        self.clamp_position()
 
     def clamp_zoom(self, zoom_min: float, zoom_max: float) -> None:
         """Clamp zoom to a valid range."""
