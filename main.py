@@ -1792,10 +1792,14 @@ class Game:
                             _turn -= PLAYER_TURN_RATE
                         if _keys[self.keys["helm_right"]] or _keys[pygame.K_RIGHT]:
                             _turn += PLAYER_TURN_RATE
-                        if _turn and vessel.status == "underway":
-                            # Manual helm overrides and cancels the autopilot.
-                            vessel.autopilot_destination = None
-                            vessel.heading = (vessel.heading + _turn * SIM_TIMESTEP) % 360.0
+                        if _turn:
+                            # Manual helm always wins: reclaim control from any AI
+                            # avoidance state, cancel the autopilot, then steer.
+                            if vessel.status == "avoiding":
+                                vessel.status = "underway"
+                            if vessel.status == "underway":
+                                vessel.autopilot_destination = None
+                                vessel.heading = (vessel.heading + _turn * SIM_TIMESTEP) % 360.0
 
                     _pt = _sim_time_str(self.environment)
 

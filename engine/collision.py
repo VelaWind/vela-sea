@@ -235,6 +235,13 @@ def update_collision_avoidance(vessels) -> None:
                 else:
                     give_way = a   # head-on / ambiguous: index-i vessel gives way
 
+                # The human player is never auto-steered: if COLREGS would make the
+                # player the give-way vessel, the AI vessel takes the evasive action
+                # instead.  The player stays a stand-on obstacle others avoid, and
+                # keeps full manual helm (it never enters "avoiding").
+                if getattr(give_way, "is_player", False):
+                    give_way = b if give_way is a else a
+
                 # Severity scales 0→1 as CPA shrinks from threshold toward zero.
                 # Emergency: below the emergency fraction of SAFE_CPA, snap to max
                 # severity so the turn is immediate and large regardless of CPA value.
