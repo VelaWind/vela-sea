@@ -1,3 +1,46 @@
+# Meridian Sea — v0.6.1 Release Notes
+
+A stability and clarity pass on top of v0.6.0: real fullscreen, the helm can
+never be taken away from you, no more pan-into-the-void crash, and hull damage
+you can actually see coming.
+
+## Fixes
+
+### Steering & control
+- **Your helm always wins.** While avoiding traffic, the player vessel could be
+  assigned the give-way role and have its wheel, autopilot, and throttle quietly
+  locked out until the encounter cleared (the "steering randomly does nothing"
+  bug). The player is now always a stand-on obstacle — AI ships still give way to
+  you correctly, but you are never auto-steered, and any manual input instantly
+  reclaims the helm.
+
+### Display
+- **Fullscreen actually goes fullscreen.** The toggle was sizing the window from
+  the current video mode instead of the desktop, so it never filled the screen.
+  Fullscreen now uses the true desktop size (or your chosen resolution), windowed
+  restores correctly, and toggling repeatedly rebuilds the view without crashing.
+
+### Crashes & stability
+- Fixed an **OverflowError crash when free-panning the camera** far off the map —
+  the camera is now clamped to the world plus a margin.
+- Quitting from the title screen is honoured immediately; **pausing now preserves
+  your time-compression setting** instead of snapping it back to 1×.
+- Long-session hardening: bounded a slowly-leaking chart cache, corrupt
+  `settings.json` values fall back to defaults (a bad volume no longer loads at
+  max), Space/R can't be bound over the depart/restart keys, a dropped slider
+  drag releases cleanly, and several edge-case guards on save dirs and routes.
+
+### Hull damage you can see
+- Taking hull damage now **flashes the screen red** (grounding or storm), a
+  persistent pulsing **"HULL CRITICAL"** banner warns you below 25% integrity,
+  and the **game-over screen explains the cause in plain English** — "ran aground
+  once too often", "caught out in heavy seas", or bankruptcy — instead of a bare
+  "Hull failure".
+
+Tests: pytest 16/16; gameplay bot 16/16; draw-budget check passing.
+
+---
+
 # Meridian Sea — v0.6.0 Release Notes
 
 Clickable menus and a complete, persisted settings system, reachable from the
