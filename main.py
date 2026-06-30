@@ -2126,7 +2126,13 @@ class Game:
                     vessel.current_speed = 0.0
                     vessel.distress = True   # triggers SAR dispatch next step
                     vessel.mood = "stressed"
-                    vessel.memory["grounded_positions"].append(vessel.position)
+                    # Keep only the most recent groundings — this list is scanned
+                    # every smart-decision tick, so it must not grow unbounded over
+                    # a long session of repeated AI groundings.
+                    _gp = vessel.memory["grounded_positions"]
+                    _gp.append(vessel.position)
+                    if len(_gp) > 12:
+                        del _gp[:-12]
                     _t = _sim_time_str(self.environment)
                     self.event_log.add(_t, f"MAYDAY — {vessel.name} AGROUND", EVENT_COLOR_MAYDAY)
                     if _is_player:

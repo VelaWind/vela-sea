@@ -301,6 +301,10 @@ class Chart:
                 continue
             sx, sy = self.camera.world_to_screen(zone.center)
             sr = max(1, int(self.camera.distance_to_screen(zone.radius)))
+            # Quantise the screen radius to an 8 px step: the halo cache is never
+            # evicted, so an un-quantised key per zoom level would leak memory over
+            # a long session.  8 px snapping is imperceptible on a soft gradient.
+            sr = (sr // 8) * 8 or 8
             halo = self._build_shoal_halo(sr)
             self.surface.blit(halo, (int(sx) - sr - 2, int(sy) - sr - 2))
 

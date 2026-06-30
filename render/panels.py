@@ -2165,9 +2165,11 @@ class SettingsScreen:
     """
 
     # Key names that may not be rebound (reserved for menu/camera/time control).
+    # Reserved for fixed menu/camera/time/docking/restart handlers — rebinding to
+    # these would silently shadow an existing hardcoded action.
     RESERVED_KEYS = frozenset({"escape", "return", "enter", "tab",
                                "up", "down", "left", "right",
-                               "1", "2", "3", "4", "z"})
+                               "1", "2", "3", "4", "z", "space", "r"})
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
@@ -2202,7 +2204,13 @@ class SettingsScreen:
     def handle_motion(self, pos) -> None:
         self._back.update(pos)
         if self._drag is not None:
-            self._apply_slider(self._drag, pos, self._drag_settings)
+            # Drop the drag if the button is no longer held (e.g. a MOUSEBUTTONUP
+            # was lost to a focus change), so the slider doesn't follow a free
+            # mouse around.
+            if not pygame.mouse.get_pressed()[0]:
+                self._drag = None
+            else:
+                self._apply_slider(self._drag, pos, self._drag_settings)
 
     def end_drag(self) -> None:
         self._drag = None

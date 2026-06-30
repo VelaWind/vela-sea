@@ -220,6 +220,8 @@ class Vessel:
             return
 
         current_wp = self.route[self.route_index] if self.route else self.destination
+        if current_wp is None:
+            return   # nothing to arrive at (no route and no destination)
         port = self._port_at(current_wp, world) if world is not None else None
 
         if port is not None:

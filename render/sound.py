@@ -173,12 +173,20 @@ _GENERATORS = {
 
 
 def ensure_sound_files(sound_dir: str = SOUND_DIR) -> None:
-    """Generate any missing .wav files into sound_dir."""
-    os.makedirs(sound_dir, exist_ok=True)
-    for name, gen in _GENERATORS.items():
-        path = os.path.join(sound_dir, name + ".wav")
-        if not os.path.exists(path):
-            _write_wav(path, gen())
+    """Generate any missing .wav files into sound_dir.
+
+    Never raises: a packaged build on a read-only install dir (where the wavs are
+    already bundled, so nothing needs writing) must degrade gracefully rather
+    than crash any caller.
+    """
+    try:
+        os.makedirs(sound_dir, exist_ok=True)
+        for name, gen in _GENERATORS.items():
+            path = os.path.join(sound_dir, name + ".wav")
+            if not os.path.exists(path):
+                _write_wav(path, gen())
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------

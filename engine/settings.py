@@ -66,11 +66,11 @@ DIFFICULTIES = ("easy", "normal", "hard")
 RESOLUTION_CHOICES = [None, (1280, 720), (1600, 900), (1920, 1080), (2560, 1440)]
 
 
-def _clamp01(v) -> float:
+def _clamp01(v, default: float = 1.0) -> float:
     try:
         return max(0.0, min(1.0, float(v)))
     except (TypeError, ValueError):
-        return 1.0
+        return default   # bad data falls back to the field's default, not max
 
 
 class Settings:
@@ -119,9 +119,9 @@ class Settings:
     def from_dict(self, data: dict) -> "Settings":
         if not isinstance(data, dict):
             return self
-        self.master_volume = _clamp01(data.get("master_volume", self.master_volume))
-        self.sfx_volume = _clamp01(data.get("sfx_volume", self.sfx_volume))
-        self.music_volume = _clamp01(data.get("music_volume", self.music_volume))
+        self.master_volume = _clamp01(data.get("master_volume"), self.master_volume)
+        self.sfx_volume = _clamp01(data.get("sfx_volume"), self.sfx_volume)
+        self.music_volume = _clamp01(data.get("music_volume"), self.music_volume)
         self.fullscreen = bool(data.get("fullscreen", self.fullscreen))
         res = data.get("resolution", None)
         self.resolution = (tuple(res) if isinstance(res, (list, tuple))
