@@ -532,6 +532,7 @@ class Game:
         self.clock = pygame.time.Clock()
         self.running = True
         self.is_paused = False
+        self._prepause_speed = 1.0   # speed to restore when un-pausing
 
         # Rebindable input: action -> keycode maps built from the keybind settings.
         self._rebuild_keybinds()
@@ -1223,8 +1224,14 @@ class Game:
                     self._handle_docking_key(event.key)
 
                 elif event.key == self.keys["pause"]:
-                    self.is_paused = not self.is_paused
-                    self.environment.time_speed_multiplier = 0.0 if self.is_paused else 1.0
+                    if self.is_paused:
+                        self.is_paused = False
+                        self.environment.time_speed_multiplier = self._prepause_speed
+                    else:
+                        # Remember the speed so unpausing restores a 2x/3x choice.
+                        self._prepause_speed = self.environment.time_speed_multiplier or 1.0
+                        self.is_paused = True
+                        self.environment.time_speed_multiplier = 0.0
 
                 # Player throttle — bound throttle keys / UP-DOWN when player active
                 elif event.key in (self.keys["throttle_up"], pygame.K_UP,
@@ -2356,6 +2363,11 @@ class Game:
                     elif action is not None:
                         return action
 
+            # A window-close inside the Settings sub-screen sets self.running
+            # False; honour it here so the title doesn't keep looping.
+            if not self.running:
+                return "quit"
+
             self.update_simulation(dt)
             self.chart.draw_all(world=self.world, environment=self.environment)
             title.surface = self.display   # follow any display re-init from settings
@@ -2432,6 +2444,8 @@ class Game:
         reuses the settings screen; Save & Quit persists the career and returns
         to the title with the save intact (Continue then loads it)."""
         menu = PauseMenu(self.display)
+        # Remember the speed so Resume restores it (a 2x/3x selection isn't lost).
+        prev_speed = self.environment.time_speed_multiplier
         self.is_paused = True
         self.environment.time_speed_multiplier = 0.0
         while True:
@@ -2453,7 +2467,9 @@ class Game:
 
             if chosen == "resume":
                 self.is_paused = False
-                self.environment.time_speed_multiplier = 1.0
+                # Restore the pre-pause speed (preserve 2x/3x); fall back to 1x
+                # if the player had manually paused before opening the menu.
+                self.environment.time_speed_multiplier = prev_speed if prev_speed > 0 else 1.0
                 return
             if chosen == "settings":
                 self._run_settings_screen()        # may re-init the display
