@@ -47,6 +47,9 @@ from engine.environment import Environment
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
+from config import (HULL_CRITICAL_THRESHOLD, HULL_DAMAGE_FLASH_MS,
+                    HULL_DAMAGE_FLASH_COLOR, HULL_DAMAGE_FLASH_MAX_ALPHA)
+from config import COLOR_WARNING, FONT_UI_NAME, FONT_SIZE_TITLE, FONT_SIZE_SECTION
 from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, TutorialOverlayPanel, RewardBannerPanel, SettingsScreen, PauseMenu
 from config import COLOR_OBJECTIVE, BANNER_PROMOTE_COLOR, BANNER_DURATION_MS
 from config import (FLAVOR_COOLDOWN_S, FLAVOR_PORT_RANGE_WU,
@@ -578,6 +581,16 @@ class Game:
         self._restart_requested = False
         self._session_start_time = time.time()
         self._game_over_screen = GameOverScreen(self.display)
+
+        # Hull-damage feedback: track how much integrity each source has cost so the
+        # game-over screen can name the dominant cause in plain English, plus the tick
+        # (ms) until which the red screen flash lingers after the most recent hit.
+        self._hull_damage_by_source = {"grounding": 0.0, "storm": 0.0}
+        self._hull_damage_flash_until: int = 0
+        self._hull_warn_font = pygame.font.SysFont(
+            FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
+        self._hull_warn_sub_font = pygame.font.SysFont(
+            FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
 
         # Port the player just departed from — proximity docking is suppressed
         # until the vessel clears that port's radius, else DEPART would re-dock
@@ -1694,6 +1707,46 @@ class Game:
         self.event_log.add(_sim_time_str(self.environment),
                            f"ACHIEVEMENT — {name}", EVENT_COLOR_REFLOAT)
 
+    def _apply_hull_damage(self, vessel, amount: float, source: str) -> None:
+        """Subtract hull integrity from a named source, record the amount for the
+        game-over cause line, and arm the red on-screen flash.  Triggers game-over
+        (attributed to the dominant source) when the hull reaches zero.
+
+        Centralising both damage sites here keeps the on-screen feedback and the
+        loss attribution in one place — call sites just say how much and why.
+        """
+        if amount <= 0.0 or self.game_over:
+            return
+        before = vessel.hull_integrity
+        vessel.hull_integrity = max(0.0, before - amount)
+        dealt = before - vessel.hull_integrity
+        if dealt <= 0.0:
+            return
+        self._hull_damage_by_source[source] = (
+            self._hull_damage_by_source.get(source, 0.0) + dealt)
+        self._hull_damage_flash_until = (
+            pygame.time.get_ticks() + HULL_DAMAGE_FLASH_MS)
+        if vessel.hull_integrity <= 0.0:
+            self._trigger_game_over(self._hull_failure_cause())
+
+    def _hull_failure_cause(self) -> str:
+        """Plain-English game-over line naming the dominant hull-damage source.
+
+        Reads the per-source damage tally so the player learns *why* the run
+        ended (\"ran aground once too often\" vs \"caught out in heavy seas\")
+        instead of a bare \"Hull failure\".
+        """
+        g = self._hull_damage_by_source.get("grounding", 0.0)
+        s = self._hull_damage_by_source.get("storm", 0.0)
+        if g <= 0.0 and s <= 0.0:
+            return "Hull failure — the sea finally won."
+        # Co-causes when neither dominates (within 1.5x of each other).
+        if g > 0.0 and s > 0.0 and max(g, s) < 1.5 * min(g, s):
+            return "Hull lost — groundings and heavy seas together broke her open."
+        if g >= s:
+            return "Hull holed — you ran aground once too often."
+        return "Hull battered apart — caught out in heavy seas."
+
     def _trigger_game_over(self, reason: str) -> None:
         """Freeze the sim and show the game-over overlay."""
         if self.game_over:
@@ -1884,11 +1937,9 @@ class Game:
                                     _pt,
                                     "WARNING — heavy seas, speed capped to 6 kn",
                                     EVENT_COLOR_WEATHER)
-                            vessel.hull_integrity = max(
-                                0.0,
-                                vessel.hull_integrity - STORM_HULL_DAMAGE_RATE * SIM_TIMESTEP)
-                            if vessel.hull_integrity <= 0.0:
-                                self._trigger_game_over("Hull failure (storm)")
+                            self._apply_hull_damage(
+                                vessel, STORM_HULL_DAMAGE_RATE * SIM_TIMESTEP,
+                                "storm")
                         else:
                             self._storm_speed_warning_sent = False
 
@@ -2142,16 +2193,16 @@ class Game:
                         "rescue", vessel, vessel.position)
                     # Player hull damage on grounding.
                     if _is_player:
-                        vessel.hull_integrity = max(
-                            0.0, vessel.hull_integrity
-                            - GROUNDING_HULL_DAMAGE * self.settings.damage_multiplier())
+                        self._apply_hull_damage(
+                            vessel,
+                            GROUNDING_HULL_DAMAGE * self.settings.damage_multiplier(),
+                            "grounding")
                         self.event_log.add(
                             _t,
                             f"HULL DAMAGE — integrity {vessel.hull_integrity * 100:.0f}%",
                             EVENT_COLOR_MAYDAY)
-                        if vessel.hull_integrity <= 0.0:
-                            self._trigger_game_over("Hull failure")
-                        elif vessel.hull_integrity > LUCKY_ESCAPE_HULL_MIN:
+                        if (not self.game_over
+                                and vessel.hull_integrity > LUCKY_ESCAPE_HULL_MIN):
                             self._award_achievement("Lucky Escape")
 
             # Career deadline check — once per sim step for the player vessel only.
@@ -2167,7 +2218,8 @@ class Game:
             # Game-over checks — player only.
             if self.player_vessel is not None and not self.game_over:
                 if self.career.money < -500.0:
-                    self._trigger_game_over("Bankrupt")
+                    self._trigger_game_over(
+                        "Bankrupt — the company repossessed MV Velawind.")
 
             # Random sudden events: each underway vessel has a small per-step chance.
             for vessel in self.world.vessels:
@@ -2260,6 +2312,10 @@ class Game:
                             hover_vessel=self.hover_vessel,
                             y_label_x=_y_label_x)
 
+        # Hull-damage feedback sits over the chart but under the panels, so the
+        # red flash never obscures the HUD's own (crisp) hull bar.
+        self._draw_hull_feedback()
+
         # Always-on objective marker pointing at the active contract's
         # destination — the single clear "go here" cue (on-screen marker +
         # dashed line, or an edge arrow when the port is off-screen).
@@ -2337,6 +2393,40 @@ class Game:
                 time.time() - self._session_start_time)
 
         pygame.display.flip()
+
+    def _draw_hull_feedback(self) -> None:
+        """In-play hull-damage legibility: a brief red screen flash on a fresh
+        hit, plus a persistent pulsing HULL CRITICAL banner while integrity sits
+        in the danger band.  Reads vessel state only — pure feedback, no mutation.
+        """
+        pv = self.player_vessel
+        if pv is None or self.game_over:
+            return
+        now = pygame.time.get_ticks()
+        vw, vh = self.display.get_size()
+
+        # Red flash: alpha decays linearly to zero over HULL_DAMAGE_FLASH_MS.
+        if now < self._hull_damage_flash_until:
+            frac = (self._hull_damage_flash_until - now) / HULL_DAMAGE_FLASH_MS
+            alpha = int(HULL_DAMAGE_FLASH_MAX_ALPHA * max(0.0, min(1.0, frac)))
+            if alpha > 0:
+                s = pygame.Surface((vw, vh), pygame.SRCALPHA)
+                s.fill((*HULL_DAMAGE_FLASH_COLOR, alpha))
+                self.display.blit(s, (0, 0))
+
+        # Persistent banner once the hull is at/below the critical threshold.
+        hull = getattr(pv, "hull_integrity", 1.0)
+        if hull <= HULL_CRITICAL_THRESHOLD:
+            pulse = (now // 400) % 2 == 0      # ~1.25 Hz blink — impossible to miss
+            col = COLOR_WARNING if pulse else (120, 30, 30)
+            line = self._hull_warn_font.render("HULL CRITICAL", True, col)
+            sub = self._hull_warn_sub_font.render(
+                f"integrity {hull * 100:.0f}% — make port and repair",
+                True, (230, 200, 200))
+            by = int(vh * 0.16)
+            self.display.blit(line, (vw // 2 - line.get_width() // 2, by))
+            self.display.blit(sub, (vw // 2 - sub.get_width() // 2,
+                                    by + line.get_height() + 4))
 
     def _title_loop(self) -> str:
         """Run the title menu until the player confirms an action.

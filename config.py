@@ -1030,3 +1030,11 @@ STORM_WAVE_THRESHOLD   = 3.5    # wave height (m) above which storm consequences
 STORM_HULL_DAMAGE_RATE = 0.0002 # hull integrity lost per sim-second while in storm
 
 STORM_MAX_SPEED_KN = 6.0        # player's max effective speed during storm conditions
+
+# Hull-damage player feedback (make damage legible in-play, not just at game-over).
+HULL_CRITICAL_THRESHOLD = 0.25  # at/below this fraction the hull bar pulses red and a
+                                # persistent "HULL CRITICAL" banner shows.  Kept equal to
+                                # the HUD bar's red band so warning and colour always agree.
+HULL_DAMAGE_FLASH_MS = 650      # how long the red screen flash lingers after a hull hit
+HULL_DAMAGE_FLASH_COLOR = (200, 40, 40)   # flash tint (storm tick / grounding)
+HULL_DAMAGE_FLASH_MAX_ALPHA = 90          # peak flash alpha; decays to 0 over the window

@@ -29,6 +29,7 @@ from config import (
     HULL_REPAIR_COST_PER_POINT, FUEL_COST_PER_UNIT,
     STORM_WAVE_THRESHOLD,
     HULL_BAR_HIGH_COLOR, HULL_BAR_MID_COLOR, HULL_BAR_LOW_COLOR,
+    HULL_CRITICAL_THRESHOLD,
     GAME_VERSION,
     TITLE_FONT_SIZE, TITLE_SUBTITLE_SIZE, TITLE_MENU_FONT_SIZE,
     TITLE_PANEL_WIDTH, TITLE_PANEL_HEIGHT, TITLE_PANEL_ALPHA,
@@ -1239,8 +1240,8 @@ class PlayerHUDPanel:
             cy += bar_row
 
         # ── Hull integrity bar — colour-coded so it never reads as the fuel bar.
-        # Green > 50%, yellow 25-50%, red < 25% (flashing darker when critical).
-        if hull < 0.25:
+        # Green > 50%, yellow 25-50%, red below the critical threshold (pulsing).
+        if hull <= HULL_CRITICAL_THRESHOLD:
             hull_col = HULL_BAR_LOW_COLOR if (frame_count % 2 == 0) else (120, 30, 30)
         elif hull <= 0.5:
             hull_col = HULL_BAR_MID_COLOR
