@@ -30,6 +30,7 @@ The player vessel's heading is only changed by held A/D keys in the main loop
 via ``turn_toward`` — exactly the manoeuvre a human player performs.
 """
 
+import asyncio
 import os
 
 # ---------------------------------------------------------------------------
@@ -551,7 +552,7 @@ def scenario_7():
         game._title_loop = lambda: calls.append(skip) or "new"
         game.running = False          # main loop exits immediately
         try:
-            game.run(skip_title=skip)
+            asyncio.run(game.run(skip_title=skip))   # run() is a coroutine (pygbag)
         except SystemExit:
             pass                       # run() calls sys.exit() on shutdown
 

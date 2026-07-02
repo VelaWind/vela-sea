@@ -9,6 +9,7 @@ The loop runs at a stable frame rate, but the simulation advances in fixed
 timesteps, so physics behaves consistently regardless of FPS.
 """
 
+import asyncio
 import math
 import os
 import pygame
@@ -2749,8 +2750,14 @@ class Game:
                                EVENT_COLOR_WEATHER)
             self._flavor_last_s = now_s
 
-    def run(self, skip_title: bool = False) -> None:
-        """Run the title menu, then the main game loop until quit."""
+    async def run(self, skip_title: bool = False) -> None:
+        """Run the title menu, then the main game loop until quit.
+
+        Async so the frame loop can `await asyncio.sleep(0)` once per frame — the
+        yield pygbag needs to hand control back to the browser's event loop each
+        frame under WebAssembly.  On desktop the sleep(0) is a no-op round-trip
+        through the event loop, so behavior is identical.
+        """
         if not skip_title:
             action = self._title_loop()
             if action == "quit":
@@ -2773,6 +2780,11 @@ class Game:
                 self.update_simulation(dt)
             self.render()
 
+            # Yield to the event loop once per frame.  Required by pygbag under
+            # WebAssembly (lets the browser paint + deliver input); a harmless
+            # no-op on desktop.
+            await asyncio.sleep(0)
+
         # Silence loops so a restart doesn't stack a second ambient track.
         self.sound.stop_all()
 
@@ -2781,12 +2793,17 @@ class Game:
             sys.exit()
 
 
-def main():
-    """Entry point."""
+async def main():
+    """Entry point.
+
+    Async + launched via asyncio.run() so the same file runs under pygbag
+    (WebAssembly) and on desktop without a fork — pygbag reroutes asyncio.run()
+    onto the browser's event loop, while CPython runs it normally.
+    """
     skip_title = "--skip-title" in sys.argv
     while True:
         game = Game()
-        game.run(skip_title=skip_title)
+        await game.run(skip_title=skip_title)
         if not getattr(game, '_restart_requested', False):
             break
     pygame.quit()
@@ -2794,4 +2811,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
