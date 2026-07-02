@@ -14,6 +14,17 @@ dist/
 build/
 MeridianSea_*.zip
 
+# ── pygbag / WebAssembly build (experimental, spike) ────────────────────────
+# `python -m pygbag --build .` writes the web bundle under build/ (already
+# ignored above) — apk/tar.gz/index.html + web-cache. These are large,
+# regenerated artifacts; never commit them.  pygbag.ini (build-ignore config)
+# and any itch.io archive are local build inputs/outputs, not project state.
+build/web/
+build/web-cache/
+web.zip
+*.apk
+pygbag.ini
+
 # ── Generated / debug artifacts ─────────────────────────────────────────────
 debug_frame.png
 tests/*.png
