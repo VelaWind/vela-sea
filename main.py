@@ -16,6 +16,7 @@ import pygame
 import random
 import sys
 import time
+import traceback
 from typing import Optional
 
 from config import (
@@ -42,6 +43,7 @@ from config import (
 )
 from render.camera import Camera
 from render.chart import Chart
+from render.fonts import safe_sysfont
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
@@ -588,9 +590,9 @@ class Game:
         # (ms) until which the red screen flash lingers after the most recent hit.
         self._hull_damage_by_source = {"grounding": 0.0, "storm": 0.0}
         self._hull_damage_flash_until: int = 0
-        self._hull_warn_font = pygame.font.SysFont(
+        self._hull_warn_font = safe_sysfont(
             FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
-        self._hull_warn_sub_font = pygame.font.SysFont(
+        self._hull_warn_sub_font = safe_sysfont(
             FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
 
         # Port the player just departed from — proximity docking is suppressed
@@ -2799,15 +2801,29 @@ async def main():
     Async + launched via asyncio.run() so the same file runs under pygbag
     (WebAssembly) and on desktop without a fork — pygbag reroutes asyncio.run()
     onto the browser's event loop, while CPython runs it normally.
+
+    The whole run is wrapped so any startup/runtime crash prints its FULL
+    traceback to stdout.  pygbag pipes stdout to the browser console, so a web
+    failure shows the real error instead of a silent gray screen; on desktop the
+    happy path is unchanged and a genuine crash still surfaces + exits non-zero.
     """
-    skip_title = "--skip-title" in sys.argv
-    while True:
-        game = Game()
-        await game.run(skip_title=skip_title)
-        if not getattr(game, '_restart_requested', False):
-            break
-    pygame.quit()
-    sys.exit()
+    try:
+        skip_title = "--skip-title" in sys.argv
+        while True:
+            game = Game()
+            await game.run(skip_title=skip_title)
+            if not getattr(game, '_restart_requested', False):
+                break
+        pygame.quit()
+        sys.exit()
+    except SystemExit:
+        raise                       # normal shutdown via sys.exit() — not a crash
+    except BaseException:
+        print("=== Meridian Sea: unhandled startup/runtime error ===",
+              file=sys.stdout)
+        traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+        raise
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from math import atan2, degrees
 
 import math
 from render.chart import _vessel_hull_points, _rotate_points
+from render.fonts import safe_sysfont
 from engine.settings import KEYBIND_ACTIONS, DIFFICULTIES, RESOLUTION_CHOICES
 from config import (
     COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_DIM, COLOR_WARNING,
@@ -87,13 +88,13 @@ def _format_duration(hours: float) -> str:
 class VesselInfoPanel:
     def __init__(self, surface: pygame.Surface):
         self.surface = surface
-        self.font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
-        self.font_header = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
-        self.font_label = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
-        self.font_value = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_DATA, bold=True)
-        self.font_big = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_BIG, bold=True)
-        self.font_small = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
-        self.font_log   = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL)
+        self.font_title = safe_sysfont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
+        self.font_header = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self.font_label = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self.font_value = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_DATA, bold=True)
+        self.font_big = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_BIG, bold=True)
+        self.font_small = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self.font_log   = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         self.width = 360
         self.height = 420
 
@@ -327,11 +328,11 @@ class VesselInfoPanel:
 class TechnicalSystemsPanel:
     def __init__(self, surface: pygame.Surface):
         self.surface = surface
-        self.font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
-        self.font_header = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
-        self.font_label = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
-        self.font_value = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_DATA)
-        self.font_small = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self.font_title = safe_sysfont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
+        self.font_header = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self.font_label = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self.font_value = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_DATA)
+        self.font_small = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
         self.is_visible = False
 
     def toggle_visibility(self) -> None:
@@ -531,11 +532,11 @@ class TechnicalSystemsPanel:
 class SettingsPanel:
     def __init__(self, surface: pygame.Surface):
         self.surface = surface
-        self.font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
-        self.font_header = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
-        self.font_label = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
-        self.font_value = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_DATA)
-        self.font_small = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self.font_title = safe_sysfont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
+        self.font_header = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self.font_label = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self.font_value = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_DATA)
+        self.font_small = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
         self.is_visible = False
         self.sliders: Dict[str, Tuple[int, int, int, float, float, str]] = {}
         self.buttons: Dict[str, pygame.Rect] = {}
@@ -810,7 +811,7 @@ class EventLog:
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
         self._entries: list = []   # [(text, color), ...]
-        self._font = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL)
+        self._font = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
 
     def add(self, sim_time: str, message: str, color: tuple) -> None:
         """Append an event; drop the oldest if over capacity."""
@@ -872,8 +873,8 @@ class FleetStatusPanel:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_name   = pygame.font.SysFont(FONT_UI_NAME,  FONT_SIZE_SMALL)
-        self._font_status = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL)
+        self._font_name   = safe_sysfont(FONT_UI_NAME,  FONT_SIZE_SMALL)
+        self._font_status = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         self._rows: list = []   # [(pygame.Rect, vessel), ...] for click detection
 
     def draw(self, world, selected_vessel) -> None:
@@ -967,10 +968,10 @@ class MissionPanel:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_tag  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL,   bold=True)
-        self._font_desc = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_LABEL,   bold=True)
-        self._font_obj  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL)
-        self._font_done = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
+        self._font_tag  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SMALL,   bold=True)
+        self._font_desc = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_LABEL,   bold=True)
+        self._font_obj  = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
+        self._font_done = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
 
     def draw(self, mission_manager, sim_elapsed_s: float = 0.0,
              bottom_offset: int = 0) -> None:
@@ -1115,11 +1116,11 @@ class PlayerHUDPanel:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_name   = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
-        self._font_badge  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL,   bold=True)
-        self._font_label  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL)
-        self._font_value  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_LABEL,   bold=True)
-        self._font_hint   = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL)
+        self._font_name   = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
+        self._font_badge  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SMALL,   bold=True)
+        self._font_label  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SMALL)
+        self._font_value  = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_LABEL,   bold=True)
+        self._font_hint   = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SMALL)
 
     # ------------------------------------------------------------------ public
 
@@ -1355,11 +1356,11 @@ class CareerPanel:
         self._job_rects: list = []   # [(pygame.Rect, contract), ...] for click detection
         self._display_money = None   # eased value for the count-up animation
 
-        self._font_title  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_TITLE,   bold=True)
-        self._font_header = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
-        self._font_label  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_LABEL)
-        self._font_value  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_DATA,    bold=True)
-        self._font_small  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL)
+        self._font_title  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_TITLE,   bold=True)
+        self._font_header = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
+        self._font_label  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_LABEL)
+        self._font_value  = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_DATA,    bold=True)
+        self._font_small  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SMALL)
 
     def toggle_visibility(self) -> None:
         self.is_visible = not self.is_visible
@@ -1621,8 +1622,8 @@ class RewardBannerPanel:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_big   = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_BIG, bold=True)
-        self._font_label = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self._font_big   = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_BIG, bold=True)
+        self._font_label = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
 
     def draw(self, banners: list, now_ms: int) -> None:
         if not banners:
@@ -1686,9 +1687,9 @@ class TutorialOverlayPanel:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
-        self._font_step  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
-        self._font_hint  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL)
+        self._font_title = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self._font_step  = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self._font_hint  = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
 
     def draw(self, step_index: int) -> None:
         vw = self.surface.get_width()
@@ -1805,10 +1806,10 @@ class ControlsScreen:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
-        self._font_key   = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_LABEL, bold=True)
-        self._font_desc  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
-        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self._font_title = safe_sysfont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
+        self._font_key   = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_LABEL, bold=True)
+        self._font_desc  = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self._font_hint  = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
 
     def draw(self) -> None:
         vw, vh = self.surface.get_size()
@@ -1863,10 +1864,10 @@ class DockingMenuPanel:
         self.panel_rect: Optional[pygame.Rect] = None
         self._item_rects: list = []   # [(pygame.Rect, action, enabled), ...]
 
-        self._font_title = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_TITLE,   bold=True)
-        self._font_item  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
-        self._font_cost  = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_LABEL,   bold=True)
-        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_SMALL)
+        self._font_title = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_TITLE,   bold=True)
+        self._font_item  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
+        self._font_cost  = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_LABEL,   bold=True)
+        self._font_hint  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SMALL)
 
     # ------------------------------------------------------------------ costs
 
@@ -2024,7 +2025,7 @@ class Button:
         self.rect = pygame.Rect(rect) if rect is not None else pygame.Rect(0, 0, 0, 0)
         self.enabled = enabled
         self.hover = False
-        self._font = font or pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self._font = font or safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
 
     def update(self, mouse_pos) -> None:
         self.hover = self.enabled and self.rect.collidepoint(mouse_pos)
@@ -2072,10 +2073,10 @@ class TitleScreen:
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
         self.selected_index = 0
-        self._font_title    = pygame.font.SysFont(FONT_UI_NAME, TITLE_FONT_SIZE,    bold=True)
-        self._font_subtitle = pygame.font.SysFont(FONT_UI_NAME, TITLE_SUBTITLE_SIZE)
-        self._font_menu     = pygame.font.SysFont(FONT_UI_NAME, TITLE_MENU_FONT_SIZE, bold=True)
-        self._font_hint     = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self._font_title    = safe_sysfont(FONT_UI_NAME, TITLE_FONT_SIZE,    bold=True)
+        self._font_subtitle = safe_sysfont(FONT_UI_NAME, TITLE_SUBTITLE_SIZE)
+        self._font_menu     = safe_sysfont(FONT_UI_NAME, TITLE_MENU_FONT_SIZE, bold=True)
+        self._font_hint     = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
         self._buttons = [Button(label, font=self._font_menu)
                          for label, _ in self.MENU_ITEMS]
 
@@ -2174,11 +2175,11 @@ class SettingsScreen:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_title = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
-        self._font_hdr   = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
-        self._font_lbl   = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
-        self._font_val   = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL, bold=True)
-        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self._font_title = safe_sysfont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
+        self._font_hdr   = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self._font_lbl   = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self._font_val   = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL, bold=True)
+        self._font_hint  = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
         self._back = Button("Back", font=self._font_hdr)
         # Per-frame control rects (immediate-mode hit-testing).
         self._sliders: dict = {}   # key -> track Rect ("master"/"sfx"/"music")
@@ -2416,9 +2417,9 @@ class PauseMenu:
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
         self.selected_index = 0
-        self._font_title = pygame.font.SysFont(FONT_UI_NAME, TITLE_FONT_SIZE, bold=True)
-        self._font_menu  = pygame.font.SysFont(FONT_UI_NAME, TITLE_MENU_FONT_SIZE, bold=True)
-        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self._font_title = safe_sysfont(FONT_UI_NAME, TITLE_FONT_SIZE, bold=True)
+        self._font_menu  = safe_sysfont(FONT_UI_NAME, TITLE_MENU_FONT_SIZE, bold=True)
+        self._font_hint  = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
         self._buttons = [Button(label, font=self._font_menu)
                          for label, _ in self.MENU_ITEMS]
 
@@ -2498,10 +2499,10 @@ class GameOverScreen:
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
-        self._font_big   = pygame.font.SysFont(FONT_UI_NAME,   64, bold=True)
-        self._font_sub   = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_TITLE, bold=True)
-        self._font_stats = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_DATA)
-        self._font_hint  = pygame.font.SysFont(FONT_UI_NAME,   FONT_SIZE_LABEL)
+        self._font_big   = safe_sysfont(FONT_UI_NAME,   64, bold=True)
+        self._font_sub   = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_TITLE, bold=True)
+        self._font_stats = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_DATA)
+        self._font_hint  = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_LABEL)
 
     def draw(self, reason: str, career, session_seconds: float) -> None:
         vw, vh = self.surface.get_size()

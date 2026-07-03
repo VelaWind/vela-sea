@@ -28,6 +28,13 @@ def user_data_dir() -> str:
     ``SAVE_FILEPATH`` stays cwd-relative and the dev workflow / tests are
     unchanged.
     """
+    if sys.platform == "emscripten":
+        # pygbag / WebAssembly: there is no %APPDATA% and no real home dir, and
+        # touching them (getenv/expanduser/makedirs) can be illegal in the
+        # sandbox.  The current working dir is a writable in-memory FS, so keep
+        # saves cwd-relative — writes succeed for the session (they just don't
+        # persist across a page reload without an IndexedDB mount).
+        return ""
     if getattr(sys, "frozen", False):
         base = os.environ.get("APPDATA") or os.path.expanduser("~/.local/share")
         path = os.path.join(base, "MeridianSea")

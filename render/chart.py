@@ -70,6 +70,7 @@ from config import (
     SQUALL_FLASH_ALPHA, SQUALL_FLASH_DURATION_S,
 )
 from render.camera import Camera
+from render.fonts import safe_sysfont
 
 Position = Tuple[float, float]
 
@@ -174,13 +175,13 @@ class Chart:
     def __init__(self, surface: pygame.Surface, camera: Camera):
         self.surface = surface
         self.camera = camera
-        self.font_map = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_MAP_LABEL)
-        self.font_small = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SMALL)
-        self.font_label = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_LABEL)
-        self.font_data = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_DATA)
-        self.font_mono = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_SMALL)
-        self.font_big = pygame.font.SysFont(FONT_DATA_NAME, FONT_SIZE_BIG, bold=True)
-        self.font_section = pygame.font.SysFont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
+        self.font_map = safe_sysfont(FONT_UI_NAME, FONT_SIZE_MAP_LABEL)
+        self.font_small = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
+        self.font_label = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
+        self.font_data = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_DATA)
+        self.font_mono = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
+        self.font_big = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_BIG, bold=True)
+        self.font_section = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
         self._label_candidates = []
         # Shoal halo: radial gradient surfaces keyed by screen radius.
         # Built once per unique radius (changes only when zoom changes); never rebuilt mid-frame.

@@ -11,6 +11,7 @@ import math
 import os
 import random
 import struct
+import sys
 import wave
 
 import pygame
@@ -178,14 +179,22 @@ def ensure_sound_files(sound_dir: str = SOUND_DIR) -> None:
     Never raises: a packaged build on a read-only install dir (where the wavs are
     already bundled, so nothing needs writing) must degrade gracefully rather
     than crash any caller.
+
+    Under pygbag / WebAssembly (``sys.platform == "emscripten"``) the wavs ship
+    inside the bundle and the in-memory filesystem / ``wave`` module can behave
+    unpredictably, so we skip disk generation entirely and rely on the bundled
+    files (or, failing that, on silent fallback in SoundManager).
     """
+    if sys.platform == "emscripten":
+        return
     try:
         os.makedirs(sound_dir, exist_ok=True)
         for name, gen in _GENERATORS.items():
             path = os.path.join(sound_dir, name + ".wav")
             if not os.path.exists(path):
                 _write_wav(path, gen())
-    except OSError:
+    except Exception:
+        # ANY failure (OSError, wave/struct quirks, read-only FS) -> stay silent.
         pass
 
 
