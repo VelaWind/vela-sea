@@ -17,7 +17,7 @@ import pygame
 
 from config import (
     SOUND_ENABLED, SOUND_VOLUME, SOUND_DIR,
-    ENGINE_SOUND_MIN_SPEED_KN, SOUND_RELATIVE_VOLUMES,
+    ENGINE_SOUND_MIN_SPEED_KN, SOUND_RELATIVE_VOLUMES, IS_WEB,
 )
 
 SAMPLE_RATE = 22050
@@ -224,6 +224,18 @@ class SoundManager:
         self._sounds: dict = {}
         self._engine_channel = None
         self._ambient_channel = None
+        # Web (WASM): audio is fully disabled for now.  The stdlib-synthesised WAV
+        # loops underrun and distort badly whenever the single browser thread
+        # stalls, so we skip mixer init entirely and leave every play call a no-op
+        # (self.enabled stays False -> all public methods early-return; set_enabled
+        # can't turn it on either because self._sounds is empty).
+        #
+        # TODO(web-audio): ship small pre-made OGG assets + lighter mixing and
+        # re-enable once perf is solid.  Browser autoplay policy still requires a
+        # first user gesture before any sound can start — fine for silent ambient.
+        if IS_WEB:
+            self.enabled = False
+            return
         if not self.enabled:
             return
         try:
