@@ -68,6 +68,7 @@ from config import (
     STORM_WAVE_LINE_COLOR, STORM_WAVE_LINE_ALPHA,
     STORM_WAVE_LINE_SPACING_PX, STORM_WAVE_SCROLL_PX_S,
     SQUALL_FLASH_ALPHA, SQUALL_FLASH_DURATION_S,
+    IS_WEB,
 )
 from render.camera import Camera
 from render.fonts import safe_sysfont
@@ -474,6 +475,31 @@ class Chart:
         self._depth_surf = surf
         self._depth_key = key
         return surf
+
+    def _draw_web_shallows(self, world) -> None:
+        """Web-only cheap coastal shallows: a single offset halo per island drawn
+        STRAIGHT to the surface — no cached SRCALPHA layer.
+
+        The desktop depth layer (_build_depth_layer) is cached by camera POSITION,
+        so the follow-cam (camera moves nearly every frame) rebuilds its 8 rings +
+        beach fringe per island every frame — the single biggest web hitch (Step 0
+        measured ~+2.7ms native / far worse under WASM when following).  This draws
+        ONE gfxdraw.filled_polygon per island directly, so there is nothing to
+        cache and nothing to rebuild when the camera pans.  draw_islands() later
+        covers each interior with the land fill, leaving a soft shallow ring.
+        """
+        if not world:
+            return
+        band_color = (*COLOR_SHALLOW_WATER, SHALLOW_WATER_MID_BAND_ALPHA)
+        for island in world.islands:
+            screen_polygon = [self.camera.world_to_screen(p) for p in island.polygon]
+            if len(screen_polygon) < 3:
+                continue
+            int_polygon = [(int(x), int(y)) for x, y in screen_polygon]
+            band = self._offset_screen_polygon(
+                int_polygon, SHALLOW_WATER_MID_BAND_OFFSET_PX)
+            if len(band) >= 3:
+                pygame.gfxdraw.filled_polygon(self.surface, band, band_color)
 
     def draw_grid(self, y_label_x: int = 4) -> None:
         # One coordinate system, no drift: screen_to_world() finds what world
@@ -1564,8 +1590,13 @@ class Chart:
         self.draw_ocean_vignette()
         # Coastal depth layer (mid-depth + shallow bands) — cached; land fill drawn
         # later in draw_islands() covers the interior of each offset polygon.
+        # On web the cache key (camera position) thrashes under the follow-cam, so
+        # use a single cheap halo pass with no per-frame rebuild instead.
         if world:
-            self.surface.blit(self._build_depth_layer(world), (0, 0))
+            if IS_WEB:
+                self._draw_web_shallows(world)
+            else:
+                self.surface.blit(self._build_depth_layer(world), (0, 0))
         # Depth zone fills (before islands so land polygons cover the inward part)
         if world and environment:
             self.draw_depth_zones(world, environment)
