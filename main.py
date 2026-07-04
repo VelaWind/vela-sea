@@ -832,8 +832,13 @@ class Game:
         """Zoom that frames the WHOLE Meridian Sea (both axes) with a little
         breathing room around the coast — the ambient spectator overview used on
         the web boot, where nothing is followed so the full sea must be visible.
+
+        The margin is deliberately tight (2%): on a viewport wider than the
+        world's aspect the leftover side bands are unavoidable, so they're kept
+        minimal and styled as open sea (water fill + world frame + matching page
+        background) rather than dead space.
         """
-        margin = 1.06  # ~6% padding so the coastline isn't flush to the edges
+        margin = 1.02  # ~2% padding so the coastline isn't flush to the edges
         fit = min(width / (WORLD_WIDTH * margin), height / (WORLD_HEIGHT * margin))
         return max(ZOOM_MIN, min(fit, ZOOM_MAX))
 
@@ -1352,6 +1357,19 @@ class Game:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+
+            elif IS_WEB and event.type == pygame.VIDEORESIZE:
+                # Browser window resized (if pygbag delivers it): recreate the
+                # framebuffer at the new true pixel size and repoint camera +
+                # every panel at it.  The static world chunk keys on (zoom, vw,
+                # vh) so it invalidates and rebuilds automatically.  UI_SCALE
+                # stays from boot (fonts are built once); a large resize reads
+                # slightly off until reload, which is acceptable.
+                self._apply_display_settings()
+                if self.camera.follow_target is None:
+                    self.camera.zoom = self._calculate_overview_zoom(
+                        self.display.get_width(), self.display.get_height())
+                    self.camera.set_center((WORLD_WIDTH / 2.0, WORLD_HEIGHT / 2.0))
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:

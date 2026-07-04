@@ -639,6 +639,18 @@ class Chart:
             self.draw_grid(lines=True, labels=False)
             self.draw_islands(world)
             self.draw_zones(world)     # shapes only; labels suppressed above
+            # Chart frame: a subtle line along each chunk edge that IS a world
+            # boundary, so at the overview the sea reads as a bounded chart and
+            # the off-world letterbox band looks intentional rather than dead.
+            eps = 1e-6
+            if ox <= eps:
+                pygame.draw.line(surf, COLOR_FRAME, (0, 0), (0, ch - 1))
+            if oy <= eps:
+                pygame.draw.line(surf, COLOR_FRAME, (0, 0), (cw - 1, 0))
+            if ox + ww >= WORLD_WIDTH - eps:
+                pygame.draw.line(surf, COLOR_FRAME, (cw - 1, 0), (cw - 1, ch - 1))
+            if oy + wh >= WORLD_HEIGHT - eps:
+                pygame.draw.line(surf, COLOR_FRAME, (0, ch - 1), (cw - 1, ch - 1))
         finally:
             self.surface, self.camera = old_surface, old_camera
             self._building_static = False

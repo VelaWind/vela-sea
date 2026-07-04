@@ -107,6 +107,59 @@ def prefetch_pygame_wheel() -> None:
             os.remove(dest)          # never leave a truncated wheel behind
 
 
+def _sea_color_hex() -> str:
+    """The game's deep-water color as a CSS hex string, read from config.py so
+    the page background can never drift from the chart's sea color."""
+    sys.path.insert(0, ROOT)
+    try:
+        from config import COLOR_WATER
+        return "#%02x%02x%02x" % tuple(COLOR_WATER[:3])
+    except Exception:
+        return "#0a1c34"   # last-known DEEP_WATER; only used if config breaks
+    finally:
+        sys.path.remove(ROOT)
+
+
+PAGE_STYLE_MARKER = "meridian-page-style"
+
+
+def patch_web_page() -> None:
+    """Frame the canvas like part of the sea instead of a widget on a gray page.
+
+    pygbag's default template puts the canvas on a gray page.  Inject a small
+    style block (idempotent, keyed on PAGE_STYLE_MARKER) that sets the page
+    background to the game's deep-water color and removes body margins so the
+    canvas margins blend into the page.
+
+    Patched into BOTH the generated index.html and the cached *.tmpl templates
+    (build/web-cache/): pygbag's test server regenerates index.html from the
+    cached template on each serve, so patching only index.html would not
+    survive `--serve`.
+    """
+    style = (
+        f'<style id="{PAGE_STYLE_MARKER}">\n'
+        f'  html, body {{ background: {_sea_color_hex()} !important; '
+        f'margin: 0; padding: 0; overflow: hidden; }}\n'
+        f'</style>\n</head>'
+    )
+    targets = [os.path.join(WEB_DIR, "index.html")]
+    cache_dir = os.path.join(STAGE, "build", "web-cache")
+    if os.path.isdir(cache_dir):
+        targets += [os.path.join(cache_dir, f) for f in os.listdir(cache_dir)
+                    if f.endswith(".tmpl")]
+    for path in targets:
+        if not os.path.isfile(path):
+            continue
+        with open(path, "r", encoding="utf-8") as f:
+            html = f.read()
+        if PAGE_STYLE_MARKER in html or "</head>" not in html:
+            continue                      # already patched / no head to patch
+        html = html.replace("</head>", style, 1)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"patched page style (sea background) -> {path}")
+
+
 def run_pygbag(extra: list) -> int:
     # --ume_block 0: don't gate the sim behind a click-to-start splash.  This is
     # an ambient spectator simulator — it should boot the living sea immediately
@@ -126,6 +179,10 @@ def main() -> int:
     if rc != 0:
         return rc
     prefetch_pygame_wheel()
+    # Patch AFTER build, BEFORE serve: --serve regenerates index.html from the
+    # cached template, which patch_web_page() also patches, so the sea-color
+    # page framing survives the re-pack.
+    patch_web_page()
     if "--serve" in sys.argv:
         # pygbag re-packs the apk on serve start; the cdn/ folder survives.
         return run_pygbag([])
