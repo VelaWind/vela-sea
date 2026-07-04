@@ -13,7 +13,7 @@ The camera is defined by:
 from dataclasses import dataclass
 from typing import Tuple
 
-from config import WORLD_WIDTH, WORLD_HEIGHT, CAMERA_PAN_MARGIN_WU
+from config import WORLD_WIDTH, WORLD_HEIGHT, CAMERA_PAN_MARGIN_WU, IS_WEB
 
 Position = Tuple[float, float]
 
@@ -140,8 +140,23 @@ class Camera:
 
     def update_follow(self) -> None:
         """If following a target, move the camera to keep it centered.
-        
+
         Call this once per frame to smoothly track a moving target.
+
+        Web: exponential smoothing — clicking a vessel GLIDES the camera to it
+        instead of snapping (0.14/frame at 30 fps ≈ ~0.5 s settle), and it
+        keeps tracking a moving target with a slight cinematic lag.  Desktop
+        keeps the original hard lock.
         """
         if self.follow_target and hasattr(self.follow_target, "position"):
-            self.position = self.follow_target.position
+            if IS_WEB:
+                tx, ty = self.follow_target.position
+                cx, cy = self.position
+                a = 0.14
+                nx, ny = cx + (tx - cx) * a, cy + (ty - cy) * a
+                # Snap once the residual is sub-pixel so we never dither.
+                if abs(tx - nx) * self.zoom < 0.5 and abs(ty - ny) * self.zoom < 0.5:
+                    nx, ny = tx, ty
+                self.position = (nx, ny)
+            else:
+                self.position = self.follow_target.position

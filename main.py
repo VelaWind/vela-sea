@@ -620,6 +620,10 @@ class Game:
         # canvas's true device-pixel size and heal when they disagree.
         self._web_size_check_ms = 0      # next watchdog tick (pygame ms)
         self._web_heal_attempts = 0      # bounded retries; reset on success
+        # Web zoom easing: the wheel sets a target; _ease_zoom() glides the
+        # camera toward it each frame, anchored at the cursor.  None = settled.
+        self._zoom_target: Optional[float] = None
+        self._zoom_anchor: tuple = (0, 0)
         self.running = True
         self.is_paused = False
         self._prepause_speed = 1.0   # speed to restore when un-pausing
@@ -879,11 +883,37 @@ class Game:
         self._hud_perf_font = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         self._hud_perf_surf = None
         # Re-fit the overview when nothing is followed (the spectator default).
+        self._zoom_target = None   # cancel any in-flight wheel ease
         if self.camera.follow_target is None:
             self.camera.zoom = self._calculate_overview_zoom(w, h)
             self.camera.set_center((WORLD_WIDTH / 2.0, WORLD_HEIGHT / 2.0))
         print(f"[WEBDISPLAY] healed display to {w}x{h} "
               f"(ui_scale={get_ui_scale():.3f}, zoom={self.camera.zoom:.3f})")
+
+    def _nudge_zoom_target(self, cursor_pos, factor: float) -> None:
+        """Accumulate a wheel notch into the eased zoom target (web only)."""
+        base = self._zoom_target if self._zoom_target is not None else self.camera.zoom
+        self._zoom_target = max(ZOOM_MIN, min(ZOOM_MAX, base * factor))
+        self._zoom_anchor = cursor_pos
+
+    def _ease_zoom(self) -> None:
+        """Glide camera.zoom toward the wheel target, anchored at the cursor.
+
+        Exponential ease (~0.3s settle at 30fps); snaps and clears the target
+        once within 0.2% so the static chunk gets a stable final zoom to build
+        against.  Web only — desktop zoom stays immediate.
+        """
+        if self._zoom_target is None:
+            return
+        z = self.camera.zoom
+        if abs(self._zoom_target - z) / max(z, 1e-6) > 0.002:
+            step = (self._zoom_target / z) ** 0.30
+            self.camera.zoom_at(self._zoom_anchor, step)
+            self.camera.clamp_zoom(ZOOM_MIN, ZOOM_MAX)
+        else:
+            self.camera.zoom_at(self._zoom_anchor, self._zoom_target / z)
+            self.camera.clamp_zoom(ZOOM_MIN, ZOOM_MAX)
+            self._zoom_target = None
 
     def _rebuild_keybinds(self) -> None:
         """(Re)build the action<->keycode maps from settings.keybinds (key names).
@@ -1519,6 +1549,7 @@ class Game:
 
                 # Reset zoom — keep following player vessel if one exists
                 elif event.key == pygame.K_z:
+                    self._zoom_target = None   # cancel any in-flight wheel ease
                     self.camera.zoom = self._calculate_default_zoom(self.display.get_width(), self.display.get_height())
                     if self.player_vessel is None:
                         self.camera.set_follow_target(None)
@@ -1583,14 +1614,20 @@ class Game:
                 if event.button == 4:  # scroll wheel up
                     cursor_pos = pygame.mouse.get_pos()
                     zoom_factor = 1.0 + ZOOM_SCROLL_SPEED
-                    self.camera.zoom_at(cursor_pos, zoom_factor)
-                    self.camera.clamp_zoom(ZOOM_MIN, ZOOM_MAX)
+                    if IS_WEB:
+                        self._nudge_zoom_target(cursor_pos, zoom_factor)
+                    else:
+                        self.camera.zoom_at(cursor_pos, zoom_factor)
+                        self.camera.clamp_zoom(ZOOM_MIN, ZOOM_MAX)
 
                 elif event.button == 5:  # scroll wheel down
                     cursor_pos = pygame.mouse.get_pos()
                     zoom_factor = 1.0 - ZOOM_SCROLL_SPEED
-                    self.camera.zoom_at(cursor_pos, zoom_factor)
-                    self.camera.clamp_zoom(ZOOM_MIN, ZOOM_MAX)
+                    if IS_WEB:
+                        self._nudge_zoom_target(cursor_pos, zoom_factor)
+                    else:
+                        self.camera.zoom_at(cursor_pos, zoom_factor)
+                        self.camera.clamp_zoom(ZOOM_MIN, ZOOM_MAX)
 
                 elif event.button == 1:  # begin drag / click
                     self._dragging = True
@@ -3079,6 +3116,8 @@ class Game:
                 # Heal the display if the real canvas size disagrees with our
                 # surface (boot race against pygbag's window_resize; ~1/s check).
                 self._web_watch_display()
+                # Glide toward the wheel's zoom target (no-op when settled).
+                self._ease_zoom()
             else:
                 dt = self.clock.tick(TARGET_FPS) / 1000.0  # convert ms to seconds
 

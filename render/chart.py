@@ -1128,6 +1128,15 @@ class Chart:
 
         # Hover popup is an AIS aid — unavailable when fog hides the target.
         if hover_vessel is not None and _fog_origin is None:
+            if IS_WEB:
+                # Subtle hover ring: quiet affordance that the vessel is
+                # clickable, drawn under the tooltip.
+                hx, hy = self.camera.world_to_screen(hover_vessel.position)
+                hr = max(int(10 * self._ui),
+                         int(12 * self.camera.zoom * self._ui))
+                ca, cb, cc = theme.ACCENT
+                pygame.gfxdraw.aacircle(self.surface, int(hx), int(hy), hr,
+                                        (ca, cb, cc, 110))
             self._draw_hover_popup(hover_vessel)
 
     def _draw_hover_popup(self, vessel) -> None:

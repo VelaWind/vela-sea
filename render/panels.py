@@ -940,6 +940,9 @@ class FleetStatusPanel:
                          border_radius=theme.PANEL_RADIUS)
         self.surface.blit(bg, (x, y))
 
+        from config import IS_WEB as _web
+        _mouse = pygame.mouse.get_pos() if _web else None
+
         self._rows = []
         for i, vessel in enumerate(vessels):
             row_y   = y + self.PAD_Y + i * self.ROW_H
@@ -947,9 +950,11 @@ class FleetStatusPanel:
             self._rows.append((row_rect, vessel))
 
             is_sel = (vessel == selected_vessel)
-            if is_sel:
+            _hovered = (_mouse is not None and not is_sel
+                        and row_rect.collidepoint(_mouse))
+            if is_sel or _hovered:
                 hl = pygame.Surface((self.WIDTH, self.ROW_H), pygame.SRCALPHA)
-                hl.fill(theme.ROW_SEL_FILL)
+                hl.fill(theme.ROW_SEL_FILL if is_sel else theme.ROW_HOVER_FILL)
                 self.surface.blit(hl, (x, row_y))
 
             # Determine display status and color
