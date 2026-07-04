@@ -610,7 +610,7 @@ class Game:
         self._hud_perf_surf: Optional[pygame.Surface] = None
         self._hud_perf_frames = 0
         self._hud_perf_t0 = time.perf_counter()
-        self._hud_perf_font = (safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL, bold=True)
+        self._hud_perf_font = (safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
                                if WEB_HUD_PERF else None)
         # Web display watchdog: at boot pygbag's canvas may still be the
         # template's 1280x720 (its own window_resize settles AFTER our first
@@ -876,7 +876,7 @@ class Game:
         self.tutorial_overlay = TutorialOverlayPanel(self.display)
         self.reward_banner = RewardBannerPanel(self.display)
         self._game_over_screen = GameOverScreen(self.display)
-        self._hud_perf_font = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL, bold=True)
+        self._hud_perf_font = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         self._hud_perf_surf = None
         # Re-fit the overview when nothing is followed (the spectator default).
         if self.camera.follow_target is None:
@@ -2546,6 +2546,16 @@ class Game:
         # the left edge.  The fleet panel is drawn whenever settings is hidden.
         _fleet_visible = not self.settings_panel.is_visible
         _y_label_x = (20 + self.fleet_panel.WIDTH + 8) if _fleet_visible else 4
+        # Web: keep chart labels out from under the vessel-info column so they
+        # can't ghost through its translucent card (see chart.label_occluders).
+        if IS_WEB:
+            if self.selected_vessel is not None:
+                _vw, _vh = self.display.get_size()
+                _pw = min(ui_px(360), max(ui_px(280), _vw - ui_px(40)))
+                self.chart.label_occluders = [pygame.Rect(
+                    _vw - _pw - ui_px(40), 0, _pw + ui_px(40), _vh)]
+            else:
+                self.chart.label_occluders = []
         _prof = self._prof   # None on desktop -> all timing branches skipped
         _c = time.perf_counter() if _prof is not None else 0.0
         self.chart.draw_all(world=self.world, environment=self.environment,
@@ -2646,8 +2656,9 @@ class Game:
             if _elapsed >= 1.0:
                 _fps = self._hud_perf_frames / _elapsed
                 _txt = f"{_fps:.0f} fps · {1000.0 / _fps:.0f} ms" if _fps > 0 else "-- fps"
+                from render import theme
                 self._hud_perf_surf = self._hud_perf_font.render(
-                    _txt, True, (150, 205, 170))
+                    _txt, True, theme.FPS_COLOR)
                 self._hud_perf_frames = 0
                 self._hud_perf_t0 = _now_s
             if self._hud_perf_surf is not None:

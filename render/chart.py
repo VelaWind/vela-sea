@@ -73,6 +73,7 @@ from config import (
 )
 from render.camera import Camera
 from render.fonts import safe_sysfont, ui_px, get_ui_scale
+from render import theme
 
 Position = Tuple[float, float]
 
@@ -217,6 +218,11 @@ class Chart:
         self._ws_key: tuple = ()              # (zoom, vw, vh) the chunk was built for
         self._ws_built_ms: int = -10**9       # last rebuild tick (throttle)
         self._building_static = False         # suppress label queuing during builds
+        # Screen rects (set per frame by Game on web) that chart labels must
+        # not be placed under — e.g. the vessel-info panel column.  Labels
+        # ghosting through a translucent panel looked broken in the preview
+        # harness; suppressing them is cleaner than making panels opaque.
+        self.label_occluders: list = []
         # Web HUD caches: the compass rose is fully static; the scale bar only
         # changes with the zoom bucket.  Painted once, blitted per frame.
         self._compass_surf: Optional[pygame.Surface] = None
@@ -711,10 +717,10 @@ class Chart:
             if is_major or not web_cheap:
                 sx = cam.world_to_screen((x, 0))[0]
                 if lines:
-                    color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+                    color = theme.GRID_MAJOR if is_major else theme.GRID_MINOR
                     _draw_line(self.surface, color, (sx, 0), (sx, vh))
                 if is_major and labels and 0 <= x <= WORLD_WIDTH:
-                    label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
+                    label = self.font_mono.render(f"{int(x)}", True, theme.GRID_LABEL)
                     self._blit_text_shadow(label, int(sx + 4), 4)   # top edge
             x += GRID_SPACING
 
@@ -724,10 +730,10 @@ class Chart:
             if is_major or not web_cheap:
                 sy = cam.world_to_screen((0, y))[1]
                 if lines:
-                    color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+                    color = theme.GRID_MAJOR if is_major else theme.GRID_MINOR
                     _draw_line(self.surface, color, (0, sy), (vw, sy))
                 if is_major and labels and 0 <= y <= WORLD_HEIGHT:
-                    label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
+                    label = self.font_mono.render(f"{int(y)}", True, theme.GRID_LABEL)
                     # Left edge, inset past the fleet panel when it's showing so the
                     # trailing digit is never clipped; sits right on its own line.
                     self._blit_text_shadow(label, y_label_x, int(sy + 4))
@@ -1009,10 +1015,11 @@ class Chart:
 
             pygame.gfxdraw.filled_circle(self.surface, sx, sy, symbol_size, COLOR_PANEL_BORDER)
             pygame.gfxdraw.aacircle(self.surface, sx, sy, symbol_size, COLOR_ACCENT)
-            name_label = self.font_map.render(port.name, True, COLOR_TEXT_PRIMARY)
-            # queue port label (high priority)
+            name_label = self.font_map.render(port.name, True, theme.CHIP_TEXT_PORT)
+            # queue port label (high priority; quieter chip styling than vessels)
             self._queue_label(name_label, sx + PORT_LABEL_OFFSET, sy - PORT_LABEL_OFFSET,
-                              priority=80, anchor_pos=(screen_x, screen_y))
+                              priority=80, anchor_pos=(screen_x, screen_y),
+                              kind="port")
 
     def draw_shipping_lanes(self, world) -> None:
         """Draw faint dashed TSS lines connecting the main ports in route order.
@@ -1381,12 +1388,13 @@ class Chart:
             pygame.gfxdraw.aapolygon(self.surface, hull_int, (r, g, b, 255))
 
         # ── Vessel label ──────────────────────────────────────────────────────
-        name_label = self.font_map.render(vessel.name, True, COLOR_TEXT_PRIMARY)
+        name_label = self.font_map.render(vessel.name, True, theme.CHIP_TEXT_VESSEL)
         # Player vessel: priority 200 — always drawn regardless of zoom threshold.
         prio = 200 if _is_player else (100 if selected else 30)
         self._queue_label(name_label, int(screen_x - name_label.get_width() / 2),
                           int(screen_y + SHIP_LABEL_OFFSET), priority=prio,
-                          anchor_pos=(screen_x, screen_y))
+                          anchor_pos=(screen_x, screen_y),
+                          kind="vessel", selected=(selected or _is_player))
 
         # ── Range rings: always shown for player, else only when selected ─────
         if selected or _is_player:
@@ -1620,8 +1628,8 @@ class Chart:
     def draw_status_bar(self, environment, selected_vessel) -> None:
         bar_height = ui_px(40)
         bar_rect = pygame.Rect(0, 0, self.surface.get_width(), bar_height)
-        pygame.draw.rect(self.surface, (*COLOR_CHART_BAR_BG, 220), bar_rect)
-        pygame.draw.line(self.surface, COLOR_FRAME, bar_rect.bottomleft, bar_rect.bottomright, 1)
+        pygame.draw.rect(self.surface, theme.BAR_FILL, bar_rect)
+        pygame.draw.line(self.surface, theme.BAR_LINE, bar_rect.bottomleft, bar_rect.bottomright, 1)
 
         time_text = f"{int(environment.time_of_day):02d}:{int((environment.time_of_day % 1) * 60):02d}"
         # Compass bearing ("NE", "SSW") reads faster than raw degrees.
@@ -1637,10 +1645,10 @@ class Chart:
         vis_text = f"Vis {vis_display}"
         speed_text = "PAUSED" if environment.time_speed_multiplier == 0 else f"Speed {environment.time_speed_multiplier:.0f}x"
 
-        left_text = self.font_mono.render(time_text, True, COLOR_TEXT_SECONDARY)
+        left_text = self.font_mono.render(time_text, True, theme.BAR_TEXT_L)
         event = environment.active_event_name()
         mid_str = f"{wind_text} | {vis_text}" + (f" | {event.upper()}" if event else "")
-        mid_text = self.font_mono.render(mid_str, True, COLOR_TEXT_PRIMARY)
+        mid_text = self.font_mono.render(mid_str, True, theme.BAR_TEXT_M)
         right_text = self.font_mono.render(speed_text, True, COLOR_ACCENT)
 
         padding = ui_px(18)
@@ -1662,6 +1670,8 @@ class Chart:
         y: int,
         priority: int,
         anchor_pos: Position,
+        kind: str = "generic",
+        selected: bool = False,
     ) -> None:
         # Static-chunk builds draw shapes only: labels are screen-anchored and
         # per-frame, so queuing them here would blit at stale chunk coordinates.
@@ -1700,6 +1710,11 @@ class Chart:
             return
         label_rect.x = max(0, min(vw - label_rect.width, label_rect.x))
         label_rect.y = max(0, min(vh - label_rect.height, label_rect.y))
+        # Never place a label under a UI panel (it would ghost through the
+        # translucent fill).  Game maintains the occluder list on web.
+        for _occ in self.label_occluders:
+            if label_rect.colliderect(_occ):
+                return
         x = label_rect.x + _lp
         y = label_rect.y + _lp
 
@@ -1710,14 +1725,22 @@ class Chart:
             "rect": label_rect,
             "priority": priority,
             "anchor": anchor_pos,
+            "kind": kind,
+            "selected": selected,
         })
 
-    def _draw_label_pill(self, label_rect: pygame.Rect) -> None:
+    def _draw_label_pill(self, label_rect: pygame.Rect,
+                         kind: str = "generic", selected: bool = False) -> None:
+        # Chip styling from the theme: vessel chips speak slightly louder than
+        # port chips; the selected vessel's chip carries the accent border.
+        # On desktop every token resolves to the legacy single style.
+        fill = theme.CHIP_FILL_PORT if kind == "port" else theme.CHIP_FILL_VESSEL
+        border = theme.CHIP_BORDER_SEL if selected else theme.CHIP_BORDER
         pill_surface = pygame.Surface(label_rect.size, pygame.SRCALPHA)
-        pill_color = (*COLOR_CHART_BAR_BG, 220)
-        border_color = (*COLOR_TEXT_PRIMARY, 40)
-        pygame.draw.rect(pill_surface, pill_color, pill_surface.get_rect(), border_radius=8)
-        pygame.draw.rect(pill_surface, border_color, pill_surface.get_rect(), width=1, border_radius=8)
+        pygame.draw.rect(pill_surface, fill, pill_surface.get_rect(),
+                         border_radius=theme.CHIP_RADIUS)
+        pygame.draw.rect(pill_surface, border, pill_surface.get_rect(),
+                         width=1, border_radius=theme.CHIP_RADIUS)
         self.surface.blit(pill_surface, label_rect.topleft)
 
     def _draw_label_leader(self, anchor_pos: Position, label_rect: pygame.Rect) -> None:
@@ -1745,7 +1768,8 @@ class Chart:
             if any(label_rect.colliderect(existing) for existing in placed_rects):
                 continue
 
-            self._draw_label_pill(label_rect)
+            self._draw_label_pill(label_rect, candidate.get("kind", "generic"),
+                                  candidate.get("selected", False))
             self._blit_text_shadow(candidate["surface"], candidate["x"], candidate["y"])
             self._draw_label_leader(candidate["anchor"], label_rect)
             placed_rects.append(label_rect)

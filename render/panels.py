@@ -13,6 +13,7 @@ from math import atan2, degrees
 import math
 from render.chart import _vessel_hull_points, _rotate_points
 from render.fonts import safe_sysfont, ui_px
+from render import theme
 from engine.settings import KEYBIND_ACTIONS, DIFFICULTIES, RESOLUTION_CHOICES
 from config import (
     COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_DIM, COLOR_WARNING,
@@ -88,10 +89,14 @@ def _format_duration(hours: float) -> str:
 class VesselInfoPanel:
     def __init__(self, surface: pygame.Surface):
         self.surface = surface
+        from config import IS_WEB as _web
         self.font_title = safe_sysfont(FONT_UI_NAME, FONT_SIZE_TITLE, bold=True)
         self.font_header = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SECTION, bold=True)
         self.font_label = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
-        self.font_value = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_DATA, bold=True)
+        # Web: regular-weight values — every row in heavy bold cyan-white made
+        # the whole panel shout (seen in the preview harness); hierarchy comes
+        # from color instead.  Desktop keeps the legacy bold.
+        self.font_value = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_DATA, bold=not _web)
         self.font_big = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_BIG, bold=True)
         self.font_small = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
         self.font_log   = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
@@ -268,7 +273,7 @@ class VesselInfoPanel:
             # Thinking indicator: header briefly turns amber after a new log entry.
             _last_dec = getattr(vessel, '_last_decision_time', 0.0)
             _thinking = time.time() - _last_dec < 0.5
-            _hdr_col = (255, 200, 80) if _thinking else COLOR_ACCENT
+            _hdr_col = (255, 200, 80) if _thinking else theme.INFO_LOG_HEADER
             hdr_surf = self.font_header.render("CAPTAIN'S LOG", True, _hdr_col)
             self.surface.blit(hdr_surf, (x + S(20), current_y))
             current_y += S(24)
@@ -301,6 +306,16 @@ class VesselInfoPanel:
                 current_y += S(18)
 
     def _draw_panel_background(self, x: int, y: int, width: int, height: int) -> None:
+        from config import IS_WEB
+        if IS_WEB:
+            # Translucent card with hairline border: alpha only blends when
+            # drawn into an SRCALPHA surface, so build one and blit.
+            bg = pygame.Surface((width, height), pygame.SRCALPHA)
+            pygame.draw.rect(bg, theme.PANEL_FILL, bg.get_rect(), border_radius=16)
+            pygame.draw.rect(bg, theme.PANEL_BORDER, bg.get_rect(),
+                             width=theme.PANEL_BORDER_W, border_radius=16)
+            self.surface.blit(bg, (x, y))
+            return
         pygame.draw.rect(self.surface, (*COLOR_PANEL_BG, 230), (x, y, width, height), border_radius=16)
         pygame.draw.rect(self.surface, COLOR_PANEL_BORDER, (x, y, width, height), 2, border_radius=16)
 
@@ -841,11 +856,15 @@ class EventLog:
         x = ui_px(20)
         y = vh - h - ui_px(20)
 
-        # Semi-transparent dark background
+        # Translucent dark card with a hairline border (theme; legacy square
+        # box on desktop).  Border drawn INTO the SRCALPHA surface so its
+        # low-alpha value actually blends.
         bg = pygame.Surface((self.WIDTH, h), pygame.SRCALPHA)
-        bg.fill((8, 20, 40, 195))
+        pygame.draw.rect(bg, theme.LOG_FILL, bg.get_rect(),
+                         border_radius=theme.LOG_RADIUS)
+        pygame.draw.rect(bg, theme.LOG_BORDER, bg.get_rect(), width=1,
+                         border_radius=theme.LOG_RADIUS)
         self.surface.blit(bg, (x, y))
-        pygame.draw.rect(self.surface, (40, 65, 95), (x, y, self.WIDTH, h), 1)
 
         # Entries — oldest at top, most recent at bottom
         for i, (text, color) in enumerate(self._entries):
@@ -910,17 +929,16 @@ class FleetStatusPanel:
         x = ui_px(20)
         y = self.TOP_Y
 
-        # Background — themed translucent panel matching the other UI panels
-        # (rounded corners, 2 px border).  A flat alpha-200 fill with a 1 px
-        # border read as "floating text" over dark water because PANEL_BG is
-        # almost the water colour; the brighter 2 px border + rounded corners
-        # outline the panel so it's legible over water and land alike, exactly
-        # like the vessel-info and mission panels.
+        # Background — themed translucent panel (theme tokens: modern hairline
+        # card on web, the legacy 2px-border panel on desktop).  The border is
+        # drawn INTO the SRCALPHA surface so a low-alpha hairline blends.
         bg = pygame.Surface((self.WIDTH, h), pygame.SRCALPHA)
-        pygame.draw.rect(bg, (*COLOR_PANEL_BG, 230), bg.get_rect(), border_radius=10)
+        pygame.draw.rect(bg, theme.PANEL_FILL, bg.get_rect(),
+                         border_radius=theme.PANEL_RADIUS)
+        pygame.draw.rect(bg, theme.PANEL_BORDER, bg.get_rect(),
+                         width=theme.PANEL_BORDER_W,
+                         border_radius=theme.PANEL_RADIUS)
         self.surface.blit(bg, (x, y))
-        pygame.draw.rect(self.surface, COLOR_PANEL_BORDER, (x, y, self.WIDTH, h), 2,
-                         border_radius=10)
 
         self._rows = []
         for i, vessel in enumerate(vessels):
@@ -931,7 +949,7 @@ class FleetStatusPanel:
             is_sel = (vessel == selected_vessel)
             if is_sel:
                 hl = pygame.Surface((self.WIDTH, self.ROW_H), pygame.SRCALPHA)
-                hl.fill((255, 255, 255, 22))
+                hl.fill(theme.ROW_SEL_FILL)
                 self.surface.blit(hl, (x, row_y))
 
             # Determine display status and color
@@ -951,10 +969,12 @@ class FleetStatusPanel:
                 style = _FLEET_STATUS_STYLE.get(vessel.status, ("???", (150, 150, 150)))
                 label, col = style
 
-            name_col = (230, 230, 230) if is_sel else (160, 160, 160)
+            name_col = theme.ROW_NAME_SEL if is_sel else theme.ROW_NAME
             status_surf = self._font_status.render(label, True, col)
-            # Leave 6 px gap between name and status; truncate name if needed.
-            max_name_w = self.WIDTH - self.PAD_X * 2 - status_surf.get_width() - 6
+            # Real gutter between the name and status columns (theme; the old
+            # fixed 6px let long names visually collide with long statuses).
+            _gutter = ui_px(theme.ROW_GUTTER)
+            max_name_w = self.WIDTH - self.PAD_X * 2 - status_surf.get_width() - _gutter
             name_surf = self._font_name.render(
                 _truncate_text(vessel.name, self._font_name, max_name_w),
                 True, name_col,
@@ -1784,7 +1804,9 @@ class MinimapPanel:
             px = int(port.position[0] * self._SX)
             py = int(port.position[1] * self._SY)
             pygame.draw.rect(surf, COLOR_ACCENT, (px - 1, py - 1, 3, 3))
-        pygame.draw.rect(surf, COLOR_PANEL_BORDER, surf.get_rect(), 1)
+        # 1px frame in the theme border color (low-alpha hairline on web — the
+        # SRCALPHA surface blends it; opaque legacy border on desktop).
+        pygame.draw.rect(surf, theme.PANEL_BORDER, surf.get_rect(), 1)
         try:
             # Display-format match: this base is blitted every frame.
             return surf.convert_alpha()
