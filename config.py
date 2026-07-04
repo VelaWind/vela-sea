@@ -83,6 +83,18 @@ TARGET_FPS = 60
 # spectator sim and halves per-frame WASM cost (draw calls, GC, mixing).
 WEB_TARGET_FPS = 30
 
+# Web framebuffer.  pygbag's default canvas is a fixed 1280x720 backing store
+# CSS-stretched to fill the page, so on any wider or HiDPI display it upscales
+# blurry.  Instead we set_mode to the canvas's TRUE device-pixel size (window
+# inner size * devicePixelRatio) read via the pygbag JS bridge, so rendering is
+# 1:1 with the display and text is crisp.  Capped (aspect-preserving) so fill-rate
+# and fixed-px UI fonts stay sane on 4K/HiDPI — the ~1080p cap keeps fonts about
+# desktop-sized.  The fallback is used only when the bridge is unavailable.
+WEB_FB_MAX_W = 1920
+WEB_FB_MAX_H = 1080
+WEB_FB_FALLBACK_W = 1600
+WEB_FB_FALLBACK_H = 900
+
 # ============================================================================
 # Theme colors
 # ============================================================================

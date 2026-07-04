@@ -82,7 +82,8 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
                     PARTY_DURATION_MIN_S, PARTY_DURATION_MAX_S, PARTY_TENDER_NAME)
 from config import NM_PER_WORLD_UNIT
 from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
-                    WEB_TARGET_FPS, WEB_MAX_SIM_STEPS_PER_FRAME)
+                    WEB_TARGET_FPS, WEB_MAX_SIM_STEPS_PER_FRAME,
+                    WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H)
 from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
@@ -719,6 +720,15 @@ class Game:
         resolution=None + windowed reproduces the original behaviour exactly.
         Used at startup and re-used when the player changes display settings.
         """
+        if IS_WEB:
+            # Web: render at the canvas's true device-pixel size so text is crisp,
+            # instead of pygbag's blurry CSS-stretched 1280x720 default.  Its own
+            # method keeps the desktop path below byte-for-byte unchanged.
+            w, h = self._web_framebuffer_size()
+            surface = pygame.display.set_mode((w, h))
+            w, h = surface.get_size()
+            return surface, w, h
+
         # True desktop size.  pygame.display.Info().current_* returns the CURRENT
         # mode after the first set_mode (NOT the desktop), so it can't be trusted
         # at runtime — a runtime fullscreen toggle would size off the current
@@ -748,6 +758,34 @@ class Game:
         # Read back the REAL size SDL gave us (authoritative for camera/panels).
         w, h = surface.get_size()
         return surface, w, h
+
+    def _web_framebuffer_size(self):
+        """Choose the web framebuffer (set_mode) size.
+
+        pygbag's default canvas is a fixed 1280x720 backing store CSS-stretched to
+        fill the page, so on a larger or HiDPI display it upscales blurry and text
+        goes fuzzy.  Query the canvas's real DEVICE-pixel size via the pygbag JS
+        bridge (window inner size * devicePixelRatio) and render at that, so the
+        framebuffer maps 1:1 to physical pixels — crisp.  The size is capped
+        aspect-preserving to WEB_FB_MAX so fill-rate and fixed-px UI fonts stay
+        sane on 4K/HiDPI.  If the bridge is unavailable (older pygbag, headless),
+        fall back to a fixed higher-than-default size that still beats 1280x720.
+        """
+        fallback = (WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H)
+        try:
+            import platform as _platform          # pygbag shim: .window is the JS window
+            win = _platform.window
+            dpr = float(win.devicePixelRatio) or 1.0
+            cw = int(win.innerWidth)
+            ch = int(win.innerHeight)
+        except Exception:
+            return fallback
+        if cw < 320 or ch < 240:                  # nonsense / not ready -> safe default
+            return fallback
+        dw, dh = int(cw * dpr), int(ch * dpr)
+        # Cap while preserving the window's aspect ratio (no CSS-stretch distortion).
+        scale = min(1.0, WEB_FB_MAX_W / dw, WEB_FB_MAX_H / dh)
+        return max(1, int(dw * scale)), max(1, int(dh * scale))
 
     def _rebuild_keybinds(self) -> None:
         """(Re)build the action<->keycode maps from settings.keybinds (key names).
