@@ -88,9 +88,10 @@ WINDOW_MIN_HEIGHT = 950
 WINDOW_SCALE_FACTOR = 0.90
 WINDOW_TITLE = "Maritime Navigation Simulator"
 TARGET_FPS = 60
-# Web runs at half the desktop frame rate: 30 fps is plenty for an ambient
-# spectator sim and halves per-frame WASM cost (draw calls, GC, mixing).
-WEB_TARGET_FPS = 30
+# Web has NO fps target: the browser's requestAnimationFrame is the only pacer
+# (pygbag resumes the loop once per rAF tick).  A self-imposed budget sleep
+# stacked with rAF quantization and pinned the tab at ~25 fps / 40 ms on any
+# hardware — see the pacing audit in main.Game.run().
 
 # Web framebuffer.  pygbag's default canvas is a fixed 1280x720 backing store
 # CSS-stretched to fill the page, so on any wider or HiDPI display it upscales

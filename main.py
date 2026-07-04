@@ -83,7 +83,7 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
                     PARTY_DURATION_MIN_S, PARTY_DURATION_MAX_S, PARTY_TENDER_NAME)
 from config import NM_PER_WORLD_UNIT
 from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
-                    WEB_TARGET_FPS, WEB_MAX_SIM_STEPS_PER_FRAME,
+                    WEB_MAX_SIM_STEPS_PER_FRAME,
                     WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H,
                     WEB_HUD_PERF, WEB_RENDER_SCALE)
 from engine.collision import update_collision_avoidance, find_safe_path
@@ -532,48 +532,91 @@ def _random_spawn(route: list, world, draft: float,
 class FrameProfiler:
     """Cheap per-phase frame timing for the web build (config.WEB_PROFILE).
 
-    Accumulates elapsed seconds into plain float slots — no per-frame allocation
-    — and prints ONE line to stdout roughly every REPORT_S seconds.  pygbag pipes
-    stdout to the browser console, so this line is how we see where WASM time
-    actually goes and prove each perf fix.  Only instantiated when WEB_PROFILE is
-    True (i.e. on web), so it is completely inert on desktop.
+    Accumulates elapsed seconds into plain CUMULATIVE float slots — no per-frame
+    allocation.  Two consumers read windowed averages off their own baselines:
 
-    The one line to look for in the console::
+    - ``maybe_report()`` prints ONE line to stdout every REPORT_S seconds.
+      pygbag pipes stdout to the browser console, so this line is how we see
+      where WASM time actually goes and prove each perf fix.
+    - ``hud_line()`` returns a short bucket string for the on-screen overlay,
+      averaged since its previous call (the overlay calls it once per second).
 
-        [WEBPROF] fps=30.0 frame= 33.3ms | sim= 0.40 chart= 2.10 panels= 0.80 flip= 1.20 ms/f | steps/f=1.00
+    ``wait`` is frame wall time minus the measured buckets: event handling,
+    loop overhead, and above all frame PACING.  Small buckets + a large wait
+    means the browser's rAF cadence — not our work — sets the frame time.
+    Only instantiated when WEB_PROFILE is True, so fully inert on desktop.
+
+    The console line::
+
+        [WEBPROF] fps=30.0 frame= 33.3ms | sim= 0.40 chart= 2.10 panels= 0.80 flip= 1.20 wait=28.0 ms/f | steps/f=1.00
     """
     REPORT_S = 5.0
-    __slots__ = ("n", "sim", "chart", "panels", "flip", "steps", "_t0")
+    __slots__ = ("n", "sim", "chart", "panels", "flip", "steps",
+                 "_rep_t", "_rep_n", "_rep_sim", "_rep_chart", "_rep_panels",
+                 "_rep_flip", "_rep_steps",
+                 "_hud_t", "_hud_n", "_hud_sim", "_hud_chart", "_hud_panels",
+                 "_hud_flip")
 
     def __init__(self) -> None:
-        self._reset()
-        self._t0 = time.perf_counter()
-
-    def _reset(self) -> None:
         self.n = 0
-        self.sim = 0.0
-        self.chart = 0.0
-        self.panels = 0.0
-        self.flip = 0.0
+        self.sim = self.chart = self.panels = self.flip = 0.0
         self.steps = 0
+        t = time.perf_counter()
+        self._rep_t = t
+        self._rep_n = 0
+        self._rep_sim = self._rep_chart = self._rep_panels = self._rep_flip = 0.0
+        self._rep_steps = 0
+        self._hud_t = t
+        self._hud_n = 0
+        self._hud_sim = self._hud_chart = self._hud_panels = self._hud_flip = 0.0
 
     def maybe_report(self) -> None:
-        """Print + reset once REPORT_S of wall time has elapsed."""
+        """Print one [WEBPROF] line + rebase once REPORT_S of wall time passed."""
         now = time.perf_counter()
-        dt = now - self._t0
-        if dt < self.REPORT_S or self.n == 0:
+        wall = now - self._rep_t
+        dn = self.n - self._rep_n
+        if wall < self.REPORT_S or dn == 0:
             return
-        n = self.n
-        fps = n / dt
+        work = ((self.sim - self._rep_sim) + (self.chart - self._rep_chart)
+                + (self.panels - self._rep_panels) + (self.flip - self._rep_flip))
+        fps = dn / wall
         # %-format (not f-string) and one print/5 s: negligible per-report cost.
         print("[WEBPROF] fps=%4.1f frame=%5.1fms | sim=%5.2f chart=%5.2f "
-              "panels=%5.2f flip=%5.2f ms/f | steps/f=%.2f" % (
+              "panels=%5.2f flip=%5.2f wait=%5.2f ms/f | steps/f=%.2f" % (
                   fps, 1000.0 / fps,
-                  self.sim / n * 1e3, self.chart / n * 1e3,
-                  self.panels / n * 1e3, self.flip / n * 1e3,
-                  self.steps / n))
-        self._reset()
-        self._t0 = now
+                  (self.sim - self._rep_sim) / dn * 1e3,
+                  (self.chart - self._rep_chart) / dn * 1e3,
+                  (self.panels - self._rep_panels) / dn * 1e3,
+                  (self.flip - self._rep_flip) / dn * 1e3,
+                  max(0.0, wall - work) / dn * 1e3,
+                  (self.steps - self._rep_steps) / dn))
+        self._rep_t = now
+        self._rep_n = self.n
+        self._rep_sim, self._rep_chart = self.sim, self.chart
+        self._rep_panels, self._rep_flip = self.panels, self.flip
+        self._rep_steps = self.steps
+
+    def hud_line(self) -> str:
+        """Bucket averages since the previous call, formatted for the overlay.
+
+        Returns "" until at least one frame has elapsed in the window.
+        """
+        now = time.perf_counter()
+        wall = now - self._hud_t
+        dn = self.n - self._hud_n
+        if dn <= 0:
+            return ""
+        sim = (self.sim - self._hud_sim) / dn * 1e3
+        chart = (self.chart - self._hud_chart) / dn * 1e3
+        ui = (self.panels - self._hud_panels) / dn * 1e3
+        flip = (self.flip - self._hud_flip) / dn * 1e3
+        wait = max(0.0, wall / dn * 1e3 - sim - chart - ui - flip)
+        self._hud_t = now
+        self._hud_n = self.n
+        self._hud_sim, self._hud_chart = self.sim, self.chart
+        self._hud_panels, self._hud_flip = self.panels, self.flip
+        return (f"sim {sim:.1f} · chart {chart:.1f} · ui {ui:.1f}"
+                f" · flip {flip:.1f} · wait {wait:.1f}")
 
 
 class Game:
@@ -597,17 +640,19 @@ class Game:
             set_ui_scale(min(2.0, max(1.0, display_height / 720.0)))
         pygame.display.set_caption(WINDOW_TITLE)
         self.clock = pygame.time.Clock()
-        # Frame-rate + sim-step caps are lower on web to keep the tab responsive;
-        # on desktop they resolve to the original constants (IS_WEB is False).
-        self._target_fps = WEB_TARGET_FPS if IS_WEB else TARGET_FPS
+        # Sim-step cap is lower on web to keep the tab responsive; on desktop it
+        # resolves to the original constant (IS_WEB is False).  Web frame RATE
+        # is paced by the browser's requestAnimationFrame (see run()), so there
+        # is no web fps target anymore.
         self._max_sim_steps = WEB_MAX_SIM_STEPS_PER_FRAME if IS_WEB else MAX_SIM_STEPS_PER_FRAME
         self._collision_frame = 0   # web-only: runs collision avoidance every 2nd frame
         # In-browser frame profiler (None on desktop, so fully inert there).
         self._prof = FrameProfiler() if WEB_PROFILE else None
-        # On-screen perf overlay (web): "31 fps · 32 ms" top-right, re-rendered
-        # once per second.  _hud_perf_surf is the cached text surface; only the
-        # cheap blit happens per frame.
+        # On-screen perf overlay (web): "31 fps · 32 ms" plus a second bucket-
+        # breakdown line, top-right, re-rendered once per second.  The *_surf
+        # attrs cache the text surfaces; only cheap blits happen per frame.
         self._hud_perf_surf: Optional[pygame.Surface] = None
+        self._hud_prof_surf: Optional[pygame.Surface] = None
         self._hud_perf_frames = 0
         self._hud_perf_t0 = time.perf_counter()
         self._hud_perf_font = (safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
@@ -2693,8 +2738,12 @@ class Game:
                 time.time() - self._session_start_time)
 
         # On-screen perf overlay (web only): tiny fps/ms readout top-right, just
-        # below the status bar.  Text re-rendered once per second; per-frame cost
-        # is one small blit.  Screenshots then carry the numbers.
+        # below the status bar, plus a second line with the per-frame bucket
+        # breakdown "sim · chart · ui · flip · wait" averaged over the same ~1 s
+        # window.  'wait' = wall time minus measured work, i.e. pacing/loop
+        # overhead — it shows whether frame time is real work or the browser's
+        # rAF cadence.  Text re-rendered once per second (through the text
+        # cache); per-frame cost is two small blits.  Screenshots carry it all.
         if WEB_HUD_PERF and self._hud_perf_font is not None:
             self._hud_perf_frames += 1
             _now_s = time.perf_counter()
@@ -2705,13 +2754,23 @@ class Game:
                 from render import theme
                 self._hud_perf_surf = self._hud_perf_font.render(
                     _txt, True, theme.FPS_COLOR)
+                if self._prof is not None:
+                    _line = self._prof.hud_line()
+                    self._hud_prof_surf = (self._hud_perf_font.render(
+                        _line, True, theme.FPS_COLOR) if _line else None)
                 self._hud_perf_frames = 0
                 self._hud_perf_t0 = _now_s
             if self._hud_perf_surf is not None:
+                _pw = self.display.get_width()
+                _py = ui_px(46)
                 self.display.blit(
                     self._hud_perf_surf,
-                    (self.display.get_width() - self._hud_perf_surf.get_width() - ui_px(10),
-                     ui_px(46)))
+                    (_pw - self._hud_perf_surf.get_width() - ui_px(10), _py))
+                if self._hud_prof_surf is not None:
+                    self.display.blit(
+                        self._hud_prof_surf,
+                        (_pw - self._hud_prof_surf.get_width() - ui_px(10),
+                         _py + self._hud_perf_surf.get_height() + ui_px(2)))
 
         if _prof is not None:
             _pe = time.perf_counter()      # panels end / flip start
@@ -3112,15 +3171,12 @@ class Game:
         # player ship, while the title screen kept the port cluster framed.
         if self.player_vessel is not None and PLAYER_FOLLOW_CAM:
             self.camera.set_follow_target(self.player_vessel)
-        _frame_budget = 1.0 / self._target_fps   # web pacing target (30 fps)
         while self.running:
             if IS_WEB:
                 # clock.tick(fps) caps the rate with an SDL_Delay busy-wait, which
                 # burns the single browser thread under WASM.  Measure-only tick()
-                # (no cap) instead, then pace the frame with a real asyncio.sleep
-                # below, which yields to the browser's event loop (rAF) — never a
-                # busy-wait.  This is the pygbag-recommended pattern.
-                _frame_start = pygame.time.get_ticks()
+                # (no cap) instead — the browser's requestAnimationFrame is the
+                # ONLY pacer on web (see the pacing audit at the sleep below).
                 dt = self.clock.tick() / 1000.0
                 # Heal the display if the real canvas size disagrees with our
                 # surface (boot race against pygbag's window_resize; ~1/s check).
@@ -3145,14 +3201,20 @@ class Game:
 
             # Yield to the event loop once per frame.  Required by pygbag under
             # WebAssembly (lets the browser paint + deliver input); a harmless
-            # no-op on desktop.
-            if IS_WEB:
-                # Sleep the remainder of the 30 fps budget so the browser gets the
-                # thread back; falls through to sleep(0) when we're already behind.
-                _spent = (pygame.time.get_ticks() - _frame_start) / 1000.0
-                await asyncio.sleep(max(0.0, _frame_budget - _spent))
-            else:
-                await asyncio.sleep(0)
+            # no-op on desktop, where clock.tick(TARGET_FPS) above paces.
+            #
+            # PACING AUDIT (why sleep(0), never sleep(budget-spent)): pygbag
+            # steps the asyncio loop only on requestAnimationFrame ticks, so a
+            # sleep can only wake ON a tick.  Sleeping "the rest of the 33.3ms
+            # budget" set the deadline exactly on a tick boundary; browser
+            # jitter then landed the wake on the 33.3ms tick OR slid to the
+            # 50ms one, alternating 33/50ms frames -> the observed hardware-
+            # independent 25 fps / 40 ms wall that no work optimization could
+            # move (the smaller the work, the longer the sleep — same tick).
+            # sleep(0) parks the task until the NEXT rAF tick only: rAF paces,
+            # frames run back-to-back with the display, and every ms of work
+            # saved now shows up in the frame time.
+            await asyncio.sleep(0)
 
         # Silence loops so a restart doesn't stack a second ambient track.
         self.sound.stop_all()
