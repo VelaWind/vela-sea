@@ -12,7 +12,6 @@ import os
 import random
 import struct
 import sys
-import wave
 
 import pygame
 
@@ -36,6 +35,13 @@ MUSIC_SOUNDS = frozenset({"engine_loop", "ambient_sea"})
 
 def _write_wav(path: str, samples) -> None:
     """Write a list of floats in [-1, 1] as a 16-bit mono WAV."""
+    # `wave` is imported lazily, right where it's used, on purpose: under pygbag
+    # /WebAssembly a module-level `import wave` fires the runtime's import hook,
+    # which tries to auto-install the (bogus stub) 'wave' package from PyPI at
+    # boot.  This function only runs during first-launch WAV synthesis, which
+    # ensure_sound_files() no-ops on web — so the import never executes there and
+    # no PyPI fetch happens.  On desktop the import is identical, just deferred.
+    import wave
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)

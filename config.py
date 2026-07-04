@@ -7,6 +7,11 @@ simulation is easy to balance and tweak without hunting through the code.
 import os
 import sys
 
+# True when running under pygbag / WebAssembly (the browser build).  Every
+# web-specific branch keys off this; on desktop it is False, so those branches
+# are dead code and desktop behaviour is byte-for-byte identical.
+IS_WEB = sys.platform == "emscripten"
+
 
 def resource_path(relative: str) -> str:
     """Absolute path to a bundled read-only resource (e.g. the sound wavs).

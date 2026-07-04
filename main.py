@@ -81,6 +81,7 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
                     MOOD_TIRED_AFTER_S, MOOD_CONFIDENT_AFTER_S, MOOD_RESTED_AFTER_S,
                     PARTY_DURATION_MIN_S, PARTY_DURATION_MAX_S, PARTY_TENDER_NAME)
 from config import NM_PER_WORLD_UNIT
+from config import IS_WEB, WORLD_WIDTH, WORLD_HEIGHT
 from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
@@ -549,6 +550,12 @@ class Game:
         # Open framed on the middle of the port cluster, not the player's
         # far-western start; follow-cam engages in run() once the title clears.
         self.camera.set_center(CAMERA_START_CENTER)
+        # Web spectator boot: there is no player ship to follow, so frame the
+        # entire Meridian Sea (both axes) and centre on the world, rather than the
+        # port-cluster width the desktop follow-cam default assumes.
+        if IS_WEB:
+            self.camera.zoom = self._calculate_overview_zoom(display_width, display_height)
+            self.camera.set_center((WORLD_WIDTH / 2.0, WORLD_HEIGHT / 2.0))
         self.chart = Chart(self.display, self.camera)
 
         # UI Panels
@@ -708,6 +715,15 @@ class Game:
         # world — the follow cam keeps the player centred, so fitting the full
         # 1400-wu sea just shrank everything into the middle of a void.
         return max(ZOOM_MIN, min(width / DEFAULT_VIEW_SPAN_WU, ZOOM_MAX))
+
+    def _calculate_overview_zoom(self, width: int, height: int) -> float:
+        """Zoom that frames the WHOLE Meridian Sea (both axes) with a little
+        breathing room around the coast — the ambient spectator overview used on
+        the web boot, where nothing is followed so the full sea must be visible.
+        """
+        margin = 1.06  # ~6% padding so the coastline isn't flush to the edges
+        fit = min(width / (WORLD_WIDTH * margin), height / (WORLD_HEIGHT * margin))
+        return max(ZOOM_MIN, min(fit, ZOOM_MAX))
 
     def _find_next_port_in_route(self, vessel):
         """Return the next Port in vessel.route from route_index, or None."""
@@ -1190,29 +1206,34 @@ class Game:
 
         # Player vessel — human-controlled cargo ship near Port Maren.
         # No route, no mission: heading and throttle are set by keyboard.
-        player = Vessel(
-            name="MV Velawind",
-            vessel_type="cargo",
-            position=(130.0, 320.0),
-            heading=90.0,
-            target_speed=0.0,
-            current_speed=0.0,
-            max_speed=14.0,
-            acceleration=2.0,
-            deceleration=1.0,
-            turn_rate=10.0,
-            length_m=85.0,
-            beam_m=14.0,
-            draft_m=5.0,
-            fuel=100.0,
-            fuel_capacity=100.0,
-            fuel_consumption_rate=1.0,   # ~5% of tank per typical run — a minor
-                                         # cost; mistakes, not fuel, are the sink
-            is_player=True,
-            status="underway",
-        )
-        self.world.add_vessel(player)
-        self.player_vessel = player
+        #
+        # Skipped on web: the browser build boots as a pure ambient spectator —
+        # no player ship, no career, no tutorial (see IS_WEB in run()).  Leaving
+        # self.player_vessel = None makes every player-centric branch a no-op.
+        if not IS_WEB:
+            player = Vessel(
+                name="MV Velawind",
+                vessel_type="cargo",
+                position=(130.0, 320.0),
+                heading=90.0,
+                target_speed=0.0,
+                current_speed=0.0,
+                max_speed=14.0,
+                acceleration=2.0,
+                deceleration=1.0,
+                turn_rate=10.0,
+                length_m=85.0,
+                beam_m=14.0,
+                draft_m=5.0,
+                fuel=100.0,
+                fuel_capacity=100.0,
+                fuel_consumption_rate=1.0,   # ~5% of tank per typical run — a minor
+                                             # cost; mistakes, not fuel, are the sink
+                is_player=True,
+                status="underway",
+            )
+            self.world.add_vessel(player)
+            self.player_vessel = player
 
     def handle_events(self) -> None:
         """Process keyboard and mouse input."""
@@ -1224,6 +1245,11 @@ class Game:
                 if event.key == pygame.K_ESCAPE:
                     if self.game_over:
                         self.running = False     # game over: Esc exits
+                    elif IS_WEB:
+                        # Web spectator: never open the blocking pause menu.
+                        # Esc simply clears the current selection / follow-cam.
+                        self.selected_vessel = None
+                        self.camera.set_follow_target(None)
                     else:
                         self._run_pause_menu()    # in-game: Esc opens pause menu
                 elif event.key == pygame.K_r and self.game_over:
@@ -2438,6 +2464,10 @@ class Game:
         alive (AI vessels sail their routes).  Returns "new", "continue",
         or "quit".
         """
+        # Never run this blocking loop under WebAssembly — it would freeze the
+        # browser tab.  The web path skips the call site too; this is a backstop.
+        if IS_WEB:
+            return "new"
         title = TitleScreen(self.display)
         while True:
             dt = self.clock.tick(TARGET_FPS) / 1000.0
@@ -2480,6 +2510,10 @@ class Game:
         apply live (Stage 3); the chart stays drawn underneath, but the sim does
         not advance — settings is a modal sub-screen.
         """
+        # Blocking modal loop — never reachable on web (title/pause are skipped),
+        # but guarded so it can never freeze a browser tab.
+        if IS_WEB:
+            return
         screen = SettingsScreen(self.display)
         while True:
             self.clock.tick(TARGET_FPS)
@@ -2542,6 +2576,10 @@ class Game:
         Title.  Freezes the sim (it never ticks update_simulation here); Settings
         reuses the settings screen; Save & Quit persists the career and returns
         to the title with the save intact (Continue then loads it)."""
+        # Blocking modal loop — on web Esc deselects instead (see handle_events);
+        # this backstop guarantees the browser tab can never freeze here.
+        if IS_WEB:
+            return
         menu = PauseMenu(self.display)
         # Remember the speed so Resume restores it (a 2x/3x selection isn't lost).
         prev_speed = self.environment.time_speed_multiplier
@@ -2760,7 +2798,10 @@ class Game:
         frame under WebAssembly.  On desktop the sleep(0) is a no-op round-trip
         through the event loop, so behavior is identical.
         """
-        if not skip_title:
+        # Web boots straight into the living sea — no title screen (its blocking
+        # while-loop would freeze the browser tab).  On desktop the title runs
+        # exactly as before.
+        if not skip_title and not IS_WEB:
             action = self._title_loop()
             if action == "quit":
                 self.running = False

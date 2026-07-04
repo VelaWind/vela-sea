@@ -108,8 +108,12 @@ def prefetch_pygame_wheel() -> None:
 
 
 def run_pygbag(extra: list) -> int:
+    # --ume_block 0: don't gate the sim behind a click-to-start splash.  This is
+    # an ambient spectator simulator — it should boot the living sea immediately
+    # on page load.  (Browser audio policy still needs a user gesture before any
+    # sound plays, so it's silent ambient until the first click — that's fine.)
     cmd = [sys.executable, "-m", "pygbag", "--disable-sound-format-error",
-           "--title", "Meridian Sea"] + extra + [STAGE]
+           "--ume_block", "0", "--title", "Meridian Sea"] + extra + [STAGE]
     print("running:", " ".join(cmd))
     return subprocess.call(cmd)
 
