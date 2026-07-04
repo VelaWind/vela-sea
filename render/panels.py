@@ -268,6 +268,13 @@ class VesselInfoPanel:
 
         # ── Captain's log section ─────────────────────────────────────────────
         log = getattr(vessel, 'captain_log', [])
+        # Web: when the viewport clamped the panel height, drop the log section
+        # rather than draw past the card bottom (it collided with the minimap —
+        # caught in the preview harness).  Desktop keeps the legacy behaviour.
+        from config import IS_WEB as _webclip
+        _panel_bottom = y + panel_height
+        if log and _webclip and current_y + S(16 + 24 + 18) > _panel_bottom - S(18):
+            log = []
         if log:
             current_y += S(16)
             # Thinking indicator: header briefly turns amber after a new log entry.
@@ -287,6 +294,9 @@ class VesselInfoPanel:
                 current_y += S(18)
             inner_w = panel_width - S(36)
             for entry in log[-5:]:
+                # Never draw a row past the card bottom on web (clamped height).
+                if _webclip and current_y + S(18) > _panel_bottom - S(10):
+                    break
                 # Color-code entries by content: amber=hazard, green=positive, dim=normal
                 _el = entry.lower()
                 if any(kw in _el for kw in (

@@ -85,7 +85,7 @@ from config import NM_PER_WORLD_UNIT
 from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
                     WEB_TARGET_FPS, WEB_MAX_SIM_STEPS_PER_FRAME,
                     WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H,
-                    WEB_HUD_PERF)
+                    WEB_HUD_PERF, WEB_RENDER_SCALE)
 from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
@@ -813,7 +813,12 @@ class Game:
             return fallback
         if cw < 320 or ch < 240:                  # nonsense / not ready -> safe default
             return fallback
-        dw, dh = int(cw * dpr), int(ch * dpr)
+        # WEB_RENDER_SCALE: render fewer pixels than the canvas has; the
+        # browser's GPU upscale (canvas CSS is 100%) stretches for free.  The
+        # per-frame canvas upload is the real-browser bottleneck, so this is
+        # the lever that actually moves fps (see config.py).
+        dw = int(cw * dpr * WEB_RENDER_SCALE)
+        dh = int(ch * dpr * WEB_RENDER_SCALE)
         # Cap while preserving the window's aspect ratio (no CSS-stretch distortion).
         scale = min(1.0, WEB_FB_MAX_W / dw, WEB_FB_MAX_H / dh)
         return max(1, int(dw * scale)), max(1, int(dh * scale))
@@ -2643,7 +2648,11 @@ class Game:
                                 self.mission_manager.sim_elapsed_s,
                                 bottom_offset=_mm_offset)
         self.mission_manager.clear_if_expired()
-        if not self.settings_panel.is_visible:
+        # Web: the minimap and the vessel-info card contend for the bottom-right
+        # corner (the map clipped the card's log text — caught in the preview
+        # harness), so the minimap yields while a detail card is open.
+        _minimap_hidden = IS_WEB and self.selected_vessel is not None
+        if not self.settings_panel.is_visible and not _minimap_hidden:
             self.minimap.draw(self.world, self.player_vessel)
         self.player_hud.draw(
             self.player_vessel,

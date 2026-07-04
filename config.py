@@ -104,6 +104,16 @@ WEB_FB_MAX_H = 1080
 WEB_FB_FALLBACK_W = 1600
 WEB_FB_FALLBACK_H = 900
 
+# Internal render scale (web).  The dominant real-browser frame cost is the
+# per-frame canvas PRESENT: SDL's emscripten backend uploads the whole
+# framebuffer every frame (1835x980 = ~7 MB/frame), which no Python-side
+# optimization can touch — proven when removing ~109 font renders/frame moved
+# real fps by zero.  Rendering at 0.8 scale cuts uploaded pixels by 36% (and
+# every fill-rate-bound draw with it); the browser's free GPU upscale stretches
+# the canvas back to full size (CSS width/height are already 100%).  Slight
+# softness is the trade.  1.0 disables (render at native device pixels).
+WEB_RENDER_SCALE = 0.8
+
 # Pre-rendered static world layer (web).  All static chart content (sea, the
 # full-quality depth glow, islands, zone shapes) renders ONCE into a camera-
 # centered chunk WEB_STATIC_CHUNK_FACTOR x the viewport (clamped to world
