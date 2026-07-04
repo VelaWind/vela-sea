@@ -72,7 +72,7 @@ from config import (
     WEB_STATIC_EDGE_MARGIN_FRAC,
 )
 from render.camera import Camera
-from render.fonts import safe_sysfont
+from render.fonts import safe_sysfont, ui_px, get_ui_scale
 
 Position = Tuple[float, float]
 
@@ -177,6 +177,9 @@ class Chart:
     def __init__(self, surface: pygame.Surface, camera: Camera):
         self.surface = surface
         self.camera = camera
+        # UI scale (1.0 on desktop): marker radii and HUD paddings multiply by
+        # this so symbols keep desktop-relative size at high web resolutions.
+        self._ui = get_ui_scale()
         self.font_map = safe_sysfont(FONT_UI_NAME, FONT_SIZE_MAP_LABEL)
         self.font_small = safe_sysfont(FONT_UI_NAME, FONT_SIZE_SMALL)
         self.font_label = safe_sysfont(FONT_UI_NAME, FONT_SIZE_LABEL)
@@ -920,7 +923,7 @@ class Chart:
         for port in world.ports:
             screen_x, screen_y = self.camera.world_to_screen(port.position)
             sx, sy = int(screen_x), int(screen_y)
-            symbol_size = PORT_SYMBOL_SIZE
+            symbol_size = ui_px(PORT_SYMBOL_SIZE)   # == PORT_SYMBOL_SIZE on desktop
 
             # Classify docked vessels so we know which activity icons to show.
             has_cargo_docked = False
@@ -1239,7 +1242,9 @@ class Chart:
     def draw_vessel(self, vessel, selected: bool = False, environment=None) -> None:
         _is_player = getattr(vessel, 'is_player', False)
         screen_x, screen_y = self.camera.world_to_screen(vessel.position)
-        size = max(6, min(int(8 * self.camera.zoom), 18))
+        # Marker size scales with the UI (self._ui is 1.0 on desktop: identical).
+        size = max(int(6 * self._ui),
+                   min(int(8 * self.camera.zoom * self._ui), int(18 * self._ui)))
         if _is_player:
             size = max(8, min(int(size * 1.4), 26))
         color = self._vessel_color(vessel)
@@ -1554,7 +1559,7 @@ class Chart:
         self._blit_text_shadow(label, start_x, bar_bottom + 6)
 
     def draw_status_bar(self, environment, selected_vessel) -> None:
-        bar_height = 40
+        bar_height = ui_px(40)
         bar_rect = pygame.Rect(0, 0, self.surface.get_width(), bar_height)
         pygame.draw.rect(self.surface, (*COLOR_CHART_BAR_BG, 220), bar_rect)
         pygame.draw.line(self.surface, COLOR_FRAME, bar_rect.bottomleft, bar_rect.bottomright, 1)
@@ -1579,10 +1584,11 @@ class Chart:
         mid_text = self.font_mono.render(mid_str, True, COLOR_TEXT_PRIMARY)
         right_text = self.font_mono.render(speed_text, True, COLOR_ACCENT)
 
-        padding = 18
-        self._blit_text_shadow(left_text, padding, 10)
-        self._blit_text_shadow(mid_text, self.surface.get_width() // 2 - mid_text.get_width() // 2, 10)
-        self._blit_text_shadow(right_text, self.surface.get_width() - right_text.get_width() - padding, 10)
+        padding = ui_px(18)
+        _ty = ui_px(10)
+        self._blit_text_shadow(left_text, padding, _ty)
+        self._blit_text_shadow(mid_text, self.surface.get_width() // 2 - mid_text.get_width() // 2, _ty)
+        self._blit_text_shadow(right_text, self.surface.get_width() - right_text.get_width() - padding, _ty)
 
     def _blit_text_shadow(self, text_surface: pygame.Surface, x: int, y: int) -> None:
         shadow = text_surface.copy()
@@ -1613,11 +1619,12 @@ class Chart:
         if priority < 200 and self.camera.zoom < LABEL_ZOOM_THRESHOLD_SHOW_ALL and priority < 80:
             return
 
+        _lp = ui_px(4)   # pill padding around the text (4 px at design scale)
         label_rect = pygame.Rect(
-            x - 4,
-            y - 4,
-            label_surface.get_width() + 8,
-            label_surface.get_height() + 8,
+            x - _lp,
+            y - _lp,
+            label_surface.get_width() + _lp * 2,
+            label_surface.get_height() + _lp * 2,
         )
 
         # Skip labels whose anchor is off-screen: clamping them inward would
@@ -1634,8 +1641,8 @@ class Chart:
             return
         label_rect.x = max(0, min(vw - label_rect.width, label_rect.x))
         label_rect.y = max(0, min(vh - label_rect.height, label_rect.y))
-        x = label_rect.x + 4
-        y = label_rect.y + 4
+        x = label_rect.x + _lp
+        y = label_rect.y + _lp
 
         self._label_candidates.append({
             "surface": label_surface,

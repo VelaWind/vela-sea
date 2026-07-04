@@ -12,7 +12,7 @@ from math import atan2, degrees
 
 import math
 from render.chart import _vessel_hull_points, _rotate_points
-from render.fonts import safe_sysfont
+from render.fonts import safe_sysfont, ui_px
 from engine.settings import KEYBIND_ACTIONS, DIFFICULTIES, RESOLUTION_CHOICES
 from config import (
     COLOR_TEXT_PRIMARY, COLOR_TEXT_SECONDARY, COLOR_TEXT_DIM, COLOR_WARNING,
@@ -103,28 +103,34 @@ class VesselInfoPanel:
 
         Mirrors the exact current_y increments in draw() so the background
         rect is always tall enough, regardless of vessel type or destination.
+        Every fixed row increment routes through ui_px (identity on desktop) so
+        the rows grow with the scaled fonts on high-resolution web builds.
         """
-        h = 18  # top padding
-        h += self.font_title.get_height() + 12  # vessel name + gap
-        h += 16   # divider gap
-        h += 26   # Type row
-        h += 32   # Status row
-        h += 24 + 22 + 22 + 30   # Dimensions: header + LOA + Beam + (Draft + section gap)
-        h += 24 + 22 + 22 + 22 + 30  # Navigation: header + 4 rows + section gap
+        S = ui_px
+        h = S(18)  # top padding
+        h += self.font_title.get_height() + S(12)  # vessel name + gap
+        h += S(16)   # divider gap
+        h += S(26)   # Type row
+        h += S(32)   # Status row
+        # Per-term S(...) everywhere (never S(a+b)): draw() advances current_y one
+        # row at a time, so the height sum must round each term identically or the
+        # background comes up a few px short at fractional scales.
+        h += S(24) + S(22) + S(22) + S(30)   # Dimensions: header + LOA + Beam + (Draft + section gap)
+        h += S(24) + S(22) + S(22) + S(22) + S(30)  # Navigation: header + 4 rows + section gap
         if vessel.destination:
-            h += 24 + 22 + 30    # Nav Target: header + Distance + (ETA + section gap)
-        h += 24  # Fuel/Propulsion header
+            h += S(24) + S(22) + S(30)    # Nav Target: header + Distance + (ETA + section gap)
+        h += S(24)  # Fuel/Propulsion header
         if vessel.fuel is not None:
-            h += 26 + 32         # fuel label + bar row
+            h += S(26) + S(32)         # fuel label + bar row
         else:
-            h += 26 + 26         # "Wind-powered" + "Wind Note" rows
+            h += S(26) + S(26)         # "Wind-powered" + "Wind Note" rows
         if vessel.status == "aground" and getattr(vessel, 'distress', False):
-            h += 24 + 22 + 22 + 22 + 18  # DISTRESS header + 4 rows + gap
+            h += S(24) + S(22) + S(22) + S(22) + S(18)  # DISTRESS header + 4 rows + gap
         log = getattr(vessel, 'captain_log', [])
         if log:
             _has_mood_line = bool(getattr(vessel, 'personality', '') or getattr(vessel, 'mood', ''))
-            h += 16 + 24 + (18 if _has_mood_line else 0) + min(5, len(log)) * 18
-        h += 18  # bottom padding
+            h += S(16) + S(24) + (S(18) if _has_mood_line else 0) + min(5, len(log)) * S(18)
+        h += S(18)  # bottom padding
         return h
 
     def draw(self, vessel: Optional[object], environment: Optional[object], world: Optional[object] = None) -> None:
@@ -133,8 +139,9 @@ class VesselInfoPanel:
         if vessel is None:
             return
 
-        panel_margin = 20
-        panel_width = min(360, max(280, self.surface.get_width() - panel_margin * 2))
+        S = ui_px   # identity on desktop; scales rows with the fonts on web
+        panel_margin = S(20)
+        panel_width = min(S(360), max(S(280), self.surface.get_width() - panel_margin * 2))
         panel_height = min(
             self._required_panel_height(vessel),
             self.surface.get_height() - panel_margin * 2,
@@ -143,7 +150,7 @@ class VesselInfoPanel:
         y = panel_margin
         self._draw_panel_background(x, y, panel_width, panel_height)
 
-        padding = 18
+        padding = S(18)
         current_y = y + padding
         title_text = self.font_title.render(vessel.name, True, COLOR_ACCENT)
         self.surface.blit(title_text, (x + padding, current_y))
@@ -151,49 +158,49 @@ class VesselInfoPanel:
         if getattr(vessel, 'is_player', False):
             you_surf = self.font_small.render("[YOU]", True, (60, 220, 120))
             self.surface.blit(you_surf,
-                              (x + padding + title_text.get_width() + 8,
+                              (x + padding + title_text.get_width() + S(8),
                                current_y + (title_text.get_height() - you_surf.get_height()) // 2))
-        current_y += title_text.get_height() + 12
+        current_y += title_text.get_height() + S(12)
 
         self._draw_divider(x, current_y, panel_width)
-        current_y += 16
+        current_y += S(16)
 
         self._draw_label_value(x, current_y, panel_width, "Type", vessel.vessel_type.capitalize())
         # Small hull silhouette on the same row, pointing right (east, heading=0).
-        _inner_margin = 20
+        _inner_margin = S(20)
         _val_w = self.font_value.size(vessel.vessel_type.capitalize())[0]
-        _ico_cx = x + (panel_width - _inner_margin) - _val_w - 4 - 12
-        _ico_cy = current_y + 12
-        _hull_pts = _vessel_hull_points(vessel.vessel_type, 10)
+        _ico_cx = x + (panel_width - _inner_margin) - _val_w - S(4) - S(12)
+        _ico_cy = current_y + S(12)
+        _hull_pts = _vessel_hull_points(vessel.vessel_type, S(10))
         _hull_screen = _rotate_points(_hull_pts, 90.0, _ico_cx, _ico_cy)
         _hull_int = [(int(px), int(py)) for px, py in _hull_screen]
         if len(_hull_int) >= 3:
             pygame.draw.polygon(self.surface, COLOR_TEXT_SECONDARY, _hull_int)
-        current_y += 26
+        current_y += S(26)
         # Show mission_status when available (e.g. "TRAWLING", "BOARDING"), else status
         _status_display = getattr(vessel, 'mission_status', '') or vessel.status.upper()
         self._draw_label_value(x, current_y, panel_width, "Status", _status_display)
-        current_y += 32
+        current_y += S(32)
 
         self._draw_section_header(x, current_y, "Dimensions")
-        current_y += 24
+        current_y += S(24)
         self._draw_label_value(x, current_y, panel_width, "LOA", f"{vessel.length_m:.1f} m")
-        current_y += 22
+        current_y += S(22)
         self._draw_label_value(x, current_y, panel_width, "Beam", f"{vessel.beam_m:.1f} m")
-        current_y += 22
+        current_y += S(22)
         self._draw_label_value(x, current_y, panel_width, "Draft", f"{vessel.draft_m:.1f} m")
-        current_y += 30
+        current_y += S(30)
 
         self._draw_section_header(x, current_y, "Navigation")
-        current_y += 24
+        current_y += S(24)
         self._draw_label_value(x, current_y, panel_width, "Heading", f"{vessel.heading:.0f}°")
-        current_y += 22
+        current_y += S(22)
         self._draw_label_value(x, current_y, panel_width, "Speed", f"{vessel.current_speed:.1f} kn")
-        current_y += 22
+        current_y += S(22)
         self._draw_label_value(x, current_y, panel_width, "Target", f"{vessel.target_speed:.1f} kn")
-        current_y += 22
+        current_y += S(22)
         self._draw_label_value(x, current_y, panel_width, "Max", f"{vessel.max_speed:.1f} kn")
-        current_y += 30
+        current_y += S(30)
 
         if vessel.destination:
             dist_nm = vessel.distance_to(vessel.destination) * NM_PER_WORLD_UNIT
@@ -201,45 +208,45 @@ class VesselInfoPanel:
             if vessel.current_speed > 0.1:
                 eta_text = _format_duration(dist_nm / vessel.current_speed)
             self._draw_section_header(x, current_y, "Navigation Target")
-            current_y += 24
+            current_y += S(24)
             self._draw_label_value(x, current_y, panel_width, "Distance", f"{dist_nm:.1f} nm")
-            current_y += 22
+            current_y += S(22)
             self._draw_label_value(x, current_y, panel_width, "ETA", eta_text)
-            current_y += 30
+            current_y += S(30)
 
         self._draw_section_header(x, current_y, "Fuel / Propulsion")
-        current_y += 24
+        current_y += S(24)
         if vessel.fuel is not None:
             fuel_pct = (vessel.fuel / vessel.fuel_capacity) * 100 if vessel.fuel_capacity else 0
             fuel_color = COLOR_ACCENT if fuel_pct > 25 else COLOR_WARNING
             self._draw_label_value(x, current_y, panel_width, "Fuel", f"{vessel.fuel:.1f} / {vessel.fuel_capacity:.1f} L", value_color=fuel_color)
-            current_y += 26
+            current_y += S(26)
             self._draw_fuel_bar(x, current_y, fuel_pct, fuel_color, panel_width)
-            current_y += 32
+            current_y += S(32)
         else:
             self._draw_label_value(x, current_y, panel_width, "Propulsion", "Wind-powered", value_color=COLOR_ACCENT)
-            current_y += 26
+            current_y += S(26)
             self._draw_label_value(x, current_y, panel_width, "Wind Note", "Effective sail power", value_color=COLOR_TEXT_SECONDARY)
-            current_y += 26
+            current_y += S(26)
 
         # ── SAR distress section ──────────────────────────────────────────────
         if vessel.status == "aground" and getattr(vessel, 'distress', False):
             self._draw_section_header(x, current_y, "DISTRESS")
-            current_y += 24
+            current_y += S(24)
 
             hrs = int(vessel.distress_timer // 3600)
             mins = int((vessel.distress_timer % 3600) // 60)
             time_str = f"{hrs}h {mins:02d}m" if hrs else f"{mins}m"
             self._draw_label_value(x, current_y, panel_width,
                                    "Time aground", time_str, value_color=COLOR_WARNING)
-            current_y += 22
+            current_y += S(22)
 
             rescuer = getattr(vessel, 'rescue_vessel', None)
             rescue_name = rescuer.name if rescuer is not None else "None dispatched"
             rescue_color = COLOR_ACCENT if rescuer is not None else COLOR_TEXT_SECONDARY
             self._draw_label_value(x, current_y, panel_width,
                                    "Rescue vessel", rescue_name, value_color=rescue_color)
-            current_y += 22
+            current_y += S(22)
 
             if world is not None and environment is not None:
                 try:
@@ -252,28 +259,28 @@ class VesselInfoPanel:
                                            value_color=depth_color)
                 except Exception:
                     self._draw_label_value(x, current_y, panel_width, "Depth", "—")
-            current_y += 22
+            current_y += S(22)
 
         # ── Captain's log section ─────────────────────────────────────────────
         log = getattr(vessel, 'captain_log', [])
         if log:
-            current_y += 16
+            current_y += S(16)
             # Thinking indicator: header briefly turns amber after a new log entry.
             _last_dec = getattr(vessel, '_last_decision_time', 0.0)
             _thinking = time.time() - _last_dec < 0.5
             _hdr_col = (255, 200, 80) if _thinking else COLOR_ACCENT
             hdr_surf = self.font_header.render("CAPTAIN'S LOG", True, _hdr_col)
-            self.surface.blit(hdr_surf, (x + 20, current_y))
-            current_y += 24
+            self.surface.blit(hdr_surf, (x + S(20), current_y))
+            current_y += S(24)
             # Personality / mood sub-header
             _pers = getattr(vessel, 'personality', '').capitalize()
             _mood = getattr(vessel, 'mood', '').capitalize()
             if _pers or _mood:
                 _pm = f"{_pers} · {_mood}" if (_pers and _mood) else (_pers or _mood)
                 _pm_surf = self.font_small.render(_pm, True, COLOR_TEXT_SECONDARY)
-                self.surface.blit(_pm_surf, (x + 20, current_y))
-                current_y += 18
-            inner_w = panel_width - 36
+                self.surface.blit(_pm_surf, (x + S(20), current_y))
+                current_y += S(18)
+            inner_w = panel_width - S(36)
             for entry in log[-5:]:
                 # Color-code entries by content: amber=hazard, green=positive, dim=normal
                 _el = entry.lower()
@@ -290,8 +297,8 @@ class VesselInfoPanel:
                 entry_surf = self.font_log.render(
                     _truncate_text(entry, self.font_log, inner_w), True, _ec,
                 )
-                self.surface.blit(entry_surf, (x + 20, current_y))
-                current_y += 18
+                self.surface.blit(entry_surf, (x + S(20), current_y))
+                current_y += S(18)
 
     def _draw_panel_background(self, x: int, y: int, width: int, height: int) -> None:
         pygame.draw.rect(self.surface, (*COLOR_PANEL_BG, 230), (x, y, width, height), border_radius=16)
@@ -299,10 +306,10 @@ class VesselInfoPanel:
 
     def _draw_section_header(self, x: int, y: int, title: str) -> None:
         header = self.font_header.render(title, True, COLOR_ACCENT)
-        self.surface.blit(header, (x + 20, y))
+        self.surface.blit(header, (x + ui_px(20), y))
 
     def _draw_label_value(self, x: int, y: int, panel_width: int, label: str, value: str, value_color: tuple = COLOR_TEXT_PRIMARY) -> None:
-        inner_margin = 20
+        inner_margin = ui_px(20)
         inner_width = panel_width - inner_margin * 2
         label_text = _truncate_text(label, self.font_label, inner_width)
         value_text = _truncate_text(value, self.font_value, inner_width)
@@ -312,16 +319,16 @@ class VesselInfoPanel:
         self.surface.blit(value_surf, (x + inner_margin + inner_width - value_surf.get_width(), y - 2))
 
     def _draw_fuel_bar(self, x: int, y: int, percent: float, fill_color: tuple, panel_width: int) -> None:
-        inner_margin = 20
+        inner_margin = ui_px(20)
         bar_w = panel_width - inner_margin * 2
-        bar_h = 14
+        bar_h = ui_px(14)
         bar_x = x + inner_margin
         pygame.draw.rect(self.surface, COLOR_FRAME, (bar_x, y, bar_w, bar_h), border_radius=6)
         fill_w = int(bar_w * percent / 100)
         pygame.draw.rect(self.surface, fill_color, (bar_x, y, fill_w, bar_h), border_radius=6)
 
     def _draw_divider(self, x: int, y: int, panel_width: int) -> None:
-        inner_margin = 20
+        inner_margin = ui_px(20)
         pygame.draw.line(self.surface, COLOR_FRAME, (x + inner_margin, y), (x + panel_width - inner_margin, y), 1)
 
 
@@ -812,6 +819,11 @@ class EventLog:
         self.surface = surface
         self._entries: list = []   # [(text, color), ...]
         self._font = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
+        # UI-scaled instance copies shadow the class constants (identity on
+        # desktop) so the box grows with the scaled font on web.
+        self.WIDTH  = ui_px(EventLog.WIDTH)
+        self.LINE_H = ui_px(EventLog.LINE_H)
+        self.PAD    = ui_px(EventLog.PAD)
 
     def add(self, sim_time: str, message: str, color: tuple) -> None:
         """Append an event; drop the oldest if over capacity."""
@@ -826,8 +838,8 @@ class EventLog:
 
         h = len(self._entries) * self.LINE_H + self.PAD * 2
         vw, vh = self.surface.get_size()
-        x = 20
-        y = vh - h - 20
+        x = ui_px(20)
+        y = vh - h - ui_px(20)
 
         # Semi-transparent dark background
         bg = pygame.Surface((self.WIDTH, h), pygame.SRCALPHA)
@@ -876,6 +888,13 @@ class FleetStatusPanel:
         self._font_name   = safe_sysfont(FONT_UI_NAME,  FONT_SIZE_SMALL)
         self._font_status = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         self._rows: list = []   # [(pygame.Rect, vessel), ...] for click detection
+        # UI-scaled instance copies shadow the class constants (identity on
+        # desktop) so rows keep pace with the scaled font on web.
+        self.ROW_H = ui_px(FleetStatusPanel.ROW_H)
+        self.WIDTH = ui_px(FleetStatusPanel.WIDTH)
+        self.PAD_X = ui_px(FleetStatusPanel.PAD_X)
+        self.PAD_Y = ui_px(FleetStatusPanel.PAD_Y)
+        self.TOP_Y = ui_px(FleetStatusPanel.TOP_Y)
 
     def draw(self, world, selected_vessel) -> None:
         if not world or not world.vessels:
@@ -888,7 +907,7 @@ class FleetStatusPanel:
         vessels = world.vessels[:max_rows]
         n = len(vessels)
         h = n * self.ROW_H + self.PAD_Y * 2
-        x = 20
+        x = ui_px(20)
         y = self.TOP_Y
 
         # Background — themed translucent panel matching the other UI panels
@@ -972,6 +991,11 @@ class MissionPanel:
         self._font_desc = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_LABEL,   bold=True)
         self._font_obj  = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         self._font_done = safe_sysfont(FONT_UI_NAME,   FONT_SIZE_SECTION, bold=True)
+        # UI-scaled instance copies (identity on desktop); row heights already
+        # derive from font.get_height(), so only the box metrics need scaling.
+        self.WIDTH  = ui_px(MissionPanel.WIDTH)
+        self.PAD    = ui_px(MissionPanel.PAD)
+        self.MARGIN = ui_px(MissionPanel.MARGIN)
 
     def draw(self, mission_manager, sim_elapsed_s: float = 0.0,
              bottom_offset: int = 0) -> None:
@@ -1015,7 +1039,7 @@ class MissionPanel:
         panel_h = pad * 2 + tag_h + 4 + desc_h + 4 + obj_h + dl_extra
 
         x = vw - self.WIDTH - self.MARGIN
-        y = vh - panel_h - self.MARGIN - 44  # clear status bar and fleet gap
+        y = vh - panel_h - self.MARGIN - ui_px(44)  # clear status bar and fleet gap
 
         self._panel_bg(x, y, self.WIDTH, panel_h)
 
@@ -1073,7 +1097,7 @@ class MissionPanel:
         panel_h  = pad * 2 + done_h + 6 + reward_h
 
         x = vw - self.WIDTH - self.MARGIN
-        y = vh - panel_h - self.MARGIN - 44
+        y = vh - panel_h - self.MARGIN - ui_px(44)
 
         self._panel_bg(x, y, self.WIDTH, panel_h)
 

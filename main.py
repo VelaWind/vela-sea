@@ -43,7 +43,7 @@ from config import (
 )
 from render.camera import Camera
 from render.chart import Chart
-from render.fonts import safe_sysfont
+from render.fonts import safe_sysfont, ui_px
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
@@ -586,6 +586,15 @@ class Game:
         # the old hardcoded behaviour, so an absent settings.json changes nothing.
         self.settings = Settings.load()
         self.display, display_width, display_height = self._create_display()
+        # Resolution-aware UI scale (web only): the layout/font pixel values are
+        # tuned for a ~720p canvas, but the web framebuffer now renders at true
+        # device-pixel size (Phase 2 step 3) — without this, all text is
+        # microscopic at 1080p+.  Must be set BEFORE Chart/panels are built
+        # (fonts and dimensions are computed in their __init__).  Never set on
+        # desktop: scale stays 1.0 there and every ui_px(v) == v.
+        if IS_WEB:
+            from render.fonts import set_ui_scale
+            set_ui_scale(min(2.0, max(1.0, display_height / 720.0)))
         pygame.display.set_caption(WINDOW_TITLE)
         self.clock = pygame.time.Clock()
         # Frame-rate + sim-step caps are lower on web to keep the tab responsive;
@@ -2553,7 +2562,8 @@ class Game:
             if self._hud_perf_surf is not None:
                 self.display.blit(
                     self._hud_perf_surf,
-                    (self.display.get_width() - self._hud_perf_surf.get_width() - 10, 46))
+                    (self.display.get_width() - self._hud_perf_surf.get_width() - ui_px(10),
+                     ui_px(46)))
 
         if _prof is not None:
             _pe = time.perf_counter()      # panels end / flip start
