@@ -1664,8 +1664,11 @@ class RewardBannerPanel:
             alpha = int(255 * frac)
             col = b["color"]
 
-            label_surf = self._font_label.render(b["label"], True, col)
-            big_surf = (self._font_big.render(b["big"], True, col)
+            # .copy(): these surfaces get set_alpha()'d for the fade below, and
+            # font renders may come from the shared text cache — mutating the
+            # cached surface would leave every later user of the same text faded.
+            label_surf = self._font_label.render(b["label"], True, col).copy()
+            big_surf = (self._font_big.render(b["big"], True, col).copy()
                         if b.get("big") else None)
             inner_w = max(label_surf.get_width(),
                           big_surf.get_width() if big_surf else 0)

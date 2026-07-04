@@ -12,7 +12,58 @@ never raise: it falls back to pygame's bundled default font, so a missing system
 face degrades the *look* of the text without ever taking down startup.
 """
 
+from collections import OrderedDict
+
 import pygame
+
+# ---------------------------------------------------------------------------
+# Rendered-text cache
+# ---------------------------------------------------------------------------
+# font.render is expensive (very expensive under WASM) and the UI re-renders
+# dozens of identical strings every frame (fleet rows, port labels, status bar,
+# event log...).  Every font in the game is constructed through safe_sysfont,
+# which wraps the pygame Font in CachedFont — so .render() is memoized by
+# (font, text, color) with ZERO call-site changes.  Changed text is a new key,
+# so invalidation is automatic; the cache is LRU-bounded so long sessions with
+# churning strings (timestamps, countdowns) can't grow it without limit.
+#
+# Contract: callers must treat rendered surfaces as immutable (blit-only).
+# The one caller that mutates (reward banner set_alpha fade) copies first.
+_TEXT_CACHE: "OrderedDict[tuple, pygame.Surface]" = OrderedDict()
+_TEXT_CACHE_MAX = 512
+
+
+class CachedFont:
+    """A pygame Font wrapper whose render() is memoized.
+
+    Everything else (size, get_height, metrics...) delegates to the real font,
+    so it is a drop-in replacement anywhere a Font is used for UI text.
+    """
+    __slots__ = ("_font",)
+
+    def __init__(self, font):
+        self._font = font
+
+    def render(self, text, antialias=True, color=(255, 255, 255), background=None):
+        try:
+            key = (id(self._font), text, bool(antialias),
+                   tuple(color), tuple(background) if background else None)
+        except TypeError:
+            # Unhashable color object — render uncached rather than crash.
+            return self._font.render(text, antialias, color, background)
+        surf = _TEXT_CACHE.get(key)
+        if surf is None:
+            surf = self._font.render(text, antialias, color, background)
+            _TEXT_CACHE[key] = surf
+            if len(_TEXT_CACHE) > _TEXT_CACHE_MAX:
+                _TEXT_CACHE.popitem(last=False)   # evict least-recently-used
+        else:
+            _TEXT_CACHE.move_to_end(key)
+        return surf
+
+    def __getattr__(self, name):
+        return getattr(self._font, name)
+
 
 # Resolution-aware UI scale (web).  Every font in the game is built through
 # safe_sysfont, and panel pixel dimensions route through ui_px, so this module
@@ -47,14 +98,14 @@ def safe_sysfont(name, size, bold=False, italic=False):
     """
     size = max(1, int(round(size * _UI_SCALE)))
     try:
-        return pygame.font.SysFont(name, size, bold=bold, italic=italic)
+        return CachedFont(pygame.font.SysFont(name, size, bold=bold, italic=italic))
     except Exception:
         # System-font lookup failed (e.g. no fontconfig under emscripten).
         # Ensure the font module is up, then use the bundled default face.
         try:
             if not pygame.font.get_init():
                 pygame.font.init()
-            return pygame.font.Font(None, size)
+            return CachedFont(pygame.font.Font(None, size))
         except Exception:
             # Font subsystem is entirely unavailable — the caller will get None;
             # nothing renders, but the game keeps running instead of crashing.
