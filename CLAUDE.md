@@ -73,6 +73,19 @@ config.py          Every constant: physics, colors, career, sound, polish
 - `python tests/test_visual_perf.py` — draw_all budget (< 8 ms)
 - Bot redirects saves to a temp path — never touches the player's save.json
 
+## Web build (pygbag) — visual self-verification RULE
+The browser build (`IS_WEB` code path) has a headless preview harness:
+`python tools/web_preview.py` renders the exact web path off-browser
+(MERIDIAN_FORCE_WEB=1 + SDL dummy) and saves PNGs to `tools/preview_out/`
+(boot / ambient / follow / zoom) plus a per-bucket timing line.
+
+**THE RULE: after ANY visual change to the web build, re-run the harness and
+actually OPEN AND LOOK at the PNGs before moving on.**  Iterate
+change→render→inspect→refine until it looks right, then commit.  Do not judge
+web visuals from code alone, and do not wait for user screenshots to find
+layout bugs.  (`MERIDIAN_FORCE_WEB` must never be set in normal desktop runs
+or tests — desktop resolves IS_WEB=False and must stay byte-identical.)
+
 ## What to Avoid
 - Do not put Pygame imports or rendering state in `engine/`
 - Do not mutate vessels/career from `render/` panels — return actions to Game

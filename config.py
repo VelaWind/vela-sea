@@ -10,7 +10,11 @@ import sys
 # True when running under pygbag / WebAssembly (the browser build).  Every
 # web-specific branch keys off this; on desktop it is False, so those branches
 # are dead code and desktop behaviour is byte-for-byte identical.
-IS_WEB = sys.platform == "emscripten"
+#
+# MERIDIAN_FORCE_WEB=1 forces the web path OFF-browser so tools/web_preview.py
+# can render and screenshot the exact web build headlessly (SDL dummy driver).
+# Never set it in normal desktop runs or tests — desktop must resolve False.
+IS_WEB = sys.platform == "emscripten" or os.environ.get("MERIDIAN_FORCE_WEB") == "1"
 
 # Frame profiler: when True the game prints one [WEBPROF] timing line to stdout
 # (pygbag pipes stdout to the browser console) every ~5 s.  Defaults to IS_WEB

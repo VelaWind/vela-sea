@@ -28,6 +28,7 @@ pygbag.ini
 # ── Generated / debug artifacts ─────────────────────────────────────────────
 debug_frame.png
 tests/*.png
+tools/preview_out/
 
 # ── Editors ─────────────────────────────────────────────────────────────────
 .vscode/
