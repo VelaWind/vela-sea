@@ -612,6 +612,14 @@ class Game:
         self._hud_perf_t0 = time.perf_counter()
         self._hud_perf_font = (safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL, bold=True)
                                if WEB_HUD_PERF else None)
+        # Web display watchdog: at boot pygbag's canvas may still be the
+        # template's 1280x720 (its own window_resize settles AFTER our first
+        # set_mode), so SDL clamps us to a smaller surface than the real canvas
+        # and the whole boot sizing (fit zoom, UI scale) is computed for the
+        # wrong resolution.  Once per second we compare our surface against the
+        # canvas's true device-pixel size and heal when they disagree.
+        self._web_size_check_ms = 0      # next watchdog tick (pygame ms)
+        self._web_heal_attempts = 0      # bounded retries; reset on success
         self.running = True
         self.is_paused = False
         self._prepause_speed = 1.0   # speed to restore when un-pausing
@@ -805,6 +813,77 @@ class Game:
         # Cap while preserving the window's aspect ratio (no CSS-stretch distortion).
         scale = min(1.0, WEB_FB_MAX_W / dw, WEB_FB_MAX_H / dh)
         return max(1, int(dw * scale)), max(1, int(dh * scale))
+
+    def _web_watch_display(self) -> None:
+        """Once-per-second sanity check: does our surface match the real canvas?
+
+        The Phase 4 root cause of the letterboxed world: our boot set_mode runs
+        BEFORE pygbag's own window_resize() has grown the canvas past the
+        template's 1280x720, so SDL clamps the surface and every boot-time size
+        decision (overview fit, UI scale) is computed for a resolution the
+        canvas stops having moments later.  A single boot-time measurement can
+        never win that race — so we re-measure and heal until stable.
+        Bounded retries: if the environment simply refuses the size (surface
+        never changes after a heal), stop asking rather than loop forever.
+        """
+        now = pygame.time.get_ticks()
+        if now < self._web_size_check_ms:
+            return
+        self._web_size_check_ms = now + 1000
+        if self._web_heal_attempts >= 5:
+            return
+        desired = self._web_framebuffer_size()
+        cur = self.display.get_size()
+        if abs(desired[0] - cur[0]) <= 8 and abs(desired[1] - cur[1]) <= 8:
+            self._web_heal_attempts = 0
+            return
+        self._web_heal_display(desired)
+        # Success resets the budget; a refused size burns one attempt.
+        if self.display.get_size() == desired:
+            self._web_heal_attempts = 0
+        else:
+            self._web_heal_attempts += 1
+
+    def _web_heal_display(self, size) -> None:
+        """Recreate the display at the canvas's true size and rebuild the UI.
+
+        Unlike _apply_display_settings (which only repoints surfaces), this
+        also recomputes UI_SCALE and RECONSTRUCTS the chart + panels so their
+        fonts and scaled dimensions pick up the new resolution — fonts are
+        built in each panel's __init__, so repointing alone can't resize text.
+        Game state (world, vessels, camera position, event log) is preserved.
+        """
+        from render.fonts import set_ui_scale, get_ui_scale
+        self.display = pygame.display.set_mode(size)
+        w, h = self.display.get_size()
+        set_ui_scale(min(2.0, max(1.0, h / 720.0)))
+        self.camera.viewport_width = w
+        self.camera.viewport_height = h
+        # Rebuild chart + panels (fonts/dimensions bake the scale in __init__).
+        _entries = self.event_log._entries       # keep the spectator's feed
+        self.chart = Chart(self.display, self.camera)
+        self.vessel_info_panel = VesselInfoPanel(self.display)
+        self.tech_systems_panel = TechnicalSystemsPanel(self.display)
+        self.settings_panel = SettingsPanel(self.display)
+        self.event_log = EventLog(self.display)
+        self.event_log._entries = _entries
+        self.fleet_panel = FleetStatusPanel(self.display)
+        self.mission_panel = MissionPanel(self.display)
+        self.player_hud = PlayerHUDPanel(self.display)
+        self.career_panel = CareerPanel(self.display)
+        self.docking_menu = DockingMenuPanel(self.display)
+        self.minimap = MinimapPanel(self.display)
+        self.tutorial_overlay = TutorialOverlayPanel(self.display)
+        self.reward_banner = RewardBannerPanel(self.display)
+        self._game_over_screen = GameOverScreen(self.display)
+        self._hud_perf_font = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL, bold=True)
+        self._hud_perf_surf = None
+        # Re-fit the overview when nothing is followed (the spectator default).
+        if self.camera.follow_target is None:
+            self.camera.zoom = self._calculate_overview_zoom(w, h)
+            self.camera.set_center((WORLD_WIDTH / 2.0, WORLD_HEIGHT / 2.0))
+        print(f"[WEBDISPLAY] healed display to {w}x{h} "
+              f"(ui_scale={get_ui_scale():.3f}, zoom={self.camera.zoom:.3f})")
 
     def _rebuild_keybinds(self) -> None:
         """(Re)build the action<->keycode maps from settings.keybinds (key names).
@@ -1359,17 +1438,11 @@ class Game:
                 self.running = False
 
             elif IS_WEB and event.type == pygame.VIDEORESIZE:
-                # Browser window resized (if pygbag delivers it): recreate the
-                # framebuffer at the new true pixel size and repoint camera +
-                # every panel at it.  The static world chunk keys on (zoom, vw,
-                # vh) so it invalidates and rebuilds automatically.  UI_SCALE
-                # stays from boot (fonts are built once); a large resize reads
-                # slightly off until reload, which is acceptable.
-                self._apply_display_settings()
-                if self.camera.follow_target is None:
-                    self.camera.zoom = self._calculate_overview_zoom(
-                        self.display.get_width(), self.display.get_height())
-                    self.camera.set_center((WORLD_WIDTH / 2.0, WORLD_HEIGHT / 2.0))
+                # Browser window resized (if pygbag delivers it): heal through
+                # the same path as the watchdog — recreate the framebuffer at
+                # the true canvas size, recompute UI_SCALE, rebuild fonts and
+                # panels, and re-fit the overview when nothing is followed.
+                self._web_heal_display(self._web_framebuffer_size())
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -2992,6 +3065,9 @@ class Game:
                 # busy-wait.  This is the pygbag-recommended pattern.
                 _frame_start = pygame.time.get_ticks()
                 dt = self.clock.tick() / 1000.0
+                # Heal the display if the real canvas size disagrees with our
+                # surface (boot race against pygbag's window_resize; ~1/s check).
+                self._web_watch_display()
             else:
                 dt = self.clock.tick(TARGET_FPS) / 1000.0  # convert ms to seconds
 
