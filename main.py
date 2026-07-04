@@ -585,6 +585,11 @@ class Game:
         self.display, display_width, display_height = self._create_display()
         pygame.display.set_caption(WINDOW_TITLE)
         self.clock = pygame.time.Clock()
+        # Frame-rate + sim-step caps are lower on web to keep the tab responsive;
+        # on desktop they resolve to the original constants (IS_WEB is False).
+        self._target_fps = WEB_TARGET_FPS if IS_WEB else TARGET_FPS
+        self._max_sim_steps = WEB_MAX_SIM_STEPS_PER_FRAME if IS_WEB else MAX_SIM_STEPS_PER_FRAME
+        self._collision_frame = 0   # web-only: runs collision avoidance every 2nd frame
         # In-browser frame profiler (None on desktop, so fully inert there).
         self._prof = FrameProfiler() if WEB_PROFILE else None
         self.running = True
@@ -1859,7 +1864,7 @@ class Game:
         self.accumulator += scaled_dt
         steps = 0
 
-        while self.accumulator >= SIM_TIMESTEP and steps < MAX_SIM_STEPS_PER_FRAME:
+        while self.accumulator >= SIM_TIMESTEP and steps < self._max_sim_steps:
             # Weather event detection: snapshot before update, compare after.
             _prev_event = self.environment.active_event_name()
             self.environment.update(SIM_TIMESTEP)
@@ -2333,7 +2338,7 @@ class Game:
 
         # Discard any excess accumulated time after the cap to prevent it from
         # carrying over and demanding even more steps next frame.
-        if steps >= MAX_SIM_STEPS_PER_FRAME:
+        if steps >= self._max_sim_steps:
             self.accumulator = 0.0
 
         self.last_sim_steps = steps
@@ -2348,7 +2353,14 @@ class Game:
         # Running it inside the loop at 375× per frame was the crash cause at 3×
         # speed — the O(n²) pair scan repeated hundreds of times per frame.
         # One call per frame is sufficient: positions update smoothly at 60 FPS.
-        update_collision_avoidance(self.world.vessels)
+        if IS_WEB:
+            # Halve the O(n²) pair scan on web: 15 Hz avoidance at 30 fps is ample
+            # for ambient traffic and leaves more of the frame budget for rendering.
+            self._collision_frame ^= 1
+            if self._collision_frame == 0:
+                update_collision_avoidance(self.world.vessels)
+        else:
+            update_collision_avoidance(self.world.vessels)
 
         # Onboarding step progression (once per frame, reads live player state).
         self._update_tutorial()
@@ -2875,8 +2887,18 @@ class Game:
         # player ship, while the title screen kept the port cluster framed.
         if self.player_vessel is not None and PLAYER_FOLLOW_CAM:
             self.camera.set_follow_target(self.player_vessel)
+        _frame_budget = 1.0 / self._target_fps   # web pacing target (30 fps)
         while self.running:
-            dt = self.clock.tick(TARGET_FPS) / 1000.0  # convert ms to seconds
+            if IS_WEB:
+                # clock.tick(fps) caps the rate with an SDL_Delay busy-wait, which
+                # burns the single browser thread under WASM.  Measure-only tick()
+                # (no cap) instead, then pace the frame with a real asyncio.sleep
+                # below, which yields to the browser's event loop (rAF) — never a
+                # busy-wait.  This is the pygbag-recommended pattern.
+                _frame_start = pygame.time.get_ticks()
+                dt = self.clock.tick() / 1000.0
+            else:
+                dt = self.clock.tick(TARGET_FPS) / 1000.0  # convert ms to seconds
 
             self.handle_events()
             _prof = self._prof   # None on desktop -> every timing branch is skipped
@@ -2894,7 +2916,13 @@ class Game:
             # Yield to the event loop once per frame.  Required by pygbag under
             # WebAssembly (lets the browser paint + deliver input); a harmless
             # no-op on desktop.
-            await asyncio.sleep(0)
+            if IS_WEB:
+                # Sleep the remainder of the 30 fps budget so the browser gets the
+                # thread back; falls through to sleep(0) when we're already behind.
+                _spent = (pygame.time.get_ticks() - _frame_start) / 1000.0
+                await asyncio.sleep(max(0.0, _frame_budget - _spent))
+            else:
+                await asyncio.sleep(0)
 
         # Silence loops so a restart doesn't stack a second ambient track.
         self.sound.stop_all()

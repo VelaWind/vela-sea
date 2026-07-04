@@ -525,28 +525,36 @@ class Chart:
         first_x = math.ceil(world_x_min / GRID_SPACING) * GRID_SPACING
         first_y = math.ceil(world_y_min / GRID_SPACING) * GRID_SPACING
 
+        # On web, plain (non-antialiased) grid lines: aaline blends per pixel along
+        # the FULL screen dimension for every gridline (~50/frame) — measured the
+        # single biggest chart cost.  Plain lines are visually near-identical here
+        # and far cheaper under WASM.  Minor gridlines are also dropped on web.
+        _draw_line = pygame.draw.line if IS_WEB else pygame.draw.aaline
+
         x = first_x
         while x <= world_x_max:
-            sx = cam.world_to_screen((x, 0))[0]
             is_major = int(x) % int(GRID_LABEL_INTERVAL) == 0
-            color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-            pygame.draw.aaline(self.surface, color, (sx, 0), (sx, vh))
-            if is_major:
-                label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
-                self._blit_text_shadow(label, int(sx + 4), 4)   # top edge
+            if is_major or not IS_WEB:
+                sx = cam.world_to_screen((x, 0))[0]
+                color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+                _draw_line(self.surface, color, (sx, 0), (sx, vh))
+                if is_major:
+                    label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
+                    self._blit_text_shadow(label, int(sx + 4), 4)   # top edge
             x += GRID_SPACING
 
         y = first_y
         while y <= world_y_max:
-            sy = cam.world_to_screen((0, y))[1]
             is_major = int(y) % int(GRID_LABEL_INTERVAL) == 0
-            color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-            pygame.draw.aaline(self.surface, color, (0, sy), (vw, sy))
-            if is_major:
-                label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
-                # Left edge, inset past the fleet panel when it's showing so the
-                # trailing digit is never clipped; sits right on its own line.
-                self._blit_text_shadow(label, y_label_x, int(sy + 4))
+            if is_major or not IS_WEB:
+                sy = cam.world_to_screen((0, y))[1]
+                color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+                _draw_line(self.surface, color, (0, sy), (vw, sy))
+                if is_major:
+                    label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
+                    # Left edge, inset past the fleet panel when it's showing so the
+                    # trailing digit is never clipped; sits right on its own line.
+                    self._blit_text_shadow(label, y_label_x, int(sy + 4))
             y += GRID_SPACING
 
     def draw_objective(self, player_world_pos, dest_world_pos,
@@ -1435,6 +1443,11 @@ class Chart:
         # Priority ≥ 200: always shown (player vessel label, regardless of zoom).
         # Priority ≥ 80: shown at any zoom (ports, selected vessel).
         # Priority < 80: only shown above LABEL_ZOOM_THRESHOLD_SHOW_ALL.
+        # Web declutter: keep ONLY ports + the selected vessel (priority ≥ 80).
+        # Dropping the ~15 AI-vessel name labels also shrinks the O(n²) collision
+        # resolve and the per-label pill/shadow allocations in _resolve_and_draw_labels.
+        if IS_WEB and priority < 80:
+            return
         if priority < 200 and self.camera.zoom < LABEL_ZOOM_THRESHOLD_SHOW_ALL and priority < 80:
             return
 
@@ -1586,8 +1599,11 @@ class Chart:
                  hover_vessel=None, y_label_x: int = 4) -> None:
         self._label_candidates = []
         self.draw_background(world)
-        # Open-ocean vignette sits directly on the water fill, before everything else
-        self.draw_ocean_vignette()
+        # Open-ocean vignette sits directly on the water fill, before everything else.
+        # Skipped on web: a full-screen alpha gradient blit every frame is pure
+        # cosmetic cost the spectator build can't afford.
+        if not IS_WEB:
+            self.draw_ocean_vignette()
         # Coastal depth layer (mid-depth + shallow bands) — cached; land fill drawn
         # later in draw_islands() covers the interior of each offset polygon.
         # On web the cache key (camera position) thrashes under the follow-cam, so
@@ -1601,19 +1617,27 @@ class Chart:
         if world and environment:
             self.draw_depth_zones(world, environment)
         self.draw_grid(y_label_x=y_label_x)
-        # Shipping lane overlay — below islands and zones, just above the grid
-        self.draw_shipping_lanes(world)
+        # Shipping lane overlay — below islands and zones, just above the grid.
+        # Skipped on web: a dashed-line overlay recomputed every frame (~0.9ms).
+        if not IS_WEB:
+            self.draw_shipping_lanes(world)
         # Depth contour lines (before islands so land naturally covers any coastal overhang)
         if world and environment:
             self.draw_depth_contours(world, environment)
         self.draw_islands(world)
-        # Depth soundings — small depth numbers on water, after land so they read clearly
-        if world and environment:
+        # Depth soundings — small depth numbers on water, after land so they read
+        # clearly.  Skipped on web: font.render per sounding every frame (uncached).
+        if world and environment and not IS_WEB:
             self.draw_depth_soundings(world, environment)
-        self.draw_zones(world)
+        # Regulatory zones (no-entry / speed / anchorage) — hatched SRCALPHA fills.
+        # Skipped on web: ~0.8ms of decorative overlay with no gameplay meaning in
+        # spectator mode (no player to warn).
+        if not IS_WEB:
+            self.draw_zones(world)
         # Current arrows drawn after zones so they sit above the chart base but
-        # below port symbols, nav marks, and vessels.
-        if environment:
+        # below port symbols, nav marks, and vessels.  Skipped on web: a dense grid
+        # of gfxdraw arrows recomputed every frame.
+        if environment and not IS_WEB:
             self.draw_current_arrows(environment)
         self.draw_ports(world)
         self.draw_nav_marks(world)
@@ -1625,8 +1649,9 @@ class Chart:
         # Apply day/night tint over ALL chart content (water, land, labels,
         # compass) so the whole scene shifts at night — not just the water.
         # Applied here, after chart drawing but before the HUD status bar,
-        # so the bar stays at full brightness.
-        if environment:
+        # so the bar stays at full brightness.  All three of these are full-screen
+        # alpha overlays — skipped on web (Step 2 cosmetics cut).
+        if environment and not IS_WEB:
             tint = environment.day_night_tint()
             if tint[3] > 0:
                 s = self._get_alpha_surf()
@@ -1634,11 +1659,12 @@ class Chart:
                 self.surface.blit(s, (0, 0))
 
         # Weather visuals drawn after night tint so fog/rain sit on top of everything
-        if environment:
+        if environment and not IS_WEB:
             self.draw_weather_effects(environment)
 
         # Edge vignette frames the whole scene, under the status bar only.
-        self.draw_screen_vignette()
+        if not IS_WEB:
+            self.draw_screen_vignette()
 
         if environment:
             self.draw_status_bar(environment, selected_vessel)
