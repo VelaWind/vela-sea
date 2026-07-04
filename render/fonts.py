@@ -54,6 +54,12 @@ class CachedFont:
         surf = _TEXT_CACHE.get(key)
         if surf is None:
             surf = self._font.render(text, antialias, color, background)
+            try:
+                # Match the display format so every cached blit is a straight
+                # copy.  Worth doing only for cached surfaces (rendered once).
+                surf = surf.convert_alpha()
+            except pygame.error:
+                pass   # no display yet (bare unit context) — cache as-is
             _TEXT_CACHE[key] = surf
             if len(_TEXT_CACHE) > _TEXT_CACHE_MAX:
                 _TEXT_CACHE.popitem(last=False)   # evict least-recently-used

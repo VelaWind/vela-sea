@@ -217,6 +217,11 @@ class Chart:
         self._ws_key: tuple = ()              # (zoom, vw, vh) the chunk was built for
         self._ws_built_ms: int = -10**9       # last rebuild tick (throttle)
         self._building_static = False         # suppress label queuing during builds
+        # Web HUD caches: the compass rose is fully static; the scale bar only
+        # changes with the zoom bucket.  Painted once, blitted per frame.
+        self._compass_surf: Optional[pygame.Surface] = None
+        self._scalebar_surf: Optional[pygame.Surface] = None
+        self._scalebar_key: tuple = ()
 
     def _get_alpha_surf(self) -> pygame.Surface:
         """Return the shared full-screen SRCALPHA surface, creating it once on first use.
@@ -615,7 +620,9 @@ class Chart:
         ox = cx - ww / 2.0
         oy = cy - wh / 2.0
 
-        surf = pygame.Surface((cw, ch))
+        # .convert(): match the display pixel format so the huge per-frame blit
+        # is a straight memory copy, not a per-pixel format conversion.
+        surf = pygame.Surface((cw, ch)).convert()
         chunk_cam = Camera(cw, ch)
         chunk_cam.zoom = z
         chunk_cam.position = (ox + ww / 2.0, oy + wh / 2.0)
@@ -629,7 +636,7 @@ class Chart:
             self.draw_background(world)
             # Full desktop-quality depth glow — painted into a transient SRCALPHA
             # layer (the ring alphas need per-pixel blending), then composited.
-            rings = pygame.Surface((cw, ch), pygame.SRCALPHA)
+            rings = pygame.Surface((cw, ch), pygame.SRCALPHA).convert_alpha()
             self._paint_depth_rings(rings, world)
             surf.blit(rings, (0, 0))
             del rings
@@ -1514,8 +1521,28 @@ class Chart:
         self.surface.blit(self._vignette_surf, (0, 0))
 
     def draw_compass_rose(self) -> None:
-        center_x = COMPASS_OFFSET_X
-        center_y = COMPASS_OFFSET_Y
+        if not IS_WEB:
+            self._paint_compass_rose(COMPASS_OFFSET_X, COMPASS_OFFSET_Y)
+            return
+        # Web: the rose is completely static (north is always up), so paint it
+        # once into a small cached surface and blit thereafter.
+        if self._compass_surf is None:
+            pad = 12   # AA + text-shadow bleed margin
+            side = COMPASS_SIZE + pad * 2
+            surf = pygame.Surface((side, side), pygame.SRCALPHA)
+            old = self.surface
+            self.surface = surf
+            try:
+                self._paint_compass_rose(side // 2, side // 2)
+            finally:
+                self.surface = old
+            self._compass_surf = surf.convert_alpha()
+        self.surface.blit(
+            self._compass_surf,
+            (COMPASS_OFFSET_X - self._compass_surf.get_width() // 2,
+             COMPASS_OFFSET_Y - self._compass_surf.get_height() // 2))
+
+    def _paint_compass_rose(self, center_x: int, center_y: int) -> None:
         radius = COMPASS_SIZE // 2
         pygame.gfxdraw.aacircle(self.surface, center_x, center_y, radius, COLOR_NORTH_ARROW)
         pygame.gfxdraw.filled_circle(self.surface, center_x, center_y, radius - 1, COLOR_CHART_BAR_BG)
@@ -1539,8 +1566,6 @@ class Chart:
             self._blit_text_shadow(text, center_x + dx - text.get_width() / 2, center_y + dy - text.get_height() / 2)
 
     def draw_scale_bar(self) -> None:
-        start_x = SCALE_BAR_OFFSET_X
-        start_y = SCALE_BAR_OFFSET_Y
         candidates = [0.5, 1, 2, 5, 10, 20, 50]
         target_pixels = SCALE_BAR_TARGET_WIDTH
         best_distance = candidates[0]
@@ -1557,6 +1582,32 @@ class Chart:
 
         world_distance = best_distance
         pixel_length = int(_clamp(self.camera.distance_to_screen(world_distance), 40, SCALE_BAR_MAX_WIDTH))
+
+        if not IS_WEB:
+            self._paint_scale_bar(SCALE_BAR_OFFSET_X, SCALE_BAR_OFFSET_Y,
+                                  pixel_length, world_distance)
+            return
+        # Web: the bar only changes when the zoom bucket does — cache by
+        # (pixel_length, world_distance) and blit the pre-painted surface.
+        key = (pixel_length, world_distance)
+        if self._scalebar_key != key or self._scalebar_surf is None:
+            label_h = self.font_mono.get_height() if self.font_mono else 14
+            w = pixel_length + 60          # room for the label overhang + shadow
+            h = SCALE_BAR_HEIGHT + 6 + label_h + 2
+            surf = pygame.Surface((w, h), pygame.SRCALPHA)
+            old = self.surface
+            self.surface = surf
+            try:
+                self._paint_scale_bar(0, 0, pixel_length, world_distance)
+            finally:
+                self.surface = old
+            self._scalebar_surf = surf.convert_alpha()
+            self._scalebar_key = key
+        self.surface.blit(self._scalebar_surf,
+                          (SCALE_BAR_OFFSET_X, SCALE_BAR_OFFSET_Y))
+
+    def _paint_scale_bar(self, start_x: int, start_y: int,
+                         pixel_length: int, world_distance: float) -> None:
         bar_top = start_y
         bar_bottom = start_y + SCALE_BAR_HEIGHT
         pygame.draw.rect(self.surface, COLOR_SCALE_BAR, (start_x, bar_top, pixel_length, SCALE_BAR_HEIGHT))

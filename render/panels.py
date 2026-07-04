@@ -1785,7 +1785,11 @@ class MinimapPanel:
             py = int(port.position[1] * self._SY)
             pygame.draw.rect(surf, COLOR_ACCENT, (px - 1, py - 1, 3, 3))
         pygame.draw.rect(surf, COLOR_PANEL_BORDER, surf.get_rect(), 1)
-        return surf
+        try:
+            # Display-format match: this base is blitted every frame.
+            return surf.convert_alpha()
+        except pygame.error:
+            return surf   # no display (unit context) — use as-is
 
     def draw(self, world, player) -> None:
         if not self.is_visible or world is None:
