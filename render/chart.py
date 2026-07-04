@@ -68,7 +68,8 @@ from config import (
     STORM_WAVE_LINE_COLOR, STORM_WAVE_LINE_ALPHA,
     STORM_WAVE_LINE_SPACING_PX, STORM_WAVE_SCROLL_PX_S,
     SQUALL_FLASH_ALPHA, SQUALL_FLASH_DURATION_S,
-    IS_WEB,
+    IS_WEB, WEB_PROFILE, WEB_STATIC_CHUNK_FACTOR, WEB_STATIC_REBUILD_MS,
+    WEB_STATIC_EDGE_MARGIN_FRAC,
 )
 from render.camera import Camera
 from render.fonts import safe_sysfont
@@ -204,6 +205,15 @@ class Chart:
         self._squall_flash_until: float = 0.0
         # Screen-edge vignette — cached by window size, rebuilt on resize only.
         self._vignette_surf: Optional[pygame.Surface] = None
+        # Pre-rendered static world layer (web): a camera-centered chunk holding
+        # all static chart content at full desktop quality, blitted per frame.
+        # See _draw_static_world / _build_static_chunk.  Inert on desktop.
+        self._ws_surf: Optional[pygame.Surface] = None
+        self._ws_origin: tuple = (0.0, 0.0)   # world coords of chunk top-left
+        self._ws_world_size: tuple = (0.0, 0.0)  # chunk extent in world units
+        self._ws_key: tuple = ()              # (zoom, vw, vh) the chunk was built for
+        self._ws_built_ms: int = -10**9       # last rebuild tick (throttle)
+        self._building_static = False         # suppress label queuing during builds
 
     def _get_alpha_surf(self) -> pygame.Surface:
         """Return the shared full-screen SRCALPHA surface, creating it once on first use.
@@ -438,43 +448,54 @@ class Chart:
         surf = pygame.Surface((vw, vh), pygame.SRCALPHA)
         surf.fill((0, 0, 0, 0))
 
-        if world:
-            for island in world.islands:
-                screen_polygon = [self.camera.world_to_screen(p) for p in island.polygon]
-                if len(screen_polygon) < 3:
-                    continue
-                int_polygon = [(int(x), int(y)) for x, y in screen_polygon]
-
-                # 1. Mid-depth zone: large offset polygon; land fill covers interior.
-                mid_poly = self._offset_screen_polygon(
-                    int_polygon, SHALLOW_WATER_MID_BAND_OFFSET_PX)
-                if len(mid_poly) >= 3:
-                    pygame.gfxdraw.filled_polygon(
-                        surf, mid_poly,
-                        (*COLOR_SHALLOW_WATER, SHALLOW_WATER_MID_BAND_ALPHA))
-
-                # 2. Beach fringe: thin warm ring on the polygon edge.
-                pygame.draw.lines(
-                    surf, (*COLOR_BEACH_FRINGE, BEACH_FRINGE_ALPHA),
-                    True, int_polygon, BEACH_FRINGE_WIDTH_PX)
-
-                # 3. Shallow bands: start 1 step outward so no ring overlaps land.
-                for step in range(SHALLOW_WATER_BAND_STEPS):
-                    step_alpha = int(
-                        SHALLOW_WATER_BAND_MAX_ALPHA
-                        * (1.0 - step / SHALLOW_WATER_BAND_STEPS))
-                    step_offset = (step + 1) * SHALLOW_WATER_BAND_STEP_PX
-                    band_poly = self._offset_screen_polygon(int_polygon, step_offset)
-                    if len(band_poly) >= 3:
-                        pygame.draw.lines(
-                            surf,
-                            (*COLOR_SHALLOW_BAND, step_alpha),
-                            True, band_poly,
-                            SHALLOW_WATER_BAND_STEP_PX + 1)
+        self._paint_depth_rings(surf, world)
 
         self._depth_surf = surf
         self._depth_key = key
         return surf
+
+    def _paint_depth_rings(self, surf: pygame.Surface, world) -> None:
+        """Paint the full-quality coastal depth rings for every island onto
+        ``surf`` (an SRCALPHA surface) using the CURRENT camera transform.
+
+        Extracted from _build_depth_layer so the web static-world chunk can render
+        the same desktop-quality glow (mid halo + beach fringe + 8 shallow bands)
+        off the hot path.  Pure extraction — desktop output is unchanged.
+        """
+        if not world:
+            return
+        for island in world.islands:
+            screen_polygon = [self.camera.world_to_screen(p) for p in island.polygon]
+            if len(screen_polygon) < 3:
+                continue
+            int_polygon = [(int(x), int(y)) for x, y in screen_polygon]
+
+            # 1. Mid-depth zone: large offset polygon; land fill covers interior.
+            mid_poly = self._offset_screen_polygon(
+                int_polygon, SHALLOW_WATER_MID_BAND_OFFSET_PX)
+            if len(mid_poly) >= 3:
+                pygame.gfxdraw.filled_polygon(
+                    surf, mid_poly,
+                    (*COLOR_SHALLOW_WATER, SHALLOW_WATER_MID_BAND_ALPHA))
+
+            # 2. Beach fringe: thin warm ring on the polygon edge.
+            pygame.draw.lines(
+                surf, (*COLOR_BEACH_FRINGE, BEACH_FRINGE_ALPHA),
+                True, int_polygon, BEACH_FRINGE_WIDTH_PX)
+
+            # 3. Shallow bands: start 1 step outward so no ring overlaps land.
+            for step in range(SHALLOW_WATER_BAND_STEPS):
+                step_alpha = int(
+                    SHALLOW_WATER_BAND_MAX_ALPHA
+                    * (1.0 - step / SHALLOW_WATER_BAND_STEPS))
+                step_offset = (step + 1) * SHALLOW_WATER_BAND_STEP_PX
+                band_poly = self._offset_screen_polygon(int_polygon, step_offset)
+                if len(band_poly) >= 3:
+                    pygame.draw.lines(
+                        surf,
+                        (*COLOR_SHALLOW_BAND, step_alpha),
+                        True, band_poly,
+                        SHALLOW_WATER_BAND_STEP_PX + 1)
 
     def _draw_web_shallows(self, world) -> None:
         """Web-only cheap coastal shallows: a single offset halo per island drawn
@@ -501,9 +522,142 @@ class Chart:
             if len(band) >= 3:
                 pygame.gfxdraw.filled_polygon(self.surface, band, band_color)
 
-    def draw_grid(self, y_label_x: int = 4) -> None:
+    # ------------------------------------------------------------------
+    # Pre-rendered static world layer (web only)
+    # ------------------------------------------------------------------
+
+    def _draw_static_world(self, world) -> bool:
+        """Blit the pre-rendered static world chunk for this frame.
+
+        Returns True when a valid chunk covered the visible world area (the
+        caller then skips dynamic island/shallow drawing).  Returns False when
+        no covering chunk exists yet and the rebuild throttle blocked building
+        one — the caller must draw the cheap dynamic fallback for this frame.
+
+        Rebuilds are scheduled EARLY (when the view nears the chunk edge) while
+        the old chunk still covers the screen, so ordinary panning never shows
+        the fallback; only a zoom change or resize can, and then for at most
+        WEB_STATIC_REBUILD_MS.
+        """
+        z = self.camera.zoom
+        vw, vh = self.surface.get_size()
+        key = (round(z, 3), vw, vh)
+
+        # Visible world rect, clamped to the world (off-world is plain water).
+        tl = self.camera.screen_to_world((0, 0))
+        br = self.camera.screen_to_world((vw, vh))
+        vx0, vy0 = max(0.0, tl[0]), max(0.0, tl[1])
+        vx1, vy1 = min(WORLD_WIDTH, br[0]), min(WORLD_HEIGHT, br[1])
+
+        def _covered() -> bool:
+            if self._ws_surf is None or self._ws_key != key:
+                return False
+            ox, oy = self._ws_origin
+            ww, wh = self._ws_world_size
+            eps = 1e-3   # world units (~0.004 px at max zoom) — float-safe slack
+            return (vx0 >= ox - eps and vy0 >= oy - eps
+                    and vx1 <= ox + ww + eps and vy1 <= oy + wh + eps)
+
+        def _comfortable() -> bool:
+            # Covered with margin to spare (or pinned at a world edge, where no
+            # more margin exists) on every side — no rebuild worth scheduling.
+            ox, oy = self._ws_origin
+            ww, wh = self._ws_world_size
+            mx = vw * WEB_STATIC_EDGE_MARGIN_FRAC / z
+            my = vh * WEB_STATIC_EDGE_MARGIN_FRAC / z
+            left_ok   = ox <= 1e-6 or vx0 >= ox + mx
+            top_ok    = oy <= 1e-6 or vy0 >= oy + my
+            right_ok  = ox + ww >= WORLD_WIDTH - 1e-6 or vx1 <= ox + ww - mx
+            bottom_ok = oy + wh >= WORLD_HEIGHT - 1e-6 or vy1 <= oy + wh - my
+            return left_ok and top_ok and right_ok and bottom_ok
+
+        covered = _covered()
+        if not covered or not _comfortable():
+            now = pygame.time.get_ticks()
+            if now - self._ws_built_ms >= WEB_STATIC_REBUILD_MS:
+                self._build_static_chunk(world, key)
+                covered = _covered()
+            # else: throttled — keep blitting the old chunk if it still covers.
+
+        if not covered:
+            return False
+        sx, sy = self.camera.world_to_screen(self._ws_origin)
+        self.surface.blit(self._ws_surf, (round(sx), round(sy)))
+        return True
+
+    def _build_static_chunk(self, world, key: tuple) -> None:
+        """Render every static chart layer into a fresh camera-centered chunk.
+
+        Chunk = WEB_STATIC_CHUNK_FACTOR x viewport, clamped to world bounds, at
+        the current zoom's pixels-per-unit (so the per-frame blit is unscaled and
+        pixel-perfect).  Contents, in desktop layer order: sea fill, FULL-QUALITY
+        depth rings (mid halo + beach fringe + 8 alpha bands), anti-aliased grid
+        lines, islands, static zone shapes.  Runs off the hot path — an
+        occasional few-ms hitch on zoom change is the accepted trade.
+        """
+        z, vw, vh = key
+        z = self.camera.zoom          # use the live float, not the rounded key
+        # ceil, not int: truncation would make a whole-world chunk a fraction of
+        # a world-unit NARROWER than the world, so the coverage check could never
+        # pass and the chunk would rebuild every throttle window forever.
+        world_pw = max(1, math.ceil(WORLD_WIDTH * z))
+        world_ph = max(1, math.ceil(WORLD_HEIGHT * z))
+        cw = min(math.ceil(vw * WEB_STATIC_CHUNK_FACTOR), world_pw)
+        ch = min(math.ceil(vh * WEB_STATIC_CHUNK_FACTOR), world_ph)
+        cw, ch = max(1, cw), max(1, ch)
+
+        # Chunk origin (world units): centered on the camera, clamped to world.
+        # When the chunk spans the whole world axis (ww >= WORLD_WIDTH) the
+        # origin pins to 0 so coverage of [0, WORLD] is guaranteed.
+        ww, wh = cw / z, ch / z
+        cx, cy = self.camera.position
+        ox = min(max(cx - ww / 2.0, 0.0), max(0.0, WORLD_WIDTH - ww))
+        oy = min(max(cy - wh / 2.0, 0.0), max(0.0, WORLD_HEIGHT - wh))
+
+        surf = pygame.Surface((cw, ch))
+        chunk_cam = Camera(cw, ch)
+        chunk_cam.zoom = z
+        chunk_cam.position = (ox + ww / 2.0, oy + wh / 2.0)
+
+        # Temporarily point the chart at the chunk so every existing draw method
+        # (and its exact desktop look) renders into it unchanged.
+        old_surface, old_camera = self.surface, self.camera
+        self.surface, self.camera = surf, chunk_cam
+        self._building_static = True
+        try:
+            self.draw_background(world)
+            # Full desktop-quality depth glow — painted into a transient SRCALPHA
+            # layer (the ring alphas need per-pixel blending), then composited.
+            rings = pygame.Surface((cw, ch), pygame.SRCALPHA)
+            self._paint_depth_rings(rings, world)
+            surf.blit(rings, (0, 0))
+            del rings
+            # Anti-aliased grid lines (labels stay per-frame, screen-anchored).
+            self.draw_grid(lines=True, labels=False)
+            self.draw_islands(world)
+            self.draw_zones(world)     # shapes only; labels suppressed above
+        finally:
+            self.surface, self.camera = old_surface, old_camera
+            self._building_static = False
+
+        self._ws_surf = surf
+        self._ws_origin = (ox, oy)
+        self._ws_world_size = (ww, wh)
+        self._ws_key = key
+        self._ws_built_ms = pygame.time.get_ticks()
+        if WEB_PROFILE:
+            print("[WEBSTATIC] chunk %dx%d px (%.1f MB) at zoom %.2f" % (
+                cw, ch, cw * ch * 4 / 1e6, z))
+
+    def draw_grid(self, y_label_x: int = 4,
+                  lines: bool = True, labels: bool = True) -> None:
         # One coordinate system, no drift: screen_to_world() finds what world
         # region is visible, world_to_screen() places every line AND its label.
+        #
+        # lines/labels split (web static layer): grid LINES are world-anchored so
+        # they can be pre-rendered into the static chunk (at full anti-aliased
+        # quality, since that renders once); LABELS hug the screen edges so they
+        # must be re-placed per frame.  Desktop always passes both (default).
         # Because a line and its label derive from the SAME world_to_screen()
         # call, they can never disagree.  Visible bounds are clamped to the
         # world, so labels only ever show real, positive world coordinates.
@@ -525,20 +679,23 @@ class Chart:
         first_x = math.ceil(world_x_min / GRID_SPACING) * GRID_SPACING
         first_y = math.ceil(world_y_min / GRID_SPACING) * GRID_SPACING
 
-        # On web, plain (non-antialiased) grid lines: aaline blends per pixel along
-        # the FULL screen dimension for every gridline (~50/frame) — measured the
-        # single biggest chart cost.  Plain lines are visually near-identical here
-        # and far cheaper under WASM.  Minor gridlines are also dropped on web.
-        _draw_line = pygame.draw.line if IS_WEB else pygame.draw.aaline
+        # Per-frame web drawing (the fallback path) uses plain lines and majors
+        # only: aaline blends per pixel along the FULL screen dimension for every
+        # gridline (~50/frame) — measured the single biggest chart cost.  Inside a
+        # static-chunk build we're off the hot path, so full anti-aliased quality
+        # (all minors, aaline) comes back for free.  Desktop is always aaline.
+        web_cheap = IS_WEB and not self._building_static
+        _draw_line = pygame.draw.line if web_cheap else pygame.draw.aaline
 
         x = first_x
         while x <= world_x_max:
             is_major = int(x) % int(GRID_LABEL_INTERVAL) == 0
-            if is_major or not IS_WEB:
+            if is_major or not web_cheap:
                 sx = cam.world_to_screen((x, 0))[0]
-                color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-                _draw_line(self.surface, color, (sx, 0), (sx, vh))
-                if is_major:
+                if lines:
+                    color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+                    _draw_line(self.surface, color, (sx, 0), (sx, vh))
+                if is_major and labels:
                     label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
                     self._blit_text_shadow(label, int(sx + 4), 4)   # top edge
             x += GRID_SPACING
@@ -546,11 +703,12 @@ class Chart:
         y = first_y
         while y <= world_y_max:
             is_major = int(y) % int(GRID_LABEL_INTERVAL) == 0
-            if is_major or not IS_WEB:
+            if is_major or not web_cheap:
                 sy = cam.world_to_screen((0, y))[1]
-                color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
-                _draw_line(self.surface, color, (0, sy), (vw, sy))
-                if is_major:
+                if lines:
+                    color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
+                    _draw_line(self.surface, color, (0, sy), (vw, sy))
+                if is_major and labels:
                     label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
                     # Left edge, inset past the fleet panel when it's showing so the
                     # trailing digit is never clipped; sits right on its own line.
@@ -1440,6 +1598,10 @@ class Chart:
         priority: int,
         anchor_pos: Position,
     ) -> None:
+        # Static-chunk builds draw shapes only: labels are screen-anchored and
+        # per-frame, so queuing them here would blit at stale chunk coordinates.
+        if self._building_static:
+            return
         # Priority ≥ 200: always shown (player vessel label, regardless of zoom).
         # Priority ≥ 80: shown at any zoom (ports, selected vessel).
         # Priority < 80: only shown above LABEL_ZOOM_THRESHOLD_SHOW_ALL.
@@ -1598,46 +1760,34 @@ class Chart:
     def draw_all(self, world=None, environment=None, selected_vessel=None,
                  hover_vessel=None, y_label_x: int = 4) -> None:
         self._label_candidates = []
+        if IS_WEB:
+            self._draw_all_web(world, environment, selected_vessel,
+                               hover_vessel, y_label_x)
+            return
         self.draw_background(world)
-        # Open-ocean vignette sits directly on the water fill, before everything else.
-        # Skipped on web: a full-screen alpha gradient blit every frame is pure
-        # cosmetic cost the spectator build can't afford.
-        if not IS_WEB:
-            self.draw_ocean_vignette()
+        # Open-ocean vignette sits directly on the water fill, before everything else
+        self.draw_ocean_vignette()
         # Coastal depth layer (mid-depth + shallow bands) — cached; land fill drawn
         # later in draw_islands() covers the interior of each offset polygon.
-        # On web the cache key (camera position) thrashes under the follow-cam, so
-        # use a single cheap halo pass with no per-frame rebuild instead.
         if world:
-            if IS_WEB:
-                self._draw_web_shallows(world)
-            else:
-                self.surface.blit(self._build_depth_layer(world), (0, 0))
+            self.surface.blit(self._build_depth_layer(world), (0, 0))
         # Depth zone fills (before islands so land polygons cover the inward part)
         if world and environment:
             self.draw_depth_zones(world, environment)
         self.draw_grid(y_label_x=y_label_x)
-        # Shipping lane overlay — below islands and zones, just above the grid.
-        # Skipped on web: a dashed-line overlay recomputed every frame (~0.9ms).
-        if not IS_WEB:
-            self.draw_shipping_lanes(world)
+        # Shipping lane overlay — below islands and zones, just above the grid
+        self.draw_shipping_lanes(world)
         # Depth contour lines (before islands so land naturally covers any coastal overhang)
         if world and environment:
             self.draw_depth_contours(world, environment)
         self.draw_islands(world)
-        # Depth soundings — small depth numbers on water, after land so they read
-        # clearly.  Skipped on web: font.render per sounding every frame (uncached).
-        if world and environment and not IS_WEB:
+        # Depth soundings — small depth numbers on water, after land so they read clearly
+        if world and environment:
             self.draw_depth_soundings(world, environment)
-        # Regulatory zones (no-entry / speed / anchorage) — hatched SRCALPHA fills.
-        # Skipped on web: ~0.8ms of decorative overlay with no gameplay meaning in
-        # spectator mode (no player to warn).
-        if not IS_WEB:
-            self.draw_zones(world)
+        self.draw_zones(world)
         # Current arrows drawn after zones so they sit above the chart base but
-        # below port symbols, nav marks, and vessels.  Skipped on web: a dense grid
-        # of gfxdraw arrows recomputed every frame.
-        if environment and not IS_WEB:
+        # below port symbols, nav marks, and vessels.
+        if environment:
             self.draw_current_arrows(environment)
         self.draw_ports(world)
         self.draw_nav_marks(world)
@@ -1649,9 +1799,8 @@ class Chart:
         # Apply day/night tint over ALL chart content (water, land, labels,
         # compass) so the whole scene shifts at night — not just the water.
         # Applied here, after chart drawing but before the HUD status bar,
-        # so the bar stays at full brightness.  All three of these are full-screen
-        # alpha overlays — skipped on web (Step 2 cosmetics cut).
-        if environment and not IS_WEB:
+        # so the bar stays at full brightness.
+        if environment:
             tint = environment.day_night_tint()
             if tint[3] > 0:
                 s = self._get_alpha_surf()
@@ -1659,12 +1808,41 @@ class Chart:
                 self.surface.blit(s, (0, 0))
 
         # Weather visuals drawn after night tint so fog/rain sit on top of everything
-        if environment and not IS_WEB:
+        if environment:
             self.draw_weather_effects(environment)
 
         # Edge vignette frames the whole scene, under the status bar only.
-        if not IS_WEB:
-            self.draw_screen_vignette()
+        self.draw_screen_vignette()
 
+        if environment:
+            self.draw_status_bar(environment, selected_vessel)
+
+    def _draw_all_web(self, world, environment, selected_vessel,
+                      hover_vessel, y_label_x: int) -> None:
+        """Web frame: one static-chunk blit + dynamic entities only.
+
+        Everything static (sea, full-quality depth glow, grid lines, islands,
+        zone shapes) comes from the pre-rendered chunk; per frame we draw just
+        the things that move or animate — port pulses, nav marks, vessels,
+        labels, scale bar, compass, status bar.  When the chunk can't cover the
+        view (zoom changed within the rebuild throttle window), one cheap
+        fallback frame is drawn instead: flat shallows + islands + plain grid.
+        """
+        self.draw_background(world)   # also paints the off-world letterbox water
+        static_ok = self._draw_static_world(world) if world else False
+        if world and not static_ok:
+            # Interim fallback (≤ WEB_STATIC_REBUILD_MS): Phase 2 cheap path.
+            self._draw_web_shallows(world)
+            self.draw_grid(y_label_x=y_label_x, labels=False)
+            self.draw_islands(world)
+        # Grid labels are screen-anchored — always dynamic.  Lines live in the
+        # static chunk (anti-aliased), or came from the fallback above.
+        self.draw_grid(y_label_x=y_label_x, lines=False)
+        self.draw_ports(world)
+        self.draw_nav_marks(world)
+        self.draw_vessels(world, selected_vessel, environment, hover_vessel)
+        self._resolve_and_draw_labels()
+        self.draw_scale_bar()
+        self.draw_compass_rose()
         if environment:
             self.draw_status_bar(environment, selected_vessel)

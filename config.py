@@ -100,6 +100,19 @@ WEB_FB_MAX_H = 1080
 WEB_FB_FALLBACK_W = 1600
 WEB_FB_FALLBACK_H = 900
 
+# Pre-rendered static world layer (web).  All static chart content (sea, the
+# full-quality depth glow, islands, zone shapes) renders ONCE into a camera-
+# centered chunk WEB_STATIC_CHUNK_FACTOR x the viewport (clamped to world
+# bounds); per-frame chart work is then one unscaled blit + dynamic entities.
+# Worst case at the 1920x1080 framebuffer cap: 3840x2160 px = ~32 MB; at the
+# boot overview the whole world fits in the chunk (~5 MB) and panning never
+# rebuilds.  Rebuilds are throttled to one per WEB_STATIC_REBUILD_MS and are
+# scheduled early, when the view nears the chunk edge (EDGE_MARGIN_FRAC of the
+# viewport), so the old chunk keeps covering the screen while the new one builds.
+WEB_STATIC_CHUNK_FACTOR = 2.0
+WEB_STATIC_REBUILD_MS = 300
+WEB_STATIC_EDGE_MARGIN_FRAC = 0.25
+
 # ============================================================================
 # Theme colors
 # ============================================================================
