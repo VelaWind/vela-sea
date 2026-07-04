@@ -120,28 +120,89 @@ def _sea_color_hex() -> str:
         sys.path.remove(ROOT)
 
 
-PAGE_STYLE_MARKER = "meridian-page-style"
+PAGE_MARKER = "meridian-brand"
+
+# Inline SVG favicon: cyan vessel triangle on a deep-navy rounded square.
+_FAVICON = ("data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 "
+            "viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 "
+            "rx=%2212%22 fill=%22%230a1c34%22/><path d=%22M32 10 L45 48 L32 "
+            "41 L19 48 Z%22 fill=%22%234fd1e0%22/></svg>")
+
+
+def _head_block(sea: str) -> str:
+    """Page chrome: sea background, title, favicon, splash styling."""
+    return f"""<style id="{PAGE_MARKER}-style">
+  html, body {{ background: {sea} !important; margin: 0; padding: 0; overflow: hidden; }}
+  #{PAGE_MARKER}-splash {{
+    position: fixed; inset: 0; z-index: 9999; background: {sea};
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; transition: opacity .7s ease;
+    font-family: 'Segoe UI', system-ui, sans-serif; }}
+  .ms-word {{ color: #dee9f4; font-size: 44px; letter-spacing: .35em;
+              font-weight: 200; padding-left: .35em; }}
+  .ms-word span {{ color: #4fd1e0; font-weight: 400; }}
+  .ms-sub  {{ color: #6c8096; font-size: 13px; letter-spacing: .22em;
+              margin-top: 10px; text-transform: lowercase; }}
+  .ms-bar  {{ width: 220px; height: 2px; margin-top: 26px; overflow: hidden;
+              border-radius: 2px; background: rgba(140,170,200,.14); }}
+  .ms-bar div {{ width: 40%; height: 100%; background: #4fd1e0;
+                 border-radius: 2px; animation: msld 1.4s ease-in-out infinite; }}
+  @keyframes msld {{ 0% {{ transform: translateX(-110%); }}
+                     100% {{ transform: translateX(330%); }} }}
+</style>
+<link id="{PAGE_MARKER}-icon" rel="icon" href='{_FAVICON}'>
+<meta name="theme-color" content="{sea}">
+</head>"""
+
+
+def _body_block() -> str:
+    """Branded splash overlay + self-removing fade script.
+
+    Fades out once pygbag reveals a real canvas (the runtime grows the 1px
+    placeholder and flips visibility when the app takes over); a 45s failsafe
+    guarantees the splash can never trap the page on a stalled load.
+    """
+    return f"""<div id="{PAGE_MARKER}-splash">
+  <div class="ms-word">MERIDIAN<span>&nbsp;SEA</span></div>
+  <div class="ms-sub">ambient maritime simulator</div>
+  <div class="ms-bar"><div></div></div>
+</div>
+<script id="{PAGE_MARKER}-script">
+(function () {{
+  var s = document.getElementById('{PAGE_MARKER}-splash');
+  if (!s) return;
+  var t0 = Date.now();
+  var iv = setInterval(function () {{
+    var up = false;
+    var cs = document.getElementsByTagName('canvas');
+    for (var i = 0; i < cs.length; i++) {{
+      if (cs[i].width > 100 && cs[i].style.visibility !== 'hidden') {{ up = true; break; }}
+    }}
+    if (up || Date.now() - t0 > 45000) {{
+      clearInterval(iv);
+      setTimeout(function () {{
+        s.style.opacity = '0';
+        setTimeout(function () {{ if (s.parentNode) s.parentNode.removeChild(s); }}, 750);
+      }}, up ? 450 : 0);
+    }}
+  }}, 250);
+}})();
+</script>
+</body>"""
 
 
 def patch_web_page() -> None:
-    """Frame the canvas like part of the sea instead of a widget on a gray page.
+    """Brand the page: sea background, favicon, and a full-page loading splash
+    ("MERIDIAN SEA / ambient maritime simulator" + shimmer bar) that fades out
+    when the canvas takes over — replacing pygbag's default gray loader look.
 
-    pygbag's default template puts the canvas on a gray page.  Inject a small
-    style block (idempotent, keyed on PAGE_STYLE_MARKER) that sets the page
-    background to the game's deep-water color and removes body margins so the
-    canvas margins blend into the page.
-
-    Patched into BOTH the generated index.html and the cached *.tmpl templates
-    (build/web-cache/): pygbag's test server regenerates index.html from the
-    cached template on each serve, so patching only index.html would not
-    survive `--serve`.
+    Inline CSS/SVG only; no new asset files.  Idempotent (keyed on
+    PAGE_MARKER).  Patched into BOTH the generated index.html and the cached
+    *.tmpl templates (build/web-cache/): pygbag's test server regenerates
+    index.html from the cached template on each serve, so patching only
+    index.html would not survive `--serve`.
     """
-    style = (
-        f'<style id="{PAGE_STYLE_MARKER}">\n'
-        f'  html, body {{ background: {_sea_color_hex()} !important; '
-        f'margin: 0; padding: 0; overflow: hidden; }}\n'
-        f'</style>\n</head>'
-    )
+    sea = _sea_color_hex()
     targets = [os.path.join(WEB_DIR, "index.html")]
     cache_dir = os.path.join(STAGE, "build", "web-cache")
     if os.path.isdir(cache_dir):
@@ -152,12 +213,14 @@ def patch_web_page() -> None:
             continue
         with open(path, "r", encoding="utf-8") as f:
             html = f.read()
-        if PAGE_STYLE_MARKER in html or "</head>" not in html:
+        if PAGE_MARKER in html or "</head>" not in html:
             continue                      # already patched / no head to patch
-        html = html.replace("</head>", style, 1)
+        html = html.replace("</head>", _head_block(sea), 1)
+        if "</body>" in html:
+            html = html.replace("</body>", _body_block(), 1)
         with open(path, "w", encoding="utf-8") as f:
             f.write(html)
-        print(f"patched page style (sea background) -> {path}")
+        print(f"patched page brand (splash + favicon + sea bg) -> {path}")
 
 
 def run_pygbag(extra: list) -> int:
