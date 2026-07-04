@@ -52,7 +52,8 @@ from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
 from config import (HULL_CRITICAL_THRESHOLD, HULL_DAMAGE_FLASH_MS,
                     HULL_DAMAGE_FLASH_COLOR, HULL_DAMAGE_FLASH_MAX_ALPHA)
-from config import COLOR_WARNING, FONT_UI_NAME, FONT_SIZE_TITLE, FONT_SIZE_SECTION
+from config import (COLOR_WARNING, FONT_UI_NAME, FONT_SIZE_TITLE, FONT_SIZE_SECTION,
+                    FONT_DATA_NAME, FONT_SIZE_SMALL)
 from render.panels import VesselInfoPanel, TechnicalSystemsPanel, SettingsPanel, EventLog, FleetStatusPanel, MissionPanel, PlayerHUDPanel, CareerPanel, GameOverScreen, TitleScreen, DockingMenuPanel, MinimapPanel, TutorialOverlayPanel, RewardBannerPanel, SettingsScreen, PauseMenu
 from config import COLOR_OBJECTIVE, BANNER_PROMOTE_COLOR, BANNER_DURATION_MS
 from config import (FLAVOR_COOLDOWN_S, FLAVOR_PORT_RANGE_WU,
@@ -83,7 +84,8 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
 from config import NM_PER_WORLD_UNIT
 from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
                     WEB_TARGET_FPS, WEB_MAX_SIM_STEPS_PER_FRAME,
-                    WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H)
+                    WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H,
+                    WEB_HUD_PERF)
 from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
@@ -593,6 +595,14 @@ class Game:
         self._collision_frame = 0   # web-only: runs collision avoidance every 2nd frame
         # In-browser frame profiler (None on desktop, so fully inert there).
         self._prof = FrameProfiler() if WEB_PROFILE else None
+        # On-screen perf overlay (web): "31 fps · 32 ms" top-right, re-rendered
+        # once per second.  _hud_perf_surf is the cached text surface; only the
+        # cheap blit happens per frame.
+        self._hud_perf_surf: Optional[pygame.Surface] = None
+        self._hud_perf_frames = 0
+        self._hud_perf_t0 = time.perf_counter()
+        self._hud_perf_font = (safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL, bold=True)
+                               if WEB_HUD_PERF else None)
         self.running = True
         self.is_paused = False
         self._prepause_speed = 1.0   # speed to restore when un-pausing
@@ -2525,6 +2535,25 @@ class Game:
             self._game_over_screen.draw(
                 self.game_over_reason, self.career,
                 time.time() - self._session_start_time)
+
+        # On-screen perf overlay (web only): tiny fps/ms readout top-right, just
+        # below the status bar.  Text re-rendered once per second; per-frame cost
+        # is one small blit.  Screenshots then carry the numbers.
+        if WEB_HUD_PERF and self._hud_perf_font is not None:
+            self._hud_perf_frames += 1
+            _now_s = time.perf_counter()
+            _elapsed = _now_s - self._hud_perf_t0
+            if _elapsed >= 1.0:
+                _fps = self._hud_perf_frames / _elapsed
+                _txt = f"{_fps:.0f} fps · {1000.0 / _fps:.0f} ms" if _fps > 0 else "-- fps"
+                self._hud_perf_surf = self._hud_perf_font.render(
+                    _txt, True, (150, 205, 170))
+                self._hud_perf_frames = 0
+                self._hud_perf_t0 = _now_s
+            if self._hud_perf_surf is not None:
+                self.display.blit(
+                    self._hud_perf_surf,
+                    (self.display.get_width() - self._hud_perf_surf.get_width() - 10, 46))
 
         if _prof is not None:
             _pe = time.perf_counter()      # panels end / flip start

@@ -17,6 +17,11 @@ IS_WEB = sys.platform == "emscripten"
 # so it's on for the web build and completely absent on desktop.
 WEB_PROFILE = IS_WEB
 
+# On-screen perf overlay (web): tiny "31 fps · 32 ms" text at the top-right of
+# the canvas, updated once per second.  Screenshots from real browsers are our
+# only field telemetry — this makes every screenshot carry the numbers.
+WEB_HUD_PERF = IS_WEB
+
 
 def resource_path(relative: str) -> str:
     """Absolute path to a bundled read-only resource (e.g. the sound wavs).
