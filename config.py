@@ -12,6 +12,11 @@ import sys
 # are dead code and desktop behaviour is byte-for-byte identical.
 IS_WEB = sys.platform == "emscripten"
 
+# Frame profiler: when True the game prints one [WEBPROF] timing line to stdout
+# (pygbag pipes stdout to the browser console) every ~5 s.  Defaults to IS_WEB
+# so it's on for the web build and completely absent on desktop.
+WEB_PROFILE = IS_WEB
+
 
 def resource_path(relative: str) -> str:
     """Absolute path to a bundled read-only resource (e.g. the sound wavs).
@@ -74,6 +79,9 @@ WINDOW_MIN_HEIGHT = 950
 WINDOW_SCALE_FACTOR = 0.90
 WINDOW_TITLE = "Maritime Navigation Simulator"
 TARGET_FPS = 60
+# Web runs at half the desktop frame rate: 30 fps is plenty for an ambient
+# spectator sim and halves per-frame WASM cost (draw calls, GC, mixing).
+WEB_TARGET_FPS = 30
 
 # ============================================================================
 # Theme colors
@@ -781,6 +789,10 @@ COLLISION_EMERGENCY_AVOID_DEG = 60.0
 # Excess accumulated time is then discarded to prevent the feedback spiral that
 # previously caused the OS to kill the process at high time compression.
 MAX_SIM_STEPS_PER_FRAME = 12
+# Web caps steps-per-frame much harder: a stalled WASM frame must never be able
+# to demand a big batch of catch-up sim work next frame (that death-spirals the
+# tab).  A spectator sim tolerates a little time slippage under load.
+WEB_MAX_SIM_STEPS_PER_FRAME = 4
 
 # Heading-line color shown when a vessel is in "avoiding" status.
 # Soft amber: distinct from the steel-blue normal heading vector but still muted

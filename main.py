@@ -81,7 +81,8 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
                     MOOD_TIRED_AFTER_S, MOOD_CONFIDENT_AFTER_S, MOOD_RESTED_AFTER_S,
                     PARTY_DURATION_MIN_S, PARTY_DURATION_MAX_S, PARTY_TENDER_NAME)
 from config import NM_PER_WORLD_UNIT
-from config import IS_WEB, WORLD_WIDTH, WORLD_HEIGHT
+from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
+                    WEB_TARGET_FPS, WEB_MAX_SIM_STEPS_PER_FRAME)
 from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
@@ -525,6 +526,53 @@ def _random_spawn(route: list, world, draft: float,
     return pos, dest_i, dest, hdg
 
 
+class FrameProfiler:
+    """Cheap per-phase frame timing for the web build (config.WEB_PROFILE).
+
+    Accumulates elapsed seconds into plain float slots — no per-frame allocation
+    — and prints ONE line to stdout roughly every REPORT_S seconds.  pygbag pipes
+    stdout to the browser console, so this line is how we see where WASM time
+    actually goes and prove each perf fix.  Only instantiated when WEB_PROFILE is
+    True (i.e. on web), so it is completely inert on desktop.
+
+    The one line to look for in the console::
+
+        [WEBPROF] fps=30.0 frame= 33.3ms | sim= 0.40 chart= 2.10 panels= 0.80 flip= 1.20 ms/f | steps/f=1.00
+    """
+    REPORT_S = 5.0
+    __slots__ = ("n", "sim", "chart", "panels", "flip", "steps", "_t0")
+
+    def __init__(self) -> None:
+        self._reset()
+        self._t0 = time.perf_counter()
+
+    def _reset(self) -> None:
+        self.n = 0
+        self.sim = 0.0
+        self.chart = 0.0
+        self.panels = 0.0
+        self.flip = 0.0
+        self.steps = 0
+
+    def maybe_report(self) -> None:
+        """Print + reset once REPORT_S of wall time has elapsed."""
+        now = time.perf_counter()
+        dt = now - self._t0
+        if dt < self.REPORT_S or self.n == 0:
+            return
+        n = self.n
+        fps = n / dt
+        # %-format (not f-string) and one print/5 s: negligible per-report cost.
+        print("[WEBPROF] fps=%4.1f frame=%5.1fms | sim=%5.2f chart=%5.2f "
+              "panels=%5.2f flip=%5.2f ms/f | steps/f=%.2f" % (
+                  fps, 1000.0 / fps,
+                  self.sim / n * 1e3, self.chart / n * 1e3,
+                  self.panels / n * 1e3, self.flip / n * 1e3,
+                  self.steps / n))
+        self._reset()
+        self._t0 = now
+
+
 class Game:
     """Manages the main game loop and ties together input, simulation, and rendering."""
 
@@ -537,6 +585,8 @@ class Game:
         self.display, display_width, display_height = self._create_display()
         pygame.display.set_caption(WINDOW_TITLE)
         self.clock = pygame.time.Clock()
+        # In-browser frame profiler (None on desktop, so fully inert there).
+        self._prof = FrameProfiler() if WEB_PROFILE else None
         self.running = True
         self.is_paused = False
         self._prepause_speed = 1.0   # speed to restore when un-pausing
@@ -2336,10 +2386,15 @@ class Game:
         # the left edge.  The fleet panel is drawn whenever settings is hidden.
         _fleet_visible = not self.settings_panel.is_visible
         _y_label_x = (20 + self.fleet_panel.WIDTH + 8) if _fleet_visible else 4
+        _prof = self._prof   # None on desktop -> all timing branches skipped
+        _c = time.perf_counter() if _prof is not None else 0.0
         self.chart.draw_all(world=self.world, environment=self.environment,
                             selected_vessel=self.selected_vessel,
                             hover_vessel=self.hover_vessel,
                             y_label_x=_y_label_x)
+        if _prof is not None:
+            _ce = time.perf_counter()      # chart end / panels start
+            _prof.chart += _ce - _c
 
         # Hull-damage feedback sits over the chart but under the panels, so the
         # red flash never obscures the HUD's own (crisp) hull bar.
@@ -2421,7 +2476,12 @@ class Game:
                 self.game_over_reason, self.career,
                 time.time() - self._session_start_time)
 
+        if _prof is not None:
+            _pe = time.perf_counter()      # panels end / flip start
+            _prof.panels += _pe - _ce
         pygame.display.flip()
+        if _prof is not None:
+            _prof.flip += time.perf_counter() - _pe
 
     def _draw_hull_feedback(self) -> None:
         """In-play hull-damage legibility: a brief red screen flash on a fresh
@@ -2819,9 +2879,17 @@ class Game:
             dt = self.clock.tick(TARGET_FPS) / 1000.0  # convert ms to seconds
 
             self.handle_events()
+            _prof = self._prof   # None on desktop -> every timing branch is skipped
+            _s = time.perf_counter() if _prof is not None else 0.0
             if not self.game_over:
                 self.update_simulation(dt)
+            if _prof is not None:
+                _prof.sim += time.perf_counter() - _s
             self.render()
+            if _prof is not None:
+                _prof.n += 1
+                _prof.steps += self.last_sim_steps
+                _prof.maybe_report()
 
             # Yield to the event loop once per frame.  Required by pygbag under
             # WebAssembly (lets the browser paint + deliver input); a harmless
