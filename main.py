@@ -83,6 +83,7 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
                     PARTY_DURATION_MIN_S, PARTY_DURATION_MAX_S, PARTY_TENDER_NAME)
 from config import NM_PER_WORLD_UNIT
 from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
+                    WEB_TARGET_FPS, WEB_FRAME_DT_CLAMP_S,
                     WEB_MAX_SIM_STEPS_PER_FRAME,
                     WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H,
                     WEB_HUD_PERF, WEB_RENDER_SCALE)
@@ -541,14 +542,16 @@ class FrameProfiler:
     - ``hud_line()`` returns a short bucket string for the on-screen overlay,
       averaged since its previous call (the overlay calls it once per second).
 
-    ``wait`` is frame wall time minus the measured buckets: event handling,
-    loop overhead, and above all frame PACING.  Small buckets + a large wait
-    means the browser's rAF cadence — not our work — sets the frame time.
+    ``idle`` is frame wall time minus the measured buckets — the time between
+    rendered frames: skipped rAF ticks under the 30 fps cap, plus event
+    handling and loop overhead.  At the cap, idle ~= 33.3ms - work by design;
+    an UNEXPECTEDLY large idle with the cap off would mean pacing, not work.
     Only instantiated when WEB_PROFILE is True, so fully inert on desktop.
+    fps counts RENDERED frames only (skip iterations never touch n).
 
     The console line::
 
-        [WEBPROF] fps=30.0 frame= 33.3ms | sim= 0.40 chart= 2.10 panels= 0.80 flip= 1.20 wait=28.0 ms/f | steps/f=1.00
+        [WEBPROF] fps=30.0 frame= 33.3ms | sim= 0.40 chart= 2.10 panels= 0.80 flip= 1.20 idle=28.0 ms/f | steps/f=1.00
     """
     REPORT_S = 5.0
     __slots__ = ("n", "sim", "chart", "panels", "flip", "steps",
@@ -582,7 +585,7 @@ class FrameProfiler:
         fps = dn / wall
         # %-format (not f-string) and one print/5 s: negligible per-report cost.
         print("[WEBPROF] fps=%4.1f frame=%5.1fms | sim=%5.2f chart=%5.2f "
-              "panels=%5.2f flip=%5.2f wait=%5.2f ms/f | steps/f=%.2f" % (
+              "panels=%5.2f flip=%5.2f idle=%5.2f ms/f | steps/f=%.2f" % (
                   fps, 1000.0 / fps,
                   (self.sim - self._rep_sim) / dn * 1e3,
                   (self.chart - self._rep_chart) / dn * 1e3,
@@ -610,13 +613,13 @@ class FrameProfiler:
         chart = (self.chart - self._hud_chart) / dn * 1e3
         ui = (self.panels - self._hud_panels) / dn * 1e3
         flip = (self.flip - self._hud_flip) / dn * 1e3
-        wait = max(0.0, wall / dn * 1e3 - sim - chart - ui - flip)
+        idle = max(0.0, wall / dn * 1e3 - sim - chart - ui - flip)
         self._hud_t = now
         self._hud_n = self.n
         self._hud_sim, self._hud_chart = self.sim, self.chart
         self._hud_panels, self._hud_flip = self.panels, self.flip
         return (f"sim {sim:.1f} · chart {chart:.1f} · ui {ui:.1f}"
-                f" · flip {flip:.1f} · wait {wait:.1f}")
+                f" · flip {flip:.1f} · idle {idle:.1f}")
 
 
 class Game:
@@ -2739,11 +2742,12 @@ class Game:
 
         # On-screen perf overlay (web only): tiny fps/ms readout top-right, just
         # below the status bar, plus a second line with the per-frame bucket
-        # breakdown "sim · chart · ui · flip · wait" averaged over the same ~1 s
-        # window.  'wait' = wall time minus measured work, i.e. pacing/loop
-        # overhead — it shows whether frame time is real work or the browser's
-        # rAF cadence.  Text re-rendered once per second (through the text
-        # cache); per-frame cost is two small blits.  Screenshots carry it all.
+        # breakdown "sim · chart · ui · flip · idle" averaged over the same ~1 s
+        # window.  fps counts RENDERED frames (the 30 fps cap skips rAF ticks
+        # without touching these counters); 'idle' = wall time between rendered
+        # frames minus measured work — under the cap it reads ~budget-work by
+        # design.  Text re-rendered once per second (through the text cache);
+        # per-frame cost is two small blits.  Screenshots carry it all.
         if WEB_HUD_PERF and self._hud_perf_font is not None:
             self._hud_perf_frames += 1
             _now_s = time.perf_counter()
@@ -3171,13 +3175,37 @@ class Game:
         # player ship, while the title screen kept the port cluster framed.
         if self.player_vessel is not None and PLAYER_FOLLOW_CAM:
             self.camera.set_follow_target(self.player_vessel)
+        # Web frame cap (skip, don't sleep): rAF paces the loop at display rate
+        # (60+ Hz), but an ambient tab must not render that often — cap at
+        # WEB_TARGET_FPS by SKIPPING ticks until the budget elapses.  The grid
+        # is a perf_counter deadline advanced by exactly one budget per rendered
+        # frame: render on the first rAF tick past each deadline, and the grid
+        # self-corrects to a true 30.0 average.  (Deliberately NOT accumulated
+        # from clock.tick(): it returns integer ms, and floor-bias against a
+        # 33.33 ms threshold lands 16+16=32 < budget -> render every THIRD tick
+        # -> 20 fps — the same boundary bug the pacing audit killed.)
+        _web_budget = 1.0 / WEB_TARGET_FPS
+        _web_last = _web_next = time.perf_counter()
         while self.running:
             if IS_WEB:
-                # clock.tick(fps) caps the rate with an SDL_Delay busy-wait, which
-                # burns the single browser thread under WASM.  Measure-only tick()
-                # (no cap) instead — the browser's requestAnimationFrame is the
-                # ONLY pacer on web (see the pacing audit at the sleep below).
-                dt = self.clock.tick() / 1000.0
+                _now = time.perf_counter()
+                if _now < _web_next:
+                    # Skip path — near-zero work: one clock read, one compare,
+                    # straight back to the browser until the next rAF tick.  No
+                    # events, no sim, no render, no overlay.
+                    await asyncio.sleep(0)
+                    continue
+                # Rendered frame: sim consumes the real time since the last
+                # rendered frame, clamped so returning to a throttled/hidden
+                # tab (rAF suspended -> huge gap) can't trigger a giant
+                # catch-up burst (the step cap below bounds it further).
+                dt = min(_now - _web_last, WEB_FRAME_DT_CLAMP_S)
+                _web_last = _now
+                _web_next += _web_budget
+                if _web_next < _now:
+                    # Fell behind by a whole budget (slow frame / hidden tab):
+                    # restart the grid instead of racing to catch up.
+                    _web_next = _now + _web_budget
                 # Heal the display if the real canvas size disagrees with our
                 # surface (boot race against pygbag's window_resize; ~1/s check).
                 self._web_watch_display()
@@ -3211,9 +3239,9 @@ class Game:
             # 50ms one, alternating 33/50ms frames -> the observed hardware-
             # independent 25 fps / 40 ms wall that no work optimization could
             # move (the smaller the work, the longer the sleep — same tick).
-            # sleep(0) parks the task until the NEXT rAF tick only: rAF paces,
-            # frames run back-to-back with the display, and every ms of work
-            # saved now shows up in the frame time.
+            # sleep(0) parks the task until the NEXT rAF tick only; the frame
+            # CAP is enforced by the skip path at the top of the loop, never
+            # by a longer sleep.
             await asyncio.sleep(0)
 
         # Silence loops so a restart doesn't stack a second ambient track.

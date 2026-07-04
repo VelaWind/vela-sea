@@ -88,10 +88,17 @@ WINDOW_MIN_HEIGHT = 950
 WINDOW_SCALE_FACTOR = 0.90
 WINDOW_TITLE = "Maritime Navigation Simulator"
 TARGET_FPS = 60
-# Web has NO fps target: the browser's requestAnimationFrame is the only pacer
-# (pygbag resumes the loop once per rAF tick).  A self-imposed budget sleep
-# stacked with rAF quantization and pinned the tab at ~25 fps / 40 ms on any
-# hardware — see the pacing audit in main.Game.run().
+# Web render CAP, enforced by SKIPPING rAF ticks — never by sleeping.  With
+# rAF pacing alone the tab rendered at 200+ fps x ~5 ms/frame = a full core
+# burned on an ambient sim; skipping ticks until the 1/30 s budget elapses
+# renders at 30 while the skip path costs ~a microsecond.  A budget SLEEP is
+# forbidden here: pygbag wakes sleeps only on rAF ticks, which pinned the tab
+# at ~25 fps / 40 ms on any hardware (see the pacing audit in main.Game.run()).
+WEB_TARGET_FPS = 30
+# Real-seconds clamp on a rendered frame's dt.  Browsers throttle/suspend rAF
+# in hidden tabs; without this, returning to the tab would feed the sim one
+# giant dt and trigger a max-steps catch-up burst lasting many frames.
+WEB_FRAME_DT_CLAMP_S = 0.5
 
 # Web framebuffer.  pygbag's default canvas is a fixed 1280x720 backing store
 # CSS-stretched to fill the page, so on any wider or HiDPI display it upscales
