@@ -546,11 +546,13 @@ class Chart:
         vw, vh = self.surface.get_size()
         key = (round(z, 3), vw, vh)
 
-        # Visible world rect, clamped to the world (off-world is plain water).
+        # Visible world rect — deliberately NOT clamped to world bounds: the sea
+        # (water fill + grid) extends past the world on web so the chart never
+        # reads as a floating rectangle, and the chunk must cover all of it.
         tl = self.camera.screen_to_world((0, 0))
         br = self.camera.screen_to_world((vw, vh))
-        vx0, vy0 = max(0.0, tl[0]), max(0.0, tl[1])
-        vx1, vy1 = min(WORLD_WIDTH, br[0]), min(WORLD_HEIGHT, br[1])
+        vx0, vy0 = tl
+        vx1, vy1 = br
 
         def _covered() -> bool:
             if self._ws_surf is None or self._ws_key != key:
@@ -562,17 +564,15 @@ class Chart:
                     and vx1 <= ox + ww + eps and vy1 <= oy + wh + eps)
 
         def _comfortable() -> bool:
-            # Covered with margin to spare (or pinned at a world edge, where no
-            # more margin exists) on every side — no rebuild worth scheduling.
+            # Covered with margin to spare on every side — no rebuild worth
+            # scheduling.  (The chunk is camera-centered and unclamped, so no
+            # world-edge exceptions apply.)
             ox, oy = self._ws_origin
             ww, wh = self._ws_world_size
             mx = vw * WEB_STATIC_EDGE_MARGIN_FRAC / z
             my = vh * WEB_STATIC_EDGE_MARGIN_FRAC / z
-            left_ok   = ox <= 1e-6 or vx0 >= ox + mx
-            top_ok    = oy <= 1e-6 or vy0 >= oy + my
-            right_ok  = ox + ww >= WORLD_WIDTH - 1e-6 or vx1 <= ox + ww - mx
-            bottom_ok = oy + wh >= WORLD_HEIGHT - 1e-6 or vy1 <= oy + wh - my
-            return left_ok and top_ok and right_ok and bottom_ok
+            return (vx0 >= ox + mx and vy0 >= oy + my
+                    and vx1 <= ox + ww - mx and vy1 <= oy + wh - my)
 
         covered = _covered()
         if not covered or not _comfortable():
@@ -600,22 +600,20 @@ class Chart:
         """
         z, vw, vh = key
         z = self.camera.zoom          # use the live float, not the rounded key
-        # ceil, not int: truncation would make a whole-world chunk a fraction of
-        # a world-unit NARROWER than the world, so the coverage check could never
-        # pass and the chunk would rebuild every throttle window forever.
-        world_pw = max(1, math.ceil(WORLD_WIDTH * z))
-        world_ph = max(1, math.ceil(WORLD_HEIGHT * z))
-        cw = min(math.ceil(vw * WEB_STATIC_CHUNK_FACTOR), world_pw)
-        ch = min(math.ceil(vh * WEB_STATIC_CHUNK_FACTOR), world_ph)
-        cw, ch = max(1, cw), max(1, ch)
+        # The chunk is NOT clamped to world bounds: the sea must look infinite,
+        # so the chunk carries water + grid past the world edge and the blit
+        # covers the whole viewport at any camera position.  (ceil, not int:
+        # truncation once left the chunk a fraction narrower than the coverage
+        # check demanded, causing an eternal rebuild loop.)
+        cw = max(1, math.ceil(vw * WEB_STATIC_CHUNK_FACTOR))
+        ch = max(1, math.ceil(vh * WEB_STATIC_CHUNK_FACTOR))
 
-        # Chunk origin (world units): centered on the camera, clamped to world.
-        # When the chunk spans the whole world axis (ww >= WORLD_WIDTH) the
-        # origin pins to 0 so coverage of [0, WORLD] is guaranteed.
+        # Chunk origin (world units): centered on the camera (which itself is
+        # clamped to world + CAMERA_PAN_MARGIN_WU, bounding how far this roams).
         ww, wh = cw / z, ch / z
         cx, cy = self.camera.position
-        ox = min(max(cx - ww / 2.0, 0.0), max(0.0, WORLD_WIDTH - ww))
-        oy = min(max(cy - wh / 2.0, 0.0), max(0.0, WORLD_HEIGHT - wh))
+        ox = cx - ww / 2.0
+        oy = cy - wh / 2.0
 
         surf = pygame.Surface((cw, ch))
         chunk_cam = Camera(cw, ch)
@@ -639,18 +637,8 @@ class Chart:
             self.draw_grid(lines=True, labels=False)
             self.draw_islands(world)
             self.draw_zones(world)     # shapes only; labels suppressed above
-            # Chart frame: a subtle line along each chunk edge that IS a world
-            # boundary, so at the overview the sea reads as a bounded chart and
-            # the off-world letterbox band looks intentional rather than dead.
-            eps = 1e-6
-            if ox <= eps:
-                pygame.draw.line(surf, COLOR_FRAME, (0, 0), (0, ch - 1))
-            if oy <= eps:
-                pygame.draw.line(surf, COLOR_FRAME, (0, 0), (cw - 1, 0))
-            if ox + ww >= WORLD_WIDTH - eps:
-                pygame.draw.line(surf, COLOR_FRAME, (cw - 1, 0), (cw - 1, ch - 1))
-            if oy + wh >= WORLD_HEIGHT - eps:
-                pygame.draw.line(surf, COLOR_FRAME, (0, ch - 1), (cw - 1, ch - 1))
+            # No frame line at world bounds: the grid + water continue past the
+            # edge (see draw_grid), so the sea reads as open water, not a box.
         finally:
             self.surface, self.camera = old_surface, old_camera
             self._building_static = False
@@ -686,10 +674,18 @@ class Chart:
         top_left  = cam.screen_to_world((0, 0))
         bot_right = cam.screen_to_world((vw, vh))
 
-        world_x_min = max(0.0, top_left[0])
-        world_x_max = min(WORLD_WIDTH,  bot_right[0])
-        world_y_min = max(0.0, top_left[1])
-        world_y_max = min(WORLD_HEIGHT, bot_right[1])
+        # Web: grid lines extend across the whole visible range, INCLUDING past
+        # world bounds, so the sea reads as open water with no hard chart edge.
+        # (Labels are still gated to in-world coordinates below.)  Desktop keeps
+        # the original world clamp.
+        if IS_WEB:
+            world_x_min, world_x_max = top_left[0], bot_right[0]
+            world_y_min, world_y_max = top_left[1], bot_right[1]
+        else:
+            world_x_min = max(0.0, top_left[0])
+            world_x_max = min(WORLD_WIDTH,  bot_right[0])
+            world_y_min = max(0.0, top_left[1])
+            world_y_max = min(WORLD_HEIGHT, bot_right[1])
 
         first_x = math.ceil(world_x_min / GRID_SPACING) * GRID_SPACING
         first_y = math.ceil(world_y_min / GRID_SPACING) * GRID_SPACING
@@ -710,7 +706,7 @@ class Chart:
                 if lines:
                     color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
                     _draw_line(self.surface, color, (sx, 0), (sx, vh))
-                if is_major and labels:
+                if is_major and labels and 0 <= x <= WORLD_WIDTH:
                     label = self.font_mono.render(f"{int(x)}", True, COLOR_GRID_LABEL)
                     self._blit_text_shadow(label, int(sx + 4), 4)   # top edge
             x += GRID_SPACING
@@ -723,7 +719,7 @@ class Chart:
                 if lines:
                     color = COLOR_GRID_MAJOR if is_major else COLOR_GRID_MINOR
                     _draw_line(self.surface, color, (0, sy), (vw, sy))
-                if is_major and labels:
+                if is_major and labels and 0 <= y <= WORLD_HEIGHT:
                     label = self.font_mono.render(f"{int(y)}", True, COLOR_GRID_LABEL)
                     # Left edge, inset past the fleet panel when it's showing so the
                     # trailing digit is never clipped; sits right on its own line.
