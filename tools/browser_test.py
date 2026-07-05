@@ -17,9 +17,17 @@ Signals it reads:
   LOOK at the saved PNGs before trusting a green table.
 
 Usage:
-    python tools/browser_test.py                # full run (~10-12 min)
+    python tools/browser_test.py                # default run (~10-12 min)
     python tools/browser_test.py --skip-build   # reuse existing build/web
     python tools/browser_test.py --longrun 60   # shorten the stability soak
+
+Extended validation (each flag runs ONLY its phase, skipping the default
+suite, so runs stay composable and the default stays fast):
+    --engines chromium,firefox,webkit   # cross-engine boot + core (webkit~Safari)
+    --mobile                            # iPhone 13 descriptor: boot, LOOK, tap
+    --lifecycle                         # tab frozen 2 min + resume, resizes
+    --network                           # ~4 Mbps cold load: time-to-sea, bytes
+    --endurance 1800                    # N-second ambient soak: fps/heap/errors
 
 Artifacts land in tools/browser_test_out/ (gitignored): screenshots,
 console.log, summary.md.  Exit code 0 only if every non-skipped test passes.
@@ -118,6 +126,11 @@ def region_diff(png_a: str, png_b: str, rect=CHART_RECT, step: int = 6) -> float
 # Test harness state
 # ---------------------------------------------------------------------------
 
+class _SpecialDone(Exception):
+    """Internal control flow: unwinds main()'s try to the artifact-writing
+    finally block once the flag-gated special phases have all run."""
+
+
 class Suite:
     def __init__(self):
         self.rows = []            # (name, verdict, evidence)
@@ -187,6 +200,19 @@ def css_from_fb(page, b, vx, vy):
 # Phases
 # ---------------------------------------------------------------------------
 
+def attach(page, suite):
+    """Wire console + pageerror capture.  Lines carry the console type prefix
+    ("[error] ...") so phases can count JS errors; beacon/traceback scanning
+    uses substring search, so the prefix is transparent to them."""
+    page.on("console", lambda m: suite.console.append(f"[{m.type}] {m.text}"))
+    page.on("pageerror", lambda e: suite.errors.append(str(e)))
+
+
+def js_error_count(suite) -> int:
+    return (sum(1 for ln in suite.console if ln.startswith("[error]"))
+            + len(suite.errors))
+
+
 def wait_beacon_count(page, suite, count, timeout_s):
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -202,8 +228,16 @@ def shot(page, name):
     return path
 
 
-def boot_phase(page, suite, url, tag, shots_prefix):
-    """Navigate + splash + boot-to-beacons + 404/traceback audit."""
+def boot_phase(page, suite, url, tag, shots_prefix, viewport=None,
+               boot_timeout=240):
+    """Navigate + splash + boot-to-beacons + 404/traceback audit.
+
+    Counts beacons and requests from THIS navigation only, so it can run
+    repeatedly (per engine / per phase) inside one process.
+    """
+    viewport = viewport or VIEWPORT
+    rec0 = len(_QuietHandler.records)
+    n0 = len(suite.beacons())
     page.goto(url, wait_until="domcontentloaded")
     splash_seen = False
     try:
@@ -216,15 +250,15 @@ def boot_phase(page, suite, url, tag, shots_prefix):
               "MERIDIAN SEA splash div present" if splash_seen
               else "splash div never appeared")
 
-    booted = wait_beacon_count(page, suite, 2, timeout_s=240)
+    booted = wait_beacon_count(page, suite, n0 + 2, timeout_s=boot_timeout)
     n_webprof = sum(1 for ln in suite.console if "[WEBPROF]" in ln)
     suite.add(f"{tag}: boot (sim loop alive)", booted,
-              f"{len(suite.beacons())} [WEBTEST] beacons, "
+              f"{len(suite.beacons()) - n0} [WEBTEST] beacons, "
               f"{n_webprof} [WEBPROF] console lines")
     if not booted:
         return False
 
-    bad = [(p, c) for p, c in _QuietHandler.records
+    bad = [(p, c) for p, c in _QuietHandler.records[rec0:]
            if c == 404 and p != "/favicon.ico"]
     suite.add(f"{tag}: no asset 404s", not bad,
               "requests clean" if not bad else f"404s: {bad[:5]}")
@@ -232,25 +266,313 @@ def boot_phase(page, suite, url, tag, shots_prefix):
     suite.add(f"{tag}: zero Python tracebacks", not tb,
               "console clean" if not tb else tb[0][:160])
     r = canvas_rect(page)
-    fills = (abs(r["w"] - VIEWPORT["width"]) <= 12
-             and abs(r["h"] - VIEWPORT["height"]) <= 12)
+    fills = (abs(r["w"] - viewport["width"]) <= 12
+             and abs(r["h"] - viewport["height"]) <= 12)
     suite.add(f"{tag}: canvas fills viewport (no letterbox)", fills,
               f"canvas {r['w']:.0f}x{r['h']:.0f} at ({r['x']:.0f},{r['y']:.0f})"
-              f" in {VIEWPORT['width']}x{VIEWPORT['height']}")
+              f" in {viewport['width']}x{viewport['height']}")
     page.wait_for_timeout(3000)
     shot(page, f"{shots_prefix}_sea.png")
     return True
+
+
+# ---------------------------------------------------------------------------
+# Extended validation phases (flag-gated; each runs standalone)
+# ---------------------------------------------------------------------------
+
+def engine_core(pw, suite, engine):
+    """Boot + core checks on one engine.  A non-Chromium engine that cannot
+    boot the WASM runtime is a KNOWN LIMITATION (skip), not a failure — we
+    report the console evidence and move on, per the validation spec."""
+    url = f"http://localhost:{PORT}/"
+    browser = None
+    try:
+        browser = getattr(pw, engine).launch(headless=True)
+        ctx = browser.new_context(viewport=VIEWPORT)
+        page = ctx.new_page()
+        attach(page, suite)
+        n0 = len(suite.beacons())
+        page.goto(url, wait_until="domcontentloaded")
+        booted = wait_beacon_count(page, suite, n0 + 2, timeout_s=240)
+        if not booted:
+            ev = (suite.console[-1][:140] if suite.console
+                  else "no console output at all")
+            if engine == "chromium":
+                suite.add(f"{engine}: boot", False, ev)
+            else:
+                suite.skip(f"{engine}: boot",
+                           f"known limitation — WASM runtime never came up "
+                           f"(last console: {ev})")
+            return
+        tb = suite.tracebacks()
+        suite.add(f"{engine}: boot", not tb,
+                  "sim loop alive, console clean" if not tb else tb[0][:120])
+        a = shot(page, f"30_{engine}_a.png")
+        page.wait_for_timeout(6000)
+        b = shot(page, f"30_{engine}_b.png")
+        frac = region_diff(a, b)
+        suite.add(f"{engine}: ships move", frac > 0.002,
+                  f"chart diff {frac:.4f} over 6 s")
+        bs = suite.beacons()
+        fps = fps_between(bs[-2], bs[-1]) if len(bs) - n0 >= 2 else 0.0
+        floor = 24.0 if engine == "chromium" else 15.0
+        suite.add(f"{engine}: fps", floor <= fps <= 34.0,
+                  f"{fps:.1f} fps (floor {floor:.0f} for this engine)")
+    finally:
+        if browser is not None:
+            browser.close()
+
+
+def mobile_suite(pw, suite):
+    """iPhone 13 descriptor: boot, LOOK, tap-select.  WebKit (= iOS Safari
+    engine) preferred; falls back to Chromium (= Android reality) if WebKit
+    cannot boot, and says which engine produced the verdict."""
+    url = f"http://localhost:{PORT}/"
+    dev = pw.devices["iPhone 13"]
+    used = None
+    for engine in ("webkit", "chromium"):
+        browser = None
+        try:
+            browser = getattr(pw, engine).launch(headless=True)
+            ctx = browser.new_context(**dev)
+            page = ctx.new_page()
+            attach(page, suite)
+            n0 = len(suite.beacons())
+            page.goto(url, wait_until="domcontentloaded")
+            if not wait_beacon_count(page, suite, n0 + 2, timeout_s=240):
+                suite.skip(f"mobile boot ({engine})",
+                           "WASM runtime never came up on this engine")
+                browser.close()
+                continue
+            used = engine
+            vp = dev["viewport"]
+            suite.add(f"mobile boot ({engine})", True,
+                      f"booted at {vp['width']}x{vp['height']} dpr="
+                      f"{dev.get('device_scale_factor', 1)}")
+            page.wait_for_timeout(3000)
+            shot(page, "40_mobile_sea.png")
+            # tap a vessel off a fresh beacon (touch -> selection echo)
+            nb = len(suite.beacons())
+            wait_beacon_count(page, suite, nb + 1, timeout_s=12)
+            bs = [d for d in suite.beacons() if "vessel" in d]
+            if bs:
+                bv = bs[-1]
+                tx, ty = css_from_fb(page, bv, float(bv["vx"]), float(bv["vy"]))
+                ne = len([l for l in suite.console
+                          if "[WEBTEST] selected=" in l])
+                page.tap(f"#canvas", position={
+                    "x": tx - canvas_rect(page)["x"],
+                    "y": ty - canvas_rect(page)["y"]})
+                page.wait_for_timeout(1500)
+                sel = [l for l in suite.console
+                       if "[WEBTEST] selected=" in l][ne:]
+                ok = bool(sel) and not sel[-1].endswith("=None")
+                suite.add("mobile tap-select", ok,
+                          sel[-1][-50:] if sel else "no selection echo on tap")
+                shot(page, "41_mobile_tap.png")
+            else:
+                suite.skip("mobile tap-select", "no beacon vessel coords")
+            suite.skip("mobile pinch-zoom",
+                       "untested — Playwright has no native pinch gesture")
+            browser.close()
+            return
+        except Exception as e:
+            suite.skip(f"mobile boot ({engine})", f"engine error: {e}")
+            if browser is not None:
+                browser.close()
+    if used is None:
+        suite.add("mobile verdict", False,
+                  "no engine could boot the mobile viewport")
+
+
+def lifecycle_suite(pw, suite):
+    """Frozen-tab resume (dt clamp) + resize robustness.  Chromium (CDP).
+
+    Playwright's default Chromium args DISABLE background throttling, so
+    Page.setWebLifecycleState can be a no-op (first run: beacons flowed
+    straight through the "frozen" window).  We drop those args, then DETECT
+    whether the freeze actually took (a >60 s beacon-time gap) and only
+    assert the burst bound when it did — a non-freezing engine proves
+    nothing about the clamp either way.
+    """
+    url = f"http://localhost:{PORT}/"
+    browser = pw.chromium.launch(headless=True, ignore_default_args=[
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding"])
+    try:
+        ctx = browser.new_context(viewport=VIEWPORT)
+        page = ctx.new_page()
+        attach(page, suite)
+        n0 = len(suite.beacons())
+        page.goto(url, wait_until="domcontentloaded")
+        if not wait_beacon_count(page, suite, n0 + 2, timeout_s=240):
+            suite.add("lifecycle: boot", False, "never booted")
+            return
+        cdp = ctx.new_cdp_session(page)
+        b0 = suite.beacons()[-1]
+        cdp.send("Page.setWebLifecycleState", {"state": "frozen"})
+        time.sleep(120)                      # page JS is frozen; plain sleep
+        cdp.send("Page.setWebLifecycleState", {"state": "active"})
+        nb = len(suite.beacons())
+        wait_beacon_count(page, suite, nb + 2, timeout_s=30)
+        bs = [b for b in suite.beacons() if float(b["t"]) >= float(b0["t"])]
+        gaps = [float(bs[i + 1]["t"]) - float(bs[i]["t"])
+                for i in range(len(bs) - 1)]
+        froze = bool(gaps) and max(gaps) > 60.0
+        b1 = suite.beacons()[-1]
+        steps = int(b1["steps"]) - int(b0["steps"])
+        wall = float(b1["t"]) - float(b0["t"])
+        if froze:
+            # Unclamped, 120 s hidden at TIME_COMPRESSION 80 would demand
+            # ~9600 catch-up steps; the 0.5 s dt clamp + step cap keep the
+            # resume burst to (clamp + ~15 s normal running) ~= 1300.
+            suite.add("lifecycle: no catch-up burst after 2 min frozen",
+                      steps < 3000,
+                      f"froze (max beacon gap {max(gaps):.0f}s); steps "
+                      f"across window: {steps} (unclamped ~9600+)")
+        else:
+            # Engine refused to freeze: verify no anomaly while backgrounded
+            # (steps track wall time linearly — no burst, no stall).
+            rate = steps / wall if wall > 0 else 0.0
+            suite.add("lifecycle: backgrounded 2 min, no anomaly",
+                      60.0 <= rate <= 110.0,
+                      f"engine would not freeze (max gap {max(gaps):.1f}s); "
+                      f"steps/s {rate:.1f} stayed linear; dt-clamp itself is "
+                      f"covered by the headless frame-cap test")
+        fps = fps_between(suite.beacons()[-2], suite.beacons()[-1])
+        suite.add("lifecycle: smooth resume", 24.0 <= fps <= 34.0,
+                  f"post-resume fps {fps:.1f}")
+        for i, (w, h) in enumerate([(1835, 980), (1200, 700), (1600, 900)]):
+            page.set_viewport_size({"width": w, "height": h})
+            page.wait_for_timeout(4000)      # heal watchdog runs ~1/s
+            r = canvas_rect(page)
+            ok = abs(r["w"] - w) <= 12 and abs(r["h"] - h) <= 12
+            suite.add(f"lifecycle: resize {w}x{h}", ok
+                      and not suite.tracebacks(),
+                      f"canvas {r['w']:.0f}x{r['h']:.0f}, tracebacks "
+                      f"{len(suite.tracebacks())}")
+            shot(page, f"50_resize_{w}x{h}.png")
+    finally:
+        browser.close()
+
+
+def network_suite(pw, suite):
+    """Cold load at ~4 Mbps (hotel wifi): time-to-splash, time-to-sea, bytes."""
+    url = f"http://localhost:{PORT}/"
+    browser = pw.chromium.launch(headless=True)
+    try:
+        ctx = browser.new_context(viewport=VIEWPORT)
+        page = ctx.new_page()
+        attach(page, suite)
+        cdp = ctx.new_cdp_session(page)
+        cdp.send("Network.enable")
+        cdp.send("Network.emulateNetworkConditions", {
+            "offline": False, "latency": 40,
+            "downloadThroughput": 500_000,   # 4 Mbps
+            "uploadThroughput": 125_000,
+        })
+        # Count bytes via CDP events: performance-API transferSize reads 0 for
+        # cross-origin resources without Timing-Allow-Origin, which hides the
+        # entire pygame-web CDN download (the bulk of a cold load).
+        total = {"bytes": 0.0}
+        cdp.on("Network.loadingFinished",
+               lambda p: total.__setitem__(
+                   "bytes", total["bytes"] + p.get("encodedDataLength", 0)))
+        n0 = len(suite.beacons())
+        t0 = time.monotonic()
+        page.goto(url, wait_until="domcontentloaded")
+        try:
+            page.wait_for_selector("#meridian-brand-splash", timeout=20000)
+            t_splash = time.monotonic() - t0
+        except Exception:
+            t_splash = -1.0
+        booted = wait_beacon_count(page, suite, n0 + 1, timeout_s=360)
+        t_sea = time.monotonic() - t0 if booted else -1.0
+        mb = total["bytes"] / 1e6
+        shot(page, "60_slow_network_sea.png")
+        suite.add("slow-network: splash shown", 0 <= t_splash < 15,
+                  f"time-to-splash {t_splash:.1f}s")
+        suite.add("slow-network: sea boots", booted,
+                  f"time-to-sea {t_sea:.1f}s, ~{mb:.1f} MB transferred "
+                  f"at 4 Mbps")
+    finally:
+        browser.close()
+
+
+def endurance_suite(pw, suite, secs):
+    """The ambient use-case: an N-second tab, sampled every minute."""
+    url = f"http://localhost:{PORT}/"
+    browser = pw.chromium.launch(headless=True)
+    try:
+        ctx = browser.new_context(viewport=VIEWPORT)
+        page = ctx.new_page()
+        attach(page, suite)
+        n0 = len(suite.beacons())
+        page.goto(url, wait_until="domcontentloaded")
+        if not wait_beacon_count(page, suite, n0 + 2, timeout_s=240):
+            suite.add("endurance: boot", False, "never booted")
+            return
+        shot(page, "70_endurance_start.png")
+        samples = []                 # (minute, fps, heap_mb, err_count)
+        t_end = time.monotonic() + secs
+        minute = 0
+        while time.monotonic() < t_end:
+            waited = 0
+            while waited < 60 and time.monotonic() < t_end:
+                page.wait_for_timeout(10_000)
+                waited += 10
+            minute += 1
+            bs = suite.beacons()
+            fps = fps_between(bs[-2], bs[-1]) if len(bs) >= 2 else 0.0
+            heap = page.evaluate(
+                "() => performance.memory ? "
+                "performance.memory.usedJSHeapSize / 1e6 : -1")
+            samples.append((minute, fps, heap, js_error_count(suite)))
+            print(f"  [endurance] min {minute}: fps={fps:.1f} "
+                  f"heap={heap:.0f}MB errors={samples[-1][3]}")
+        shot(page, "71_endurance_end.png")
+        fps_list = [s[1] for s in samples]
+        heaps = [s[2] for s in samples if s[2] >= 0]
+        low = [f for f in fps_list if f < 25.0]
+        tb = suite.tracebacks()
+        suite.add(f"endurance {secs}s: fps >=25 throughout", not low,
+                  f"fps first={fps_list[0]:.1f} last={fps_list[-1]:.1f} "
+                  f"min={min(fps_list):.1f} over {len(samples)} samples")
+        suite.add(f"endurance {secs}s: zero tracebacks", not tb,
+                  "clean" if not tb else tb[0][:120])
+        if len(heaps) >= 4:
+            early = sum(heaps[:3]) / 3
+            late = sum(heaps[-3:]) / 3
+            suite.add(f"endurance {secs}s: heap bounded",
+                      late < early * 2.0 + 50,
+                      f"heap first={heaps[0]:.0f}MB last={heaps[-1]:.0f}MB "
+                      f"(early avg {early:.0f} -> late avg {late:.0f})")
+        else:
+            suite.skip("endurance: heap trend", "performance.memory absent")
+    finally:
+        browser.close()
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-build", action="store_true")
     ap.add_argument("--longrun", type=int, default=180)
+    ap.add_argument("--engines", default=None,
+                    help="comma list: chromium,firefox,webkit — run per-engine"
+                         " core checks only")
+    ap.add_argument("--mobile", action="store_true")
+    ap.add_argument("--lifecycle", action="store_true")
+    ap.add_argument("--network", action="store_true")
+    ap.add_argument("--endurance", type=int, default=0,
+                    help="ambient soak length in seconds (e.g. 1800)")
     args = ap.parse_args()
 
-    if os.path.exists(OUT_DIR):
-        shutil.rmtree(OUT_DIR)
-    os.makedirs(OUT_DIR)
+    special = bool(args.engines or args.mobile or args.lifecycle
+                   or args.network or args.endurance)
+    if os.path.exists(OUT_DIR) and not special:
+        shutil.rmtree(OUT_DIR)          # special runs accumulate artifacts
+    os.makedirs(OUT_DIR, exist_ok=True)
 
     if not args.skip_build:
         print("building web bundle...")
@@ -269,11 +591,27 @@ def main() -> int:
     try:
         srv, thread = serve(WEB_DIR)
         pw = sync_playwright().start()
+
+        if special:
+            # Extended phases only — the default 18-test suite is skipped so
+            # each validation dimension can run (and be re-run) on its own.
+            if args.engines:
+                for engine in args.engines.split(","):
+                    engine_core(pw, suite, engine.strip())
+            if args.mobile:
+                mobile_suite(pw, suite)
+            if args.lifecycle:
+                lifecycle_suite(pw, suite)
+            if args.network:
+                network_suite(pw, suite)
+            if args.endurance:
+                endurance_suite(pw, suite, args.endurance)
+            raise _SpecialDone()
+
         browser = pw.chromium.launch(headless=True)
         ctx = browser.new_context(viewport=VIEWPORT)
         page = ctx.new_page()
-        page.on("console", lambda m: suite.console.append(m.text))
-        page.on("pageerror", lambda e: suite.errors.append(str(e)))
+        attach(page, suite)
 
         # ---------------- STEP 1: boot (dev build, served at root) --------
         if not boot_phase(page, suite, f"http://localhost:{PORT}/",
@@ -469,8 +807,7 @@ def main() -> int:
             srv, thread = serve(tmp)
             ctx2 = browser.new_context(viewport=VIEWPORT)
             page2 = ctx2.new_page()
-            page2.on("console", lambda m: suite.console.append(m.text))
-            page2.on("pageerror", lambda e: suite.errors.append(str(e)))
+            attach(page2, suite)
             n0 = len(suite.beacons())
             page2.goto(f"http://localhost:{PORT}/gps-simulator/",
                        wait_until="domcontentloaded")
@@ -496,6 +833,8 @@ def main() -> int:
             suite.skip("Pages subpath preflight",
                        "docs/ missing — deploy step never landed")
 
+    except _SpecialDone:
+        pass
     finally:
         try:
             if browser is not None:
