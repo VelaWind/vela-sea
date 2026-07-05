@@ -86,6 +86,15 @@ web visuals from code alone, and do not wait for user screenshots to find
 layout bugs.  (`MERIDIAN_FORCE_WEB` must never be set in normal desktop runs
 or tests — desktop resolves IS_WEB=False and must stay byte-identical.)
 
+**DEPLOY GATE: `python tools/browser_test.py` must PASS before any web
+deploy** (any commit touching `docs/` or a Pages push).  It is the only check
+that exercises the real browser engine: boot + splash, feature tests (motion,
+fps cap, select/follow easing, Esc, time compression, zoom, hover, events,
+long-run), and the GitHub Pages SUBPATH preflight.  LOOK at its screenshots
+in `tools/browser_test_out/` before trusting a green table.  It reads the
+`[WEBTEST]` JS-console beacon emitted by `main.py` (web-only) — keep that
+beacon working.
+
 ## What to Avoid
 - Do not put Pygame imports or rendering state in `engine/`
 - Do not mutate vessels/career from `render/` panels — return actions to Game

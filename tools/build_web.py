@@ -151,6 +151,18 @@ def _head_block(sea: str) -> str:
     """Page chrome: sea background, title, favicon, splash styling."""
     return f"""<style id="{PAGE_MARKER}-style">
   html, body {{ background: {sea} !important; margin: 0; padding: 0; overflow: hidden; }}
+  /* pygbag's own loader chrome (green "Loading, please wait" box + download
+     progress) pokes through above the splash — the splash's shimmer bar is
+     the loading indication now, so suppress pygbag's. */
+  #infobox, #transfer {{ display: none !important; }}
+  /* Pin the game canvas to the full viewport.  pygbag's JS sizing is flaky:
+     the same build sometimes boots full-bleed and sometimes leaves the canvas
+     as a smaller centred box (letterboxed sea — caught by browser_test.py
+     screenshots).  Our framebuffer already follows the window's aspect via
+     _web_framebuffer_size + the heal watchdog, so a hard 100vw/100vh pin
+     cannot distort; !important beats pygbag's inline style writes. */
+  #canvas {{ position: fixed !important; left: 0 !important; top: 0 !important;
+             width: 100vw !important; height: 100vh !important; }}
   #{PAGE_MARKER}-splash {{
     position: fixed; inset: 0; z-index: 9999; background: {sea};
     display: flex; flex-direction: column; align-items: center;
@@ -191,10 +203,18 @@ def _body_block() -> str:
   if (!s) return;
   var t0 = Date.now();
   var iv = setInterval(function () {{
+    // Fade only when a canvas's width CHANGES from its first-seen value:
+    // pygbag's placeholder canvas already starts >100 px wide, so a plain
+    // size threshold fires ~1.5 s in and strands a blank page for the rest
+    // of the load.  SDL resizes the canvas in set_mode when the app truly
+    // takes over — that resize is the reliable "sea is up" signal.
     var up = false;
     var cs = document.getElementsByTagName('canvas');
     for (var i = 0; i < cs.length; i++) {{
-      if (cs[i].width > 100 && cs[i].style.visibility !== 'hidden') {{ up = true; break; }}
+      var c = cs[i];
+      if (!c.dataset.msW) {{ c.dataset.msW = String(c.width); continue; }}
+      if (String(c.width) !== c.dataset.msW
+          && c.width > 100 && c.style.visibility !== 'hidden') {{ up = true; break; }}
     }}
     if (up || Date.now() - t0 > 45000) {{
       clearInterval(iv);

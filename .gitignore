@@ -32,6 +32,7 @@ pygbag.ini
 debug_frame.png
 tests/*.png
 tools/preview_out/
+tools/browser_test_out/
 
 # ── Editors ─────────────────────────────────────────────────────────────────
 .vscode/

@@ -99,6 +99,10 @@ WEB_TARGET_FPS = 30
 # in hidden tabs; without this, returning to the tab would feed the sim one
 # giant dt and trigger a max-steps catch-up burst lasting many frames.
 WEB_FRAME_DT_CLAMP_S = 0.5
+# [WEBTEST] beacon cadence: one JS-console line every this many seconds with
+# cumulative profiler counters + sim state, read by tools/browser_test.py.
+# Web-only (WEB_PROFILE-gated) and harmless — invisible outside devtools.
+WEBTEST_BEACON_S = 5.0
 
 # Web framebuffer.  pygbag's default canvas is a fixed 1280x720 backing store
 # CSS-stretched to fill the page, so on any wider or HiDPI display it upscales
@@ -841,10 +845,16 @@ COLLISION_EMERGENCY_AVOID_DEG = 60.0
 # Excess accumulated time is then discarded to prevent the feedback spiral that
 # previously caused the OS to kill the process at high time compression.
 MAX_SIM_STEPS_PER_FRAME = 12
-# Web caps steps-per-frame much harder: a stalled WASM frame must never be able
-# to demand a big batch of catch-up sim work next frame (that death-spirals the
-# tab).  A spectator sim tolerates a little time slippage under load.
-WEB_MAX_SIM_STEPS_PER_FRAME = 4
+# Web caps steps-per-frame harder than desktop: a stalled WASM frame must never
+# demand a huge batch of catch-up sim work next frame (that death-spirals the
+# tab).  But the cap must clear the honest per-frame demand at max time
+# compression, or the speed control silently lies: at 30 fps and 1x the sim
+# takes ~2.7 steps/frame, so 3x needs ~8 — the old cap of 4 pinned "3x" to an
+# effective ~1.5x (caught by tools/browser_test.py reading the [WEBTEST]
+# beacon).  10 covers 3x with margin at ~0.12 ms/step, and the hidden-tab
+# return burst stays bounded by WEB_FRAME_DT_CLAMP_S draining in ~a dozen
+# frames.  A spectator sim tolerates a little time slippage under load.
+WEB_MAX_SIM_STEPS_PER_FRAME = 10
 
 # Heading-line color shown when a vessel is in "avoiding" status.
 # Soft amber: distinct from the steel-blue normal heading vector but still muted

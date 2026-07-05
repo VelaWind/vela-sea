@@ -83,7 +83,7 @@ from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
                     PARTY_DURATION_MIN_S, PARTY_DURATION_MAX_S, PARTY_TENDER_NAME)
 from config import NM_PER_WORLD_UNIT
 from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
-                    WEB_TARGET_FPS, WEB_FRAME_DT_CLAMP_S,
+                    WEB_TARGET_FPS, WEB_FRAME_DT_CLAMP_S, WEBTEST_BEACON_S,
                     WEB_MAX_SIM_STEPS_PER_FRAME,
                     WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H,
                     WEB_HUD_PERF, WEB_RENDER_SCALE)
@@ -530,6 +530,22 @@ def _random_spawn(route: list, world, draft: float,
     return pos, dest_i, dest, hdg
 
 
+def _web_console(msg: str) -> None:
+    """Log a line to the BROWSER devtools console (web only, never raises).
+
+    Python stdout goes to pygbag's on-page terminal, which automated tests
+    cannot read reliably — the JS console is what Playwright captures, so the
+    [WEBTEST] hooks route through platform.window.console.log directly.
+    Desktop never calls this (all call sites are IS_WEB-gated); if it were
+    called, the stdlib platform module has no .window and we swallow that.
+    """
+    try:
+        import platform as _plat
+        _plat.window.console.log(msg)
+    except Exception:
+        pass
+
+
 class FrameProfiler:
     """Cheap per-phase frame timing for the web build (config.WEB_PROFILE).
 
@@ -658,6 +674,9 @@ class Game:
         self._hud_prof_surf: Optional[pygame.Surface] = None
         self._hud_perf_frames = 0
         self._hud_perf_t0 = time.perf_counter()
+        # [WEBTEST] beacon throttle; 0.0 -> first rendered web frame emits
+        # immediately, so tests never wait a full period for the first line.
+        self._webtest_last = 0.0
         self._hud_perf_font = (safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
                                if WEB_HUD_PERF else None)
         # Web display watchdog: at boot pygbag's canvas may still be the
@@ -1536,6 +1555,7 @@ class Game:
                         # Esc simply clears the current selection / follow-cam.
                         self.selected_vessel = None
                         self.camera.set_follow_target(None)
+                        _web_console("[WEBTEST] selected=None")
                     else:
                         self._run_pause_menu()    # in-game: Esc opens pause menu
                 elif event.key == pygame.K_r and self.game_over:
@@ -1819,6 +1839,9 @@ class Game:
         if clicked is not None:
             self.selected_vessel = clicked
             self.camera.set_follow_target(clicked)
+            if IS_WEB:
+                _web_console("[WEBTEST] selected=%s"
+                             % clicked.name.replace(" ", "_"))
             return
 
         # Otherwise, try to select a vessel
@@ -1840,6 +1863,12 @@ class Game:
         else:
             self.selected_vessel = None
             self.camera.set_follow_target(None)
+        if IS_WEB:
+            # Immediate selection echo for tools/browser_test.py (the 5 s
+            # beacon alone would make the click test wait a full period).
+            _web_console("[WEBTEST] selected=%s" % (
+                closest_vessel.name.replace(" ", "_") if closest_vessel
+                else "None"))
 
     def _update_party_system(self, sim_dt: float) -> None:
         """Check for yacht party triggers and manage tender dispatch/return.
@@ -2783,6 +2812,55 @@ class Game:
         if _prof is not None:
             _prof.flip += time.perf_counter() - _pe
 
+    def _web_test_beacon(self) -> None:
+        """One [WEBTEST] line to the JS console every WEBTEST_BEACON_S seconds.
+
+        Carries CUMULATIVE profiler counters (the reader diffs consecutive
+        beacons, so this never touches the profiler's report/overlay windows),
+        sim state, and one clickable vessel's framebuffer coordinates so
+        tools/browser_test.py can click/hover a real target.  Web-only
+        (call site is IS_WEB-gated) and ~one console line per 5 s — harmless.
+        """
+        now = time.perf_counter()
+        if now - self._webtest_last < WEBTEST_BEACON_S:
+            return
+        self._webtest_last = now
+        prof = self._prof
+        if prof is None:
+            return
+        # Pick the on-screen, underway vessel nearest to screen centre — a
+        # stable click target clear of the status bar and side panels.
+        fbw, fbh = self.display.get_size()
+        cx, cy = fbw / 2.0, fbh / 2.0
+        best = None
+        best_d = float("inf")
+        for v in self.world.vessels:
+            if v.status in ("in_port", "docked", "aground"):
+                continue
+            sx, sy = self.camera.world_to_screen(v.position)
+            if not (ui_px(320) < sx < fbw - ui_px(360)
+                    and ui_px(90) < sy < fbh - ui_px(150)):
+                continue
+            d = (sx - cx) ** 2 + (sy - cy) ** 2
+            if d < best_d:
+                best_d = d
+                best = (v.name, sx, sy)
+        sel = (self.selected_vessel.name.replace(" ", "_")
+               if self.selected_vessel is not None else "None")
+        parts = [
+            f"t={now:.3f}", f"n={prof.n}", f"steps={prof.steps}",
+            f"sim={prof.sim:.3f}", f"chart={prof.chart:.3f}",
+            f"panels={prof.panels:.3f}", f"flip={prof.flip:.3f}",
+            f"speed={self.environment.time_speed_multiplier:g}",
+            f"events={self.event_log.total_added}",
+            f"sel={sel}", f"fbw={fbw}", f"fbh={fbh}",
+        ]
+        if best is not None:
+            parts.append(f"vessel={best[0].replace(' ', '_')}")
+            parts.append(f"vx={best[1]:.0f}")
+            parts.append(f"vy={best[2]:.0f}")
+        _web_console("[WEBTEST] " + " ".join(parts))
+
     def _draw_hull_feedback(self) -> None:
         """In-play hull-damage legibility: a brief red screen flash on a fresh
         hit, plus a persistent pulsing HULL CRITICAL banner while integrity sits
@@ -3226,6 +3304,8 @@ class Game:
                 _prof.n += 1
                 _prof.steps += self.last_sim_steps
                 _prof.maybe_report()
+            if IS_WEB:
+                self._web_test_beacon()
 
             # Yield to the event loop once per frame.  Required by pygbag under
             # WebAssembly (lets the browser paint + deliver input); a harmless

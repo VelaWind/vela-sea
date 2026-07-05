@@ -843,6 +843,10 @@ class EventLog:
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface
         self._entries: list = []   # [(text, color), ...]
+        # Monotonic count of every event ever added — _entries caps at
+        # MAX_ENTRIES, so tests/diagnostics needing "did anything happen since
+        # X?" read this counter instead of the (plateauing) list length.
+        self.total_added: int = 0
         self._font = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         # UI-scaled instance copies shadow the class constants (identity on
         # desktop) so the box grows with the scaled font on web.
@@ -853,6 +857,7 @@ class EventLog:
     def add(self, sim_time: str, message: str, color: tuple) -> None:
         """Append an event; drop the oldest if over capacity."""
         self._entries.append((f"[{sim_time}] {message}", color))
+        self.total_added += 1
         if len(self._entries) > self.MAX_ENTRIES:
             self._entries.pop(0)
 
