@@ -1,4 +1,4 @@
-# Meridian Sea — v0.6.1 Release Notes
+# Vela Sea — v0.6.1 Release Notes
 
 A stability and clarity pass on top of v0.6.0: real fullscreen, the helm can
 never be taken away from you, no more pan-into-the-void crash, and hull damage
@@ -41,7 +41,7 @@ Tests: pytest 16/16; gameplay bot 16/16; draw-budget check passing.
 
 ---
 
-# Meridian Sea — v0.6.0 Release Notes
+# Vela Sea — v0.6.0 Release Notes
 
 Clickable menus and a complete, persisted settings system, reachable from the
 title screen and in-game.
@@ -65,7 +65,7 @@ title screen and in-game.
 - **Gameplay:** difficulty preset (Easy / Normal / Hard — scales zone fines and
   grounding damage by 0.5× / 1.0× / 1.5×) and a voyage-flavour log toggle.
 - Settings save to the same user-writable place as the career save
-  (`%APPDATA%/MeridianSea/settings.json` in the packaged build); defaults exactly
+  (`%APPDATA%/VelaSea/settings.json` in the packaged build); defaults exactly
   reproduce prior behaviour, so an absent file changes nothing.
 
 ### Under the hood
@@ -76,7 +76,7 @@ title screen and in-game.
 
 ---
 
-# Meridian Sea — v0.4.0 Release Notes
+# Vela Sea — v0.4.0 Release Notes
 
 This release turns the passive traffic simulator into a full maritime career
 game with a progression loop: accept contract → navigate → dock → earn →
@@ -85,7 +85,7 @@ unlock better contracts → repeat.
 ## New in this build
 
 ### Title screen & main menu
-- "MERIDIAN SEA" title menu over the live chart: New Career / Continue /
+- "VELA SEA" title menu over the live chart: New Career / Continue /
   Controls / Quit, arrow-key navigation
 - Continue greys out when no save exists; `--skip-title` flag for development
 

@@ -73,7 +73,7 @@ from main import Game
 import tempfile
 from engine import career as _career_module
 
-_BOT_SAVE_PATH = os.path.join(tempfile.gettempdir(), "meridian_bot_save.json")
+_BOT_SAVE_PATH = os.path.join(tempfile.gettempdir(), "vela_bot_save.json")
 _main_module.save_career = (
     lambda career, filepath=None, hull_integrity=1.0:
         _career_module.save_career(career, _BOT_SAVE_PATH, hull_integrity))
@@ -579,7 +579,7 @@ def scenario_8():
     import tempfile
     from engine.career import PlayerCareer, save_career, load_career
 
-    path = os.path.join(tempfile.gettempdir(), "meridian_bot_roundtrip.json")
+    path = os.path.join(tempfile.gettempdir(), "vela_bot_roundtrip.json")
     career = PlayerCareer()
     career.money             = 7777.25
     career.reputation        = 33

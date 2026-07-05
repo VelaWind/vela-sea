@@ -33,7 +33,7 @@ This also makes the plain-http.server fallback below work.
 
 Usage
 -----
-    python tools/build_web.py            # build only  -> build/MeridianSea/build/web/
+    python tools/build_web.py            # build only  -> build/VelaSea/build/web/
     python tools/build_web.py --serve    # build + serve at http://localhost:8000
     python tools/build_web.py --deploy   # build + sync the finished page into docs/
                                          # (the GitHub Pages artifact — tracked!)
@@ -42,7 +42,7 @@ GitHub Pages deployment notes
 -----------------------------
 Pages serves project sites at https://<user>.github.io/<repo>/ — a SUBPATH.
 The page is subpath-safe because every reference is either RELATIVE
-(favicon.png, and platform.fopen("meridiansea.tar.gz"/".apk") resolve against
+(favicon.png, and platform.fopen("velasea.tar.gz"/".apk") resolve against
 the page URL) or ABSOLUTE-REMOTE (the runtime JS/wasm from
 https://pygame-web.github.io/cdn/).  On any non-localhost host the runtime's
 dev mode never triggers, so the pygame-ce wheel also resolves from the REMOTE
@@ -56,7 +56,7 @@ http.server, which sends none either.
 
 Fallback serve (if pygbag's test server misbehaves): the build output is fully
 static, so this is known-good once the wheel has been pre-fetched:
-    cd build/MeridianSea/build/web && python -m http.server 8000
+    cd build/VelaSea/build/web && python -m http.server 8000
 (The runtime JS/wasm then loads straight from the remote CDN — needs internet —
 and the wheel serves from the local cdn/ folder.  Note plain http.server sends
 no COOP/COEP headers; pygbag's default non-threaded runtime loads without them.)
@@ -74,8 +74,8 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # pygbag derives the app/apk name from this folder's name, so name it nicely:
-# the bundle ships as MeridianSea.apk.  Lives under build/ (gitignored).
-STAGE = os.path.join(ROOT, "build", "MeridianSea")
+# the bundle ships as VelaSea.apk.  Lives under build/ (gitignored).
+STAGE = os.path.join(ROOT, "build", "VelaSea")
 WEB_DIR = os.path.join(STAGE, "build", "web")
 
 # The ONLY things that ship to the browser: the runtime files, nothing else.
@@ -138,7 +138,7 @@ def _sea_color_hex() -> str:
         sys.path.remove(ROOT)
 
 
-PAGE_MARKER = "meridian-brand"
+PAGE_MARKER = "vela-brand"
 
 # Inline SVG favicon: cyan vessel triangle on a deep-navy rounded square.
 _FAVICON = ("data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 "
@@ -193,7 +193,7 @@ def _body_block() -> str:
     guarantees the splash can never trap the page on a stalled load.
     """
     return f"""<div id="{PAGE_MARKER}-splash">
-  <div class="ms-word">MERIDIAN<span>&nbsp;SEA</span></div>
+  <div class="ms-word">VELA<span>&nbsp;SEA</span></div>
   <div class="ms-sub">ambient maritime simulator</div>
   <div class="ms-bar"><div></div></div>
 </div>
@@ -231,7 +231,7 @@ def _body_block() -> str:
 
 def patch_web_page() -> None:
     """Brand the page: sea background, favicon, and a full-page loading splash
-    ("MERIDIAN SEA / ambient maritime simulator" + shimmer bar) that fades out
+    ("VELA SEA / ambient maritime simulator" + shimmer bar) that fades out
     when the canvas takes over — replacing pygbag's default gray loader look.
 
     Inline CSS/SVG only; no new asset files.  Idempotent (keyed on
@@ -264,11 +264,11 @@ def patch_web_page() -> None:
 DOCS_DIR = os.path.join(ROOT, "docs")
 
 # Everything the page needs at runtime, nothing else.  The non-itch unpack
-# branch fetches meridiansea.tar.gz (the .apk is the itch.zone branch — ship
+# branch fetches velasea.tar.gz (the .apk is the itch.zone branch — ship
 # both, they're ~380 KB each); favicon.png is the <link rel=icon> fallback;
 # cdn/ holds the pre-fetched pygame-ce wheel for localhost dev serving.
 DEPLOY_FILES = ["index.html", "favicon.png",
-                "meridiansea.apk", "meridiansea.tar.gz"]
+                "velasea.apk", "velasea.tar.gz"]
 DEPLOY_DIRS = ["cdn"]
 
 DOCS_README = """# docs/ — deployed web build (generated)
@@ -315,7 +315,7 @@ def run_pygbag(extra: list) -> int:
     # on page load.  (Browser audio policy still needs a user gesture before any
     # sound plays, so it's silent ambient until the first click — that's fine.)
     cmd = [sys.executable, "-m", "pygbag", "--disable-sound-format-error",
-           "--ume_block", "0", "--title", "Meridian Sea"] + extra + [STAGE]
+           "--ume_block", "0", "--title", "Vela Sea"] + extra + [STAGE]
     print("running:", " ".join(cmd))
     return subprocess.call(cmd)
 

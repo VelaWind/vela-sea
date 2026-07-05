@@ -31,7 +31,7 @@ env.time_speed_multiplier = 1.0
 
 # Add two vessels: one underway, one that will be in avoiding status
 cargo = Vessel(
-    name="MV Meridian", vessel_type="cargo",
+    name="MV Tidewater", vessel_type="cargo",
     position=(105.0, 315.0), heading=90.0,
     target_speed=8.0, current_speed=8.0,
     max_speed=12.0, acceleration=0.020, deceleration=0.017,

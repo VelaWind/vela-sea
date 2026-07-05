@@ -1,8 +1,9 @@
 # Development / packaging dependencies (players DON'T need these — see requirements.txt).
 #   pip install -r requirements-dev.txt
-#   pyinstaller meridian_sea.spec          # desktop build
+#   pyinstaller vela_sea.spec          # desktop build
 #   python tools/build_web.py              # experimental WebAssembly build (clean staged tree)
 -r requirements.txt
 pyinstaller==6.20.0
 pygbag==0.9.3
 playwright==1.61.0   # browser test suite (tools/browser_test.py); then: playwright install chromium
+git-filter-repo==2.47.0   # history maintenance (one-off rewrites)

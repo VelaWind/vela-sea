@@ -1,9 +1,9 @@
-"""Automated real-browser test suite for the Meridian Sea web build.
+"""Automated real-browser test suite for the Vela Sea web build.
 
 Drives headless Chromium (Playwright) against the built site: boot + splash,
 feature-by-feature checks (motion, fps cap, select/follow easing, Esc, time
 compression, zoom, hover, event feed, long-run stability), then a GitHub
-Pages preflight that serves docs/ under a /gps-simulator/ SUBPATH exactly as
+Pages preflight that serves docs/ under a /vela-sea/ SUBPATH exactly as
 Pages will.
 
 Signals it reads:
@@ -49,7 +49,7 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import pygame  # noqa: E402  (pixel sampling of screenshots only)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WEB_DIR = os.path.join(ROOT, "build", "MeridianSea", "build", "web")
+WEB_DIR = os.path.join(ROOT, "build", "VelaSea", "build", "web")
 DOCS_DIR = os.path.join(ROOT, "docs")
 OUT_DIR = os.path.join(ROOT, "tools", "browser_test_out")
 # NOT an 8xxx port: pygbag's runtime (aio/pep0723.py) rewrites the wheel CDN
@@ -241,13 +241,13 @@ def boot_phase(page, suite, url, tag, shots_prefix, viewport=None,
     page.goto(url, wait_until="domcontentloaded")
     splash_seen = False
     try:
-        page.wait_for_selector("#meridian-brand-splash", timeout=8000)
+        page.wait_for_selector("#vela-brand-splash", timeout=8000)
         splash_seen = True
     except Exception:
         pass
     shot(page, f"{shots_prefix}_splash.png")
     suite.add(f"{tag}: branded splash", splash_seen,
-              "MERIDIAN SEA splash div present" if splash_seen
+              "VELA SEA splash div present" if splash_seen
               else "splash div never appeared")
 
     booted = wait_beacon_count(page, suite, n0 + 2, timeout_s=boot_timeout)
@@ -483,7 +483,7 @@ def network_suite(pw, suite):
         t0 = time.monotonic()
         page.goto(url, wait_until="domcontentloaded")
         try:
-            page.wait_for_selector("#meridian-brand-splash", timeout=20000)
+            page.wait_for_selector("#vela-brand-splash", timeout=20000)
             t_splash = time.monotonic() - t0
         except Exception:
             t_splash = -1.0
@@ -798,7 +798,7 @@ def main() -> int:
         # ---------------- STEP 3: Pages subpath preflight ------------------
         if os.path.isdir(DOCS_DIR):
             tmp = tempfile.mkdtemp(prefix="pages_preflight_")
-            shutil.copytree(DOCS_DIR, os.path.join(tmp, "gps-simulator"))
+            shutil.copytree(DOCS_DIR, os.path.join(tmp, "vela-sea"))
             # localhost-only shim: dev mode requests /cdn/ at the origin ROOT
             # (host==localhost); real Pages (host!=localhost) resolves the
             # wheel from the remote CDN instead — documented in build_web.py.
@@ -809,10 +809,10 @@ def main() -> int:
             page2 = ctx2.new_page()
             attach(page2, suite)
             n0 = len(suite.beacons())
-            page2.goto(f"http://localhost:{PORT}/gps-simulator/",
+            page2.goto(f"http://localhost:{PORT}/vela-sea/",
                        wait_until="domcontentloaded")
             try:
-                page2.wait_for_selector("#meridian-brand-splash", timeout=8000)
+                page2.wait_for_selector("#vela-brand-splash", timeout=8000)
                 splash2 = True
             except Exception:
                 splash2 = False
@@ -824,7 +824,7 @@ def main() -> int:
                     if c == 404 and p != "/favicon.ico"]
             page2.wait_for_timeout(3000)
             shot(page2, "12_subpath_sea.png")
-            suite.add("Pages subpath: boot under /gps-simulator/",
+            suite.add("Pages subpath: boot under /vela-sea/",
                       splash2 and booted2 and not bad2,
                       f"splash={splash2} beacons={len(suite.beacons()) - n0} "
                       f"404s={bad2[:4] if bad2 else 'none'}")

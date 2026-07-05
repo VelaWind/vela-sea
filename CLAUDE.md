@@ -1,7 +1,7 @@
-# CLAUDE.md — AI Context for gps-simulator (Meridian Sea)
+# CLAUDE.md — AI Context for gps-simulator (Vela Sea)
 
 ## Project Overview
-**Meridian Sea** — a Python + Pygame maritime career simulator (v0.6.0,
+**Vela Sea** — a Python + Pygame maritime career simulator (v0.6.0,
 Steam release candidate). The player captains MV Velawind on a 210 nm
 fictional sea: accept contracts, navigate, dock, earn money and reputation,
 unlock higher-tier work. 15 AI vessels run autonomous schedules around them
@@ -76,14 +76,14 @@ config.py          Every constant: physics, colors, career, sound, polish
 ## Web build (pygbag) — visual self-verification RULE
 The browser build (`IS_WEB` code path) has a headless preview harness:
 `python tools/web_preview.py` renders the exact web path off-browser
-(MERIDIAN_FORCE_WEB=1 + SDL dummy) and saves PNGs to `tools/preview_out/`
+(VELA_FORCE_WEB=1 + SDL dummy) and saves PNGs to `tools/preview_out/`
 (boot / ambient / follow / zoom) plus a per-bucket timing line.
 
 **THE RULE: after ANY visual change to the web build, re-run the harness and
 actually OPEN AND LOOK at the PNGs before moving on.**  Iterate
 change→render→inspect→refine until it looks right, then commit.  Do not judge
 web visuals from code alone, and do not wait for user screenshots to find
-layout bugs.  (`MERIDIAN_FORCE_WEB` must never be set in normal desktop runs
+layout bugs.  (`VELA_FORCE_WEB` must never be set in normal desktop runs
 or tests — desktop resolves IS_WEB=False and must stay byte-identical.)
 
 **DEPLOY GATE: `python tools/browser_test.py` must PASS before any web
@@ -94,6 +94,10 @@ long-run), and the GitHub Pages SUBPATH preflight.  LOOK at its screenshots
 in `tools/browser_test_out/` before trusting a green table.  It reads the
 `[WEBTEST]` JS-console beacon emitted by `main.py` (web-only) — keep that
 beacon working.
+
+## Commit hygiene
+Commits must NEVER include `Co-Authored-By` trailers or "Generated with
+Claude Code" attribution lines — no AI attribution in the git history, ever.
 
 ## What to Avoid
 - Do not put Pygame imports or rendering state in `engine/`

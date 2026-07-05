@@ -48,7 +48,7 @@ def _make_world():
 def _make_vessels():
     return [
         Vessel(
-            name="MV Meridian", vessel_type="cargo",
+            name="MV Tidewater", vessel_type="cargo",
             position=(105.0, 315.0), heading=90.0,
             target_speed=8.0, current_speed=0.0,
             max_speed=12.0, acceleration=0.020, deceleration=0.017,
@@ -134,7 +134,7 @@ def _make_vessels():
             destination=VESSEL_ROUTE_TUG[3],
         ),
         Vessel(
-            name="SY Meridian Breeze", vessel_type="sailboat",
+            name="SY Morning Breeze", vessel_type="sailboat",
             position=(150.0, 350.0), heading=129.0,
             target_speed=5.0, current_speed=0.0,
             max_speed=8.0, acceleration=0.04, deceleration=0.02,

@@ -1,6 +1,6 @@
 """Headless visual preview of the WEB rendering path — the self-check harness.
 
-Runs the exact IS_WEB code path off-browser (MERIDIAN_FORCE_WEB=1 + SDL dummy
+Runs the exact IS_WEB code path off-browser (VELA_FORCE_WEB=1 + SDL dummy
 video driver), boots spectator mode at a real-canvas-like resolution, advances
 the simulation, and saves PNG snapshots to tools/preview_out/ (gitignored):
 
@@ -28,7 +28,7 @@ import time
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-os.environ["MERIDIAN_FORCE_WEB"] = "1"   # config.IS_WEB -> True (web code path)
+os.environ["VELA_FORCE_WEB"] = "1"   # config.IS_WEB -> True (web code path)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)

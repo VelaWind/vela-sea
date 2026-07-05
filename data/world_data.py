@@ -1,5 +1,5 @@
 """world_data.py
-The fictional sea this simulator takes place in: the MERIDIAN SEA.
+The fictional sea this simulator takes place in: the VELA SEA.
 
 This is NOT a real place, but it is laid out like a real one would be — a
 mainland coast in the southwest, a scatter of islands, a narrow shipping strait,
@@ -26,7 +26,7 @@ not need to change.
 # ---------------------------------------------------------------------------
 # WORLD BOUNDS
 # ---------------------------------------------------------------------------
-WORLD_NAME = "The Meridian Sea"
+WORLD_NAME = "The Vela Sea"
 WORLD_WIDTH = 1400
 WORLD_HEIGHT = 980
 
@@ -368,7 +368,7 @@ _WP_SKERRY_CLEAR = (380, 460)  # south of Skerry Bank; depth 60 m, no zones
 # New waypoints for the 4 additional vessels (all verified by verify_new_routes.py)
 _WP_W_APPROACH  = (300, 420)  # south of Saltgate — western approach corridor
 _WP_W_FISH_GND  = (200, 480)  # western fishing ground; dist to coast > 200 wu
-# SY Meridian Breeze: single SW mark at bearing 135°/315° from Saltgate (beam reach
+# SY Morning Breeze: single SW mark at bearing 135°/315° from Saltgate (beam reach
 # both ways with default NE wind, wind_angle=±90°, full drive on both legs).
 _WP_SAIL2_WEST  = (52, 473)   # SW open sea; 135° beam reach from Saltgate
 _WP_SALTGATE_S  = (300, 320)  # due-south approach; x=300 keeps path clear of coast edge
@@ -411,7 +411,7 @@ VESSEL_ROUTE_FISHING = [
 ]
 
 # Cargo2: MV Carrick Star — Port Maren ↔ Brattlin Light Quay via south corridor.
-# Smaller than Meridian (draft 6.5 m), retraces same corridor but different phase.
+# Smaller than Vela (draft 6.5 m), retraces same corridor but different phase.
 # Brattlin has no refuel, so the ship tanks up fully at Port Maren each visit.
 VESSEL_ROUTE_CARGO2 = [
     (105, 315),       # Port Maren (refuel)
@@ -446,7 +446,7 @@ VESSEL_ROUTE_TUG = [
     _WP_ARDENT_APP,
 ]
 
-# Sailboat2: SY Meridian Breeze — western triangle from Saltgate.
+# Sailboat2: SY Morning Breeze — western triangle from Saltgate.
 # Outbound leg is a pure beam reach; return via a due-south approach waypoint
 # to avoid the shallow zone where bearing 315° runs near-parallel to the coast:
 #   Saltgate→WP_SAIL2_WEST: bearing=135°, wind_angle=90° (beam reach ✓)
@@ -476,7 +476,7 @@ VESSEL_ROUTE_SAILBOAT = [
     (570, 660),    # NW approach — north of Vesper Isle (y=660<668), clean return
 ]
 
-# Tanker: MT Meridian Star — slow deep-sea loop, Port Maren → NE open ocean → back.
+# Tanker: MT Amber Star — slow deep-sea loop, Port Maren → NE open ocean → back.
 # Uses _WP_SE_OPEN as an intermediate to clear the mainland coast.
 # (800, 200) is in the open NE ocean, well clear of all islands and Skerry Bank.
 VESSEL_ROUTE_TANKER = [

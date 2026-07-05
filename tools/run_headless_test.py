@@ -25,7 +25,7 @@ def create_test_world():
     populate_world(world)
 
     cargo = Vessel(
-        name="MV Meridian",
+        name="MV Tidewater",
         vessel_type="cargo",
         position=(120.0, 300.0),
         heading=45.0,

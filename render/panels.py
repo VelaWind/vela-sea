@@ -2201,7 +2201,7 @@ class TitleScreen:
         self.surface.blit(panel, (x, y))
 
         cy = y + 44
-        title_surf = self._font_title.render("MERIDIAN SEA", True, COLOR_ACCENT)
+        title_surf = self._font_title.render("VELA SEA", True, COLOR_ACCENT)
         self.surface.blit(title_surf, (vw // 2 - title_surf.get_width() // 2, cy))
         cy += title_surf.get_height() + 6
         sub_surf = self._font_subtitle.render(

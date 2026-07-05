@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller build spec for Meridian Sea (tracked, reproducible — see DISTRIBUTION.md).
+# PyInstaller build spec for Vela Sea (tracked, reproducible — see DISTRIBUTION.md).
 #
-#   Build:   pyinstaller meridian_sea.spec
-#   Output:  dist/MeridianSea/  (run MeridianSea.exe — no Python needed)
+#   Build:   pyinstaller vela_sea.spec
+#   Output:  dist/VelaSea/  (run VelaSea.exe — no Python needed)
 #
 # Folder build (one EXE + a COLLECT dir), NOT one-file: it launches faster and
 # trips fewer antivirus heuristics than a single self-extracting .exe.
@@ -33,7 +33,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='MeridianSea',
+    name='VelaSea',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -53,5 +53,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='MeridianSea',
+    name='VelaSea',
 )

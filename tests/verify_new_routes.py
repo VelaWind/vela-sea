@@ -74,7 +74,7 @@ ROUTES = [
         ]),
     },
     {
-        "name": "SY Meridian Breeze (sailboat2)",
+        "name": "SY Morning Breeze (sailboat2)",
         "draft": 2.0,
         "sailboat": True,
         "legs": legs([
@@ -112,7 +112,7 @@ STARTS = [
     {"name": "Carrick Star start", "pos": (520, 555), "draft": 6.5},
     {"name": "Skerrywatch start",  "pos": (300, 300), "draft": 2.5},
     {"name": "Ardent Pilot start", "pos": (670, 575), "draft": 2.0},
-    {"name": "Meridian Breeze start", "pos": (150, 350), "draft": 2.0},
+    {"name": "Vela Breeze start", "pos": (150, 350), "draft": 2.0},
 ]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

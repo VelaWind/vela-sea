@@ -1,7 +1,7 @@
 """Headless arrival test — no pygame window required.
 
 Mirrors main.py's update_simulation() loop exactly, using the real engine.
-Drives MV Meridian (cargo, start (120,300), destination Port Ardent (648,460))
+Drives MV Tidewater (cargo, start (120,300), destination Port Ardent (648,460))
 and reports distance-to-destination every 60 steps until docked or 15 000 steps.
 """
 
@@ -26,7 +26,7 @@ environment = Environment()
 DESTINATION = (648.0, 460.0)   # Port Ardent coords used in main.py
 
 cargo = Vessel(
-    name="MV Meridian",
+    name="MV Tidewater",
     vessel_type="cargo",
     position=(120.0, 300.0),
     heading=45.0,

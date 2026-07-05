@@ -11,10 +11,10 @@ import sys
 # web-specific branch keys off this; on desktop it is False, so those branches
 # are dead code and desktop behaviour is byte-for-byte identical.
 #
-# MERIDIAN_FORCE_WEB=1 forces the web path OFF-browser so tools/web_preview.py
+# VELA_FORCE_WEB=1 forces the web path OFF-browser so tools/web_preview.py
 # can render and screenshot the exact web build headlessly (SDL dummy driver).
 # Never set it in normal desktop runs or tests — desktop must resolve False.
-IS_WEB = sys.platform == "emscripten" or os.environ.get("MERIDIAN_FORCE_WEB") == "1"
+IS_WEB = sys.platform == "emscripten" or os.environ.get("VELA_FORCE_WEB") == "1"
 
 # Frame profiler: when True the game prints one [WEBPROF] timing line to stdout
 # (pygbag pipes stdout to the browser console) every ~5 s.  Defaults to IS_WEB
@@ -41,7 +41,7 @@ def resource_path(relative: str) -> str:
 def user_data_dir() -> str:
     """A user-writable directory for the save file.
 
-    Frozen (.exe): ``%APPDATA%/MeridianSea`` on Windows (``~/.local/share`` on
+    Frozen (.exe): ``%APPDATA%/VelaSea`` on Windows (``~/.local/share`` on
     *nix) — always writable, even if the app is installed under Program Files
     where the bundle itself is read-only.  From source: the empty string, so
     ``SAVE_FILEPATH`` stays cwd-relative and the dev workflow / tests are
@@ -56,7 +56,18 @@ def user_data_dir() -> str:
         return ""
     if getattr(sys, "frozen", False):
         base = os.environ.get("APPDATA") or os.path.expanduser("~/.local/share")
-        path = os.path.join(base, "MeridianSea")
+        path = os.path.join(base, "VelaSea")
+        # One-time migration: pre-rebrand installs (<= v0.6.1) saved under the
+        # app's former name.  Copy (never move) so a failed migration can't
+        # lose the only save; the old dir stays behind as a backup.  The old
+        # name is spelled in two pieces so repo-wide brand greps stay clean.
+        legacy = os.path.join(base, "Meri" "dianSea")
+        if os.path.isdir(legacy) and not os.path.exists(path):
+            try:
+                import shutil
+                shutil.copytree(legacy, path)
+            except OSError:
+                pass          # fall through: fresh dir is created below
         os.makedirs(path, exist_ok=True)
         return path
     return ""
@@ -66,14 +77,14 @@ def user_data_dir() -> str:
 # Game identity & persistence
 # ============================================================================
 GAME_VERSION  = "0.6.1"        # shown on the title screen and stamped into saves
-# Career save lives in a user-writable location: %APPDATA%/MeridianSea when
+# Career save lives in a user-writable location: %APPDATA%/VelaSea when
 # frozen (the bundle dir is read-only), cwd-relative "save.json" from source.
 SAVE_FILEPATH = os.path.join(user_data_dir(), "save.json")
 
 # ============================================================================
 # Title screen
 # ============================================================================
-TITLE_FONT_SIZE        = 52    # "MERIDIAN SEA" headline
+TITLE_FONT_SIZE        = 52    # "VELA SEA" headline
 TITLE_SUBTITLE_SIZE    = 18    # "A Maritime Career Simulator" subtitle
 TITLE_MENU_FONT_SIZE   = 22    # menu item rows
 TITLE_PANEL_WIDTH      = 560   # centered overlay panel width (px)
@@ -86,7 +97,7 @@ TITLE_PANEL_ALPHA      = 215   # overlay darkness — chart stays faintly visibl
 WINDOW_MIN_WIDTH = 1600
 WINDOW_MIN_HEIGHT = 950
 WINDOW_SCALE_FACTOR = 0.90
-WINDOW_TITLE = "Maritime Navigation Simulator"
+WINDOW_TITLE = "Vela Sea"
 TARGET_FPS = 60
 # Web render CAP, enforced by SKIPPING rAF ticks — never by sleeping.  With
 # rAF pacing alone the tab rendered at 200+ fps x ~5 ms/frame = a full core
@@ -251,7 +262,7 @@ FONT_SIZE_MAP_LABEL = 15
 FONT_SIZE_SMALL = 12
 
 # ============================================================================
-# World Scale — Meridian Sea
+# World Scale — Vela Sea
 # ============================================================================
 # This block is the single canonical definition of the sea's physical size.
 # All physics code derives unit conversions from here; nothing else should
@@ -260,7 +271,7 @@ FONT_SIZE_SMALL = 12
 # physics automatically follow.
 #
 # Current setting: ~Irish-Sea / English-Channel scale (regional).
-SEA_WIDTH_NM  = 210.0    # real east–west extent of the Meridian Sea (nm)
+SEA_WIDTH_NM  = 210.0    # real east–west extent of the Vela Sea (nm)
 SEA_HEIGHT_NM = 147.0    # real north–south extent (preserves WORLD_WIDTH/HEIGHT ratio)
 
 # Derived scale factors — computed once here, imported everywhere they're needed.

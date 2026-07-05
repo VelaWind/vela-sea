@@ -1,7 +1,7 @@
-# MERIDIAN SEA
+# VELA SEA
 ### A Maritime Career Simulator
 
-Take the helm of MV Velawind and earn your name on the Meridian Sea. Run cargo through fog-bound straits, race a hazmat deadline past a naval exclusion zone, and limp into port with a storm-battered hull — then decide whether the repair bill is worth it before the next contract. Fifteen AI vessels live their own lives around you: trawlers working the grounds, ferries on schedule, a coast guard cutter that will come for *you* when your fuel runs dry.
+Take the helm of MV Velawind and earn your name on the Vela Sea. Run cargo through fog-bound straits, race a hazmat deadline past a naval exclusion zone, and limp into port with a storm-battered hull — then decide whether the repair bill is worth it before the next contract. Fifteen AI vessels live their own lives around you: trawlers working the grounds, ferries on schedule, a coast guard cutter that will come for *you* when your fuel runs dry.
 
 ![Screenshot placeholder — add chart + storm + docking menu shots before Steam submission]
 
@@ -70,7 +70,7 @@ render/          Pygame drawing — reads engine state, never mutates it
   panels.py      HUD, career, docking menu, title, controls, minimap, game over
   sound.py       SoundManager + stdlib WAV synthesis
 
-data/world_data.py   Meridian Sea geography and AI routes
+data/world_data.py   Vela Sea geography and AI routes
 tests/               Headless pytest suite + 14-scenario gameplay bot
 main.py              Game loop: input → fixed-timestep sim → render
 config.py            Every tunable number in the project

@@ -705,7 +705,7 @@ class Game:
         # far-western start; follow-cam engages in run() once the title clears.
         self.camera.set_center(CAMERA_START_CENTER)
         # Web spectator boot: there is no player ship to follow, so frame the
-        # entire Meridian Sea (both axes) and centre on the world, rather than the
+        # entire Vela Sea (both axes) and centre on the world, rather than the
         # port-cluster width the desktop follow-cam default assumes.
         if IS_WEB:
             self.camera.zoom = self._calculate_overview_zoom(display_width, display_height)
@@ -784,7 +784,7 @@ class Game:
 
         # Simulation state
         self.world = World()
-        populate_world(self.world)  # Load the Meridian Sea map
+        populate_world(self.world)  # Load the Vela Sea map
 
         self.environment = Environment()
         self.selected_vessel: Optional[Vessel] = None
@@ -1010,7 +1010,7 @@ class Game:
         return max(ZOOM_MIN, min(width / DEFAULT_VIEW_SPAN_WU, ZOOM_MAX))
 
     def _calculate_overview_zoom(self, width: int, height: int) -> float:
-        """Zoom that frames the WHOLE Meridian Sea (both axes) with a little
+        """Zoom that frames the WHOLE Vela Sea (both axes) with a little
         breathing room around the coast — the ambient spectator overview used on
         the web boot, where nothing is followed so the full sea must be visible.
 
@@ -1043,7 +1043,7 @@ class Game:
         # Runs the deep north-channel route (avoids Skerry Bank with 8 m draft).
         _pos, _ridx, _dest, _hdg = _random_spawn(VESSEL_ROUTE_CARGO, self.world, 8.0, _spawns); _spawns.append(_pos)
         cargo = Vessel(
-            name="MV Meridian",
+            name="MV Tidewater",
             vessel_type="cargo",
             position=_pos,
             heading=_hdg,
@@ -1231,11 +1231,11 @@ class Game:
         )
         self.world.add_vessel(tug)
 
-        # SY Meridian Breeze — second sailboat, 28 m.
+        # SY Morning Breeze — second sailboat, 28 m.
         # Western back-and-forth: Saltgate ↔ WP_SAIL2_WEST (52,473).
         _pos, _ridx, _dest, _hdg = _random_spawn(VESSEL_ROUTE_SAILBOAT2, self.world, 2.0, _spawns); _spawns.append(_pos)
         sail2 = Vessel(
-            name="SY Meridian Breeze",
+            name="SY Morning Breeze",
             vessel_type="sailboat",
             position=_pos,
             heading=_hdg,
@@ -1258,11 +1258,11 @@ class Game:
         )
         self.world.add_vessel(sail2)
 
-        # MT Meridian Star — large tanker, 200 m, deep-draft 12 m.
+        # MT Amber Star — large tanker, 200 m, deep-draft 12 m.
         # Slow deep-sea loop: Port Maren → NE open ocean → back.
         _pos, _ridx, _dest, _hdg = _random_spawn(VESSEL_ROUTE_TANKER, self.world, 12.0, _spawns); _spawns.append(_pos)
         tanker = Vessel(
-            name="MT Meridian Star",
+            name="MT Amber Star",
             vessel_type="tanker",
             position=_pos,
             heading=_hdg,
@@ -1457,15 +1457,15 @@ class Game:
         # Assign mission types and mission-appropriate port stay durations.
         # Done after all vessels are added so we can iterate world.vessels cleanly.
         _MISSION_MAP = {
-            "MV Meridian":       ("cargo_run",     PORT_STAY_CARGO_LOAD_S,     None),
+            "MV Tidewater":       ("cargo_run",     PORT_STAY_CARGO_LOAD_S,     None),
             "MV Carrick Star":   ("cargo_run",     PORT_STAY_CARGO_LOAD_S,     None),
             "MS Coastal Express":("ferry_run",     PORT_STAY_FERRY_BOARD_S,    None),
             "FV Horizon":        ("fishing_trip",  PORT_STAY_FISHING_UNLOAD_S, None),
             "FV Skerrywatch":    ("fishing_trip",  PORT_STAY_FISHING_UNLOAD_S, None),
             "SY Windward":       ("sailing_cruise",None,                        None),
-            "SY Meridian Breeze":("sailing_cruise",None,                        None),
+            "SY Morning Breeze":("sailing_cruise",None,                        None),
             "Ardent Pilot":      ("tug_duty",      PORT_STAY_TUG_S,            None),
-            "MT Meridian Star":  ("cargo_run",     PORT_STAY_CARGO_LOAD_S,     None),
+            "MT Amber Star":  ("cargo_run",     PORT_STAY_CARGO_LOAD_S,     None),
             "CG Sentinel":       ("patrol",        PORT_STAY_PATROL_S,         None),
             "MV Thornwick":      ("cargo_run",     PORT_STAY_CARGO_LOAD_S,     None),
             "SY Blue Horizon":   ("sailing_cruise",None,                        None),
@@ -1485,15 +1485,15 @@ class Game:
         # in their constructor.  New vessels have personality set directly; the
         # original 12 are patched here so the constructor signatures stay clean.
         _PERSONALITY_MAP = {
-            "MV Meridian":        "efficient",
+            "MV Tidewater":        "efficient",
             "FV Horizon":         "cautious",
             "SY Windward":        "leisure",
             "MS Coastal Express": "aggressive",
             "MV Carrick Star":    "efficient",
             "FV Skerrywatch":     "cautious",
             "Ardent Pilot":       "aggressive",
-            "SY Meridian Breeze": "leisure",
-            "MT Meridian Star":   "efficient",
+            "SY Morning Breeze": "leisure",
+            "MT Amber Star":   "efficient",
             "CG Sentinel":        "aggressive",
             "MV Thornwick":       "cautious",
             "SY Blue Horizon":    "leisure",
@@ -3356,7 +3356,7 @@ async def main():
     except SystemExit:
         raise                       # normal shutdown via sys.exit() — not a crash
     except BaseException:
-        print("=== Meridian Sea: unhandled startup/runtime error ===",
+        print("=== Vela Sea: unhandled startup/runtime error ===",
               file=sys.stdout)
         traceback.print_exc(file=sys.stdout)
         sys.stdout.flush()

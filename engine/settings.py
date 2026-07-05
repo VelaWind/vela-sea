@@ -2,7 +2,7 @@
 
 Pure Python (no pygame import): the Settings object holds plain data and
 serialises to settings.json in the SAME user-writable directory as the career
-save (frozen -> %APPDATA%/MeridianSea, source -> cwd), keyed on sys.frozen via
+save (frozen -> %APPDATA%/VelaSea, source -> cwd), keyed on sys.frozen via
 config.user_data_dir().  Defaults EXACTLY reproduce the pre-settings behaviour,
 so an absent or corrupt settings.json changes nothing.
 

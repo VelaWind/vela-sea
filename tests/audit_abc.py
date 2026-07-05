@@ -124,7 +124,7 @@ for port in W.ports:
 
 # A6: demo vessel start positions not inside islands
 demo_starts = {
-    "MV Meridian":       (700.0, 240.0),
+    "MV Tidewater":       (700.0, 240.0),
     "FV Horizon":        (250.0, 280.0),
     "SY Windward":       (700.0, 400.0),
     "MS Coastal Express":(105.0, 380.0),
@@ -140,7 +140,7 @@ port_maren        = W.find_port("Port Maren")
 brattlin_quay     = W.find_port("Brattlin Light Quay")
 vesper_cove_pos   = (512.0, 654.0)
 demo_dests = {
-    "MV Meridian":        port_maren.position,
+    "MV Tidewater":        port_maren.position,
     "FV Horizon":         vesper_cove_pos,
     "SY Windward":        vesper_cove_pos,
     "MS Coastal Express": brattlin_quay.position,
@@ -168,7 +168,7 @@ def _fuel_check(name, start, dest, speed, max_spd, rate, fuel):
             ok,
             f"INSUFFICIENT: need {needed:.2f}, have {fuel:.1f}" if not ok else "")
 
-_fuel_check("MV Meridian",       (700.0,240.0), port_maren.position,
+_fuel_check("MV Tidewater",       (700.0,240.0), port_maren.position,
              8.0, 12.0, 3.5, 80.0)
 _fuel_check("FV Horizon",        (250.0,280.0), vesper_cove_pos,
              6.0, 10.0, 2.8, 40.0)
