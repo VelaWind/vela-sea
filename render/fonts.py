@@ -12,9 +12,13 @@ never raise: it falls back to pygame's bundled default font, so a missing system
 face degrades the *look* of the text without ever taking down startup.
 """
 
+import itertools
 from collections import OrderedDict
 
 import pygame
+
+from config import (IS_WEB, FONT_DATA_NAME,
+                    FONT_WEB_UI_PATH, FONT_WEB_DATA_PATH)
 
 # ---------------------------------------------------------------------------
 # Rendered-text cache
@@ -39,14 +43,19 @@ class CachedFont:
     Everything else (size, get_height, metrics...) delegates to the real font,
     so it is a drop-in replacement anywhere a Font is used for UI text.
     """
-    __slots__ = ("_font",)
+    __slots__ = ("_font", "_uid")
+    _next_uid = itertools.count()   # class-wide; uids never recycle
 
     def __init__(self, font):
         self._font = font
+        # Stable cache identity.  NOT id(self._font): after the web display
+        # heal rebuilds all panels, a GC'd font's id() can be reused by a new
+        # font, aliasing it onto stale cached surfaces (wrong size/face).
+        self._uid = next(CachedFont._next_uid)
 
     def render(self, text, antialias=True, color=(255, 255, 255), background=None):
         try:
-            key = (id(self._font), text, bool(antialias),
+            key = (self._uid, text, bool(antialias),
                    tuple(color), tuple(background) if background else None)
         except TypeError:
             # Unhashable color object — render uncached rather than crash.
@@ -101,8 +110,25 @@ def safe_sysfont(name, size, bold=False, italic=False):
 
     The requested size is multiplied by the global UI scale (1.0 on desktop),
     so every font in the game scales with resolution through this one function.
+
+    Web mode loads the bundled DejaVu faces by FILE PATH instead: the Windows
+    face names in config don't exist under emscripten, and SysFont silently
+    falls back to freesansbold there — wrong metrics and no arrow/warning/
+    dingbat glyphs (the event-log "→" rendered as tofu).  Keyed on IS_WEB so
+    the VELA_FORCE_WEB harness exercises this exact branch off-browser;
+    desktop (IS_WEB False) never reaches it and keeps SysFont byte-identical.
     """
     size = max(1, int(round(size * _UI_SCALE)))
+    if IS_WEB:
+        try:
+            path = (FONT_WEB_DATA_PATH if name == FONT_DATA_NAME
+                    else FONT_WEB_UI_PATH)
+            font = pygame.font.Font(path, size)
+            font.set_bold(bold)
+            font.set_italic(italic)
+            return CachedFont(font)
+        except Exception:
+            pass   # bundled file unreadable — fall through to SysFont chain
     try:
         return CachedFont(pygame.font.SysFont(name, size, bold=bold, italic=italic))
     except Exception:

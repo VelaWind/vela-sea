@@ -253,6 +253,15 @@ HULL_BAR_LOW_COLOR  = (217, 74, 74)    # < 25%  — red, critical
 # ============================================================================
 FONT_UI_NAME = "segoe ui, calibri, arial"
 FONT_DATA_NAME = "consolas, cascadia mono, dejavu sans mono"
+# Web: the Windows face names above don't exist under emscripten — SysFont
+# silently degrades to pygame's freesansbold (no arrow/warning/dingbat glyphs,
+# different metrics), so web mode loads these bundled files by PATH instead
+# (render/fonts.py).  assets/ ships in the web bundle via build_web.py.
+FONT_WEB_UI_PATH   = resource_path(os.path.join("assets", "fonts", "DejaVuSans.ttf"))
+FONT_WEB_DATA_PATH = resource_path(os.path.join("assets", "fonts", "DejaVuSansMono.ttf"))
+# DejaVu covers → ⚠ ▼ ◆ ★ ✓ ↳ but NOT these two emoji-range glyphs (verified
+# by notdef pixel-compare); web drops them to plain text (render/panels.py).
+WEB_GLYPH_FALLBACKS = {"⏱": "", "⛵": ""}   # ⏱ stopwatch, ⛵ sailboat
 FONT_SIZE_TITLE = 22
 FONT_SIZE_SECTION = 16
 FONT_SIZE_LABEL = 15

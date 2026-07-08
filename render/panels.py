@@ -1102,6 +1102,15 @@ class MissionPanel:
             "vip_cruise":       "⛵ VIP CRUISE",
         }.get(m.mission_type, "MISSION")
 
+        # Web: the bundled DejaVu faces lack the two emoji-range glyphs above
+        # (⏱ ⛵ — verified notdef); drop them to plain text there.  Desktop
+        # system fonts have them and keep the full label.
+        from config import IS_WEB as _web_tag, WEB_GLYPH_FALLBACKS
+        if _web_tag:
+            for _bad, _rep in WEB_GLYPH_FALLBACKS.items():
+                tag_label = tag_label.replace(_bad, _rep)
+            tag_label = tag_label.lstrip()
+
         tag_surf = self._font_tag.render(tag_label, True, tag_col)
         self.surface.blit(tag_surf, (x + pad, cy));  cy += tag_h + 4
 
