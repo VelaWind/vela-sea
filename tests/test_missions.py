@@ -7,8 +7,9 @@ Verifies that mission_status changes correctly for each mission type:
   D. sailing_cruise — ANCHORED at open-sea WP; SAILING underway
   E. tug_duty    — ESCORTING underway; STANDBY in port
 """
+import os
 import sys
-sys.path.insert(0, r"d:\gps-simulator")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.ship import Vessel
 from engine.world import World

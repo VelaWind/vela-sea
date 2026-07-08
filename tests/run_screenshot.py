@@ -6,7 +6,8 @@ No real window needed — everything goes to an off-screen surface.
 import os, sys
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
-sys.path.insert(0, r"d:\gps-simulator")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_HERE))
 
 import pygame
 pygame.init()
@@ -79,13 +80,13 @@ chart = Chart(screen, camera)
 # ---- Screenshot 1: full chart at 1x ----
 screen.fill((10, 28, 52))
 chart.draw_all(world=world, environment=env, selected_vessel=None)
-pygame.image.save(screen, r"d:\gps-simulator\tests\screenshot_1x.png")
+pygame.image.save(screen, os.path.join(_HERE, "screenshot_1x.png"))
 print("Saved screenshot_1x.png")
 
 # ---- Screenshot 2: with a selected vessel ----
 screen.fill((10, 28, 52))
 chart.draw_all(world=world, environment=env, selected_vessel=cargo)
-pygame.image.save(screen, r"d:\gps-simulator\tests\screenshot_selected.png")
+pygame.image.save(screen, os.path.join(_HERE, "screenshot_selected.png"))
 print("Saved screenshot_selected.png")
 
 # ---- Screenshot 3: zoom into the avoiding vessels ----
@@ -94,7 +95,7 @@ camera.position = (v_a.position[0] + SEP_WU / 2, v_a.position[1])
 camera.zoom = 4.0
 screen.fill((10, 28, 52))
 chart.draw_all(world=world, environment=env, selected_vessel=None)
-pygame.image.save(screen, r"d:\gps-simulator\tests\screenshot_avoiding.png")
+pygame.image.save(screen, os.path.join(_HERE, "screenshot_avoiding.png"))
 print("Saved screenshot_avoiding.png  (zoomed on avoiding vessel)")
 
 pygame.quit()

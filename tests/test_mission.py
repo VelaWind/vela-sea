@@ -7,8 +7,9 @@ Verifies that:
   4. The vessel resumes its scheduled route after arrival (destination changes to
      a route waypoint).
 """
+import os
 import sys
-sys.path.insert(0, r"d:\gps-simulator")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from engine.ship import Vessel
 from engine.world import World
