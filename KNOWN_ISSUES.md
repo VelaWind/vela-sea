@@ -1,4 +1,4 @@
-# Known Issues — v0.4.0
+# Known Issues — v0.6.1
 
 An honest list of what doesn't work perfectly, with severity ratings.
 

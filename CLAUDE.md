@@ -1,7 +1,7 @@
 # CLAUDE.md — AI Context for gps-simulator (Vela Sea)
 
 ## Project Overview
-**Vela Sea** — a Python + Pygame maritime career simulator (v0.6.0,
+**Vela Sea** — a Python + Pygame maritime career simulator (v0.6.1,
 Steam release candidate). The player captains MV Velawind on a 210 nm
 fictional sea: accept contracts, navigate, dock, earn money and reputation,
 unlock higher-tier work. 15 AI vessels run autonomous schedules around them
@@ -11,14 +11,14 @@ with COLREGS collision avoidance, dynamic weather, tides, and SAR rescue.
 - **Language:** Python 3.10+
 - **Framework:** Pygame 2.x (rendering/input only)
 - **Package Manager:** pip (`requirements.txt`)
-- **Tests:** pytest + a 14-scenario headless gameplay bot
+- **Tests:** pytest + a 16-scenario headless gameplay bot
 
 ## Hard Architecture Rules
 1. `engine/` is pure Python — **zero Pygame imports, ever**
 2. `render/` reads engine state, **never mutates it**
 3. **All tunable numbers live in `config.py`** — no magic numbers in logic
 4. Compile (`python -m py_compile`) every touched file; run
-   `pytest tests/ -q` **and** `python tests/test_bot.py` (must be 14/14)
+   `pytest tests/ -q` **and** `python tests/test_bot.py` (must be 16/16)
    after every feature; commit per feature, never batch
 
 ## Project Structure
@@ -43,7 +43,7 @@ render/            Pygame view layer
   sound.py         SoundManager + stdlib WAV synthesis (5 effects,
                    generated into assets/sounds/ at first run)
 data/world_data.py 10 ports, islands (incl. The Twins), zones, AI routes
-tests/             pytest suite + test_bot.py (14 scenarios) +
+tests/             pytest suite + test_bot.py (16 scenarios) +
                    verify_new_routes.py (route safety checker)
 main.py            Game class: title loop, fixed-timestep sim, input, render
 config.py          Every constant: physics, colors, career, sound, polish
@@ -68,7 +68,7 @@ config.py          Every constant: physics, colors, career, sound, polish
 
 ## Testing
 - `pytest tests/ -q` — 16 tests (collision, traffic, save/load, bot)
-- `python tests/test_bot.py` — human-readable 14-scenario report
+- `python tests/test_bot.py` — human-readable 16-scenario report
 - `python tests/verify_new_routes.py` — run after ANY geography change
 - `python tests/test_visual_perf.py` — draw_all budget (< 8 ms)
 - Bot redirects saves to a temp path — never touches the player's save.json
