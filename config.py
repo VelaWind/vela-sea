@@ -199,16 +199,16 @@ THEME = {
 }
 
 # Per-type land colours.  Renderer uses island.land_type to look up fill/coast/shade.
-# "island"       — sandy-brown (default, same as historic COLOR_LAND_FILL)
-# "mainland"     — dark olive-brown (larger mass, heavier tone)
-# "rocky"        — dark grey-brown (rocky outcrops and shoals)
-# "shallow_bank" — pale sandy (submerged or near-submerged banks)
+# "island"       — muted sage green (default)
+# "mainland"     — deeper olive-green (larger mass, heavier tone)
+# "rocky"        — grey-green (rocky outcrops and shoals)
+# "shallow_bank" — pale sage (submerged or near-submerged banks)
 # "shade" is a ~15 % lighter version of "fill" used for the inland highlight polygon.
 LAND_COLORS = {
-    "mainland":     {"fill": (139, 119,  84), "coast": (100,  85,  56), "shade": (162, 140, 100)},
-    "island":       {"fill": (185, 160, 105), "coast": (135, 115,  72), "shade": (203, 181, 133)},
-    "rocky":        {"fill": (110,  95,  75), "coast": ( 78,  66,  50), "shade": (130, 113,  90)},
-    "shallow_bank": {"fill": (210, 195, 155), "coast": (165, 148, 110), "shade": (225, 212, 175)},
+    "mainland":     {"fill": (108, 122,  84), "coast": ( 74,  86,  54), "shade": (128, 142, 100)},
+    "island":       {"fill": (120, 134,  92), "coast": ( 84,  96,  60), "shade": (142, 156, 112)},
+    "rocky":        {"fill": ( 92, 100,  78), "coast": ( 64,  70,  52), "shade": (110, 118,  94)},
+    "shallow_bank": {"fill": (140, 152, 110), "coast": (104, 114,  78), "shade": (158, 170, 128)},
 }
 
 # Convenience aliases for compatibility
@@ -777,7 +777,7 @@ WEATHER_STORM_VIS_DROP   =  450.0   # near-zero visibility
 # visual is identical to an alpha=50 overlay while costing almost nothing.
 # Delta from LAND_FILL is ~7–10 units per channel — "sense of body," not texture.
 LAND_INLAND_TINT_SHRINK_PX = 12                # px to shrink the island polygon inward
-LAND_INLAND_TINT_COLOR     = (203, 181, 133)   # pre-blended ~1/3 between FILL and SHADE
+LAND_INLAND_TINT_COLOR     = (142, 156, 112)   # pre-blended toward the new sage island shade
 
 # Ocean vignette: one cached gradient circle anchored at the world centre.
 # The slight lightening of the deep open ocean breaks the perfectly-uniform
