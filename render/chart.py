@@ -1934,6 +1934,15 @@ class Chart:
             self._draw_web_shallows(world)
             self.draw_grid(y_label_x=y_label_x, labels=False)
             self.draw_islands(world)
+            # Zone circles are baked into the static chunk, so a throttled zoom
+            # frame (chunk key stale, rebuild blocked) would otherwise drop them
+            # and they'd flicker.  Draw them live here in the chunk's layer order
+            # (on top of islands) — cheap outline+fill circles, no per-frame
+            # full-viewport surface.  The island EDGE stays on the cheap shallow
+            # halo above rather than the full 8-band glow (the cost the cache
+            # exists to avoid); it snaps back to full quality when the chunk
+            # rebuilds.  (Web drops zone labels by priority, so none flicker in.)
+            self.draw_zones(world)
         # Grid labels are screen-anchored — always dynamic.  Lines live in the
         # static chunk (anti-aliased), or came from the fallback above.
         self.draw_grid(y_label_x=y_label_x, lines=False)
