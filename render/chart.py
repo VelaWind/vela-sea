@@ -48,6 +48,7 @@ from config import (
     OCEAN_VIGNETTE_WORLD_RADIUS, OCEAN_VIGNETTE_ALPHA,
     OCEAN_VIGNETTE_STEPS, OCEAN_VIGNETTE_COLOR,
     COLOR_BEACH_FRINGE, BEACH_FRINGE_ALPHA, BEACH_FRINGE_WIDTH_PX,
+    SHALLOW_GLOW_BLUR_FACTOR,
     SHALLOW_WATER_MID_BAND_OFFSET_PX, SHALLOW_WATER_MID_BAND_ALPHA,
     COLOR_COLLISION_AVOID,
     SAR_PULSE_PERIOD, COLOR_SAR_DISTRESS, PORT_ACTIVITY_PULSE_PERIOD,
@@ -518,6 +519,30 @@ class Chart:
                         True, band_poly,
                         SHALLOW_WATER_BAND_STEP_PX + 1)
 
+    @staticmethod
+    def _blur_surface(surf: pygame.Surface, factor: int) -> pygame.Surface:
+        """Approximate a Gaussian blur of an SRCALPHA surface with a bilinear
+        down/up round-trip.  Returns a NEW surface (or the original on failure).
+
+        smoothscale is the ONLY blur primitive present in both runtimes: desktop
+        ships upstream pygame (no transform.gaussian_blur / box_blur) while the
+        web runtime is pygame-ce.  Using it means desktop, browser and the
+        VELA_FORCE_WEB harness all blur identically — so what the harness renders
+        is what the browser renders.  Bilinear filters the alpha channel too, so
+        the glow keeps its soft transparent edges (no grey box).
+
+        BUILD-TIME ONLY: never call this from a per-frame draw path.
+        """
+        if factor <= 1:
+            return surf
+        w, h = surf.get_size()
+        dw, dh = max(1, w // factor), max(1, h // factor)
+        try:
+            small = pygame.transform.smoothscale(surf, (dw, dh))
+            return pygame.transform.smoothscale(small, (w, h))
+        except (pygame.error, ValueError):
+            return surf   # scaling refused (degenerate size) — keep crisp rings
+
     def _draw_web_shallows(self, world) -> None:
         """Web-only cheap coastal shallows: a single offset halo per island drawn
         STRAIGHT to the surface — no cached SRCALPHA layer.
@@ -701,6 +726,12 @@ class Chart:
             # layer (the ring alphas need per-pixel blending), then composited.
             rings = pygame.Surface((cw, ch), pygame.SRCALPHA).convert_alpha()
             self._paint_depth_rings(rings, world)
+            # Melt the uneven polygon-offset steps into a smooth gradient.  This
+            # is the ONLY blur call site: it runs here, once per chunk build (off
+            # the hot path, throttled to <=1 per WEB_STATIC_REBUILD_MS), never in
+            # the per-frame blit.  Only the ring layer is blurred — land, grid,
+            # coastline and zones are drawn after this and stay crisp.
+            rings = self._blur_surface(rings, SHALLOW_GLOW_BLUR_FACTOR)
             surf.blit(rings, (0, 0))
             del rings
             # Anti-aliased grid lines (labels stay per-frame, screen-anchored).

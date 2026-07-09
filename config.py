@@ -424,6 +424,17 @@ SHALLOW_WATER_BAND_STEP_PX = 5
 SHALLOW_WATER_BAND_MAX_ALPHA = 95
 SHALLOW_WATER_MID_BAND_OFFSET_PX = 26   # pixel outset for the mid-depth fill halo
 SHALLOW_WATER_MID_BAND_ALPHA = 48        # fill alpha for mid-depth zone
+# Coastal-glow blur.  _offset_screen_polygon splays the ring offsets unevenly on
+# irregular polygons, so the bands read as concentric steps that no alpha tuning
+# removes.  Blurring the composited ring layer ONCE dissolves them into a smooth
+# gradient.  Implemented as a bilinear down/up round-trip (smoothscale) — the only
+# blur primitive present in BOTH upstream pygame (desktop) and pygame-ce (web), so
+# desktop, browser and the headless harness all blur identically and verifiably.
+# Bigger factor = softer and cheaper.  Applied ONLY at cache-build time, in the web
+# static-chunk build (render/chart.py _build_static_chunk).  NOT applied to the
+# desktop depth layer: that surface is re-painted every frame under the follow-cam
+# (measured 30/30 frames), so blurring it would cost ~+2.7 ms EVERY frame.
+SHALLOW_GLOW_BLUR_FACTOR = 3             # 1 disables the blur
 BEACH_FRINGE_ALPHA = 160                 # alpha for sage beach fringe ring on coastline
 BEACH_FRINGE_WIDTH_PX = 4               # line width for beach fringe
 DEPTH_CONTOUR_WIDTH = 2
