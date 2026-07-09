@@ -184,7 +184,7 @@ THEME = {
     "ANCHORAGE": (90, 143, 214),
     "TSS": (160, 111, 214),
     "SHALLOW_HAZARD": (224, 200, 74),
-    "BEACH_FRINGE": (200, 178, 125),
+    "BEACH_FRINGE": (150, 162, 138),
     "VESSEL_DEFAULT": (215, 227, 240),
     "VESSEL_SELECTED": (255, 210, 63),
     "VESSEL_DOCKED": (150, 170, 190),
@@ -415,12 +415,16 @@ ZONE_HATCH_SPACING = 20
 SHALLOW_WATER_BAND_WIDTH = 20
 # Gradient-fade coastal band: STEPS rings at STEP_PX intervals, innermost at MAX_ALPHA.
 # Kept soft and low-alpha so the coast reads as a whisper of depth, not a neon rim.
-SHALLOW_WATER_BAND_STEPS = 8
-SHALLOW_WATER_BAND_STEP_PX = 4
-SHALLOW_WATER_BAND_MAX_ALPHA = 130
-SHALLOW_WATER_MID_BAND_OFFSET_PX = 40   # pixel outset for the mid-depth fill halo
-SHALLOW_WATER_MID_BAND_ALPHA = 55        # fill alpha for mid-depth zone
-BEACH_FRINGE_ALPHA = 160                 # alpha for sandy beach fringe ring on coastline
+# Fewer, wider, fainter rings.  Mid-halo and bands are both outsets from the SAME
+# island polygon, so the glow's reach is max(MID_OFFSET, STEPS*STEP_PX) = 30 px
+# (was 40): it now hugs the coast, and the larger step spacing hides the uneven
+# polygon-offset stepping that read as blotchy.
+SHALLOW_WATER_BAND_STEPS = 6
+SHALLOW_WATER_BAND_STEP_PX = 5
+SHALLOW_WATER_BAND_MAX_ALPHA = 95
+SHALLOW_WATER_MID_BAND_OFFSET_PX = 26   # pixel outset for the mid-depth fill halo
+SHALLOW_WATER_MID_BAND_ALPHA = 48        # fill alpha for mid-depth zone
+BEACH_FRINGE_ALPHA = 160                 # alpha for sage beach fringe ring on coastline
 BEACH_FRINGE_WIDTH_PX = 4               # line width for beach fringe
 DEPTH_CONTOUR_WIDTH = 2
 
