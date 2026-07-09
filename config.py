@@ -149,6 +149,12 @@ WEB_RENDER_SCALE = 0.8
 WEB_STATIC_CHUNK_FACTOR = 2.0
 WEB_STATIC_REBUILD_MS = 300
 WEB_STATIC_EDGE_MARGIN_FRAC = 0.25
+# Zoom-glow bridge: while a rebuild is throttled after a zoom notch, blit the
+# still-covering full-quality chunk SCALED to the new zoom (its 8-band glow is
+# already baked) instead of dropping to the flat cheap halo — so the glow never
+# pops.  smoothscale = bilinear (smooth); set False for nearest-neighbour
+# transform.scale (cheaper, slightly jaggier during the brief bridge window).
+WEB_STATIC_SMOOTHSCALE = True
 
 # ============================================================================
 # Theme colors

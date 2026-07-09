@@ -69,7 +69,7 @@ from config import (
     STORM_WAVE_LINE_SPACING_PX, STORM_WAVE_SCROLL_PX_S,
     SQUALL_FLASH_ALPHA, SQUALL_FLASH_DURATION_S,
     IS_WEB, WEB_PROFILE, WEB_STATIC_CHUNK_FACTOR, WEB_STATIC_REBUILD_MS,
-    WEB_STATIC_EDGE_MARGIN_FRAC,
+    WEB_STATIC_EDGE_MARGIN_FRAC, WEB_STATIC_SMOOTHSCALE,
 )
 from render.camera import Camera
 from render.fonts import safe_sysfont, ui_px, get_ui_scale
@@ -216,7 +216,14 @@ class Chart:
         self._ws_origin: tuple = (0.0, 0.0)   # world coords of chunk top-left
         self._ws_world_size: tuple = (0.0, 0.0)  # chunk extent in world units
         self._ws_key: tuple = ()              # (zoom, vw, vh) the chunk was built for
+        self._ws_zoom: float = 0.0            # the live zoom the chunk was built at
         self._ws_built_ms: int = -10**9       # last rebuild tick (throttle)
+        # Scaled-chunk bridge cache (web): during the rebuild throttle after a
+        # zoom notch, the still-covering full-quality chunk is blitted scaled to
+        # the new zoom so the baked glow stays continuous.  Cached by
+        # (build tick, rounded scale) so a static hold never re-scales.
+        self._ws_scaled_surf: Optional[pygame.Surface] = None
+        self._ws_scaled_key: tuple = ()
         self._building_static = False         # suppress label queuing during builds
         # Screen rects (set per frame by Game on web) that chart labels must
         # not be placed under — e.g. the vessel-info panel column.  Labels
@@ -550,8 +557,11 @@ class Chart:
 
         Rebuilds are scheduled EARLY (when the view nears the chunk edge) while
         the old chunk still covers the screen, so ordinary panning never shows
-        the fallback; only a zoom change or resize can, and then for at most
-        WEB_STATIC_REBUILD_MS.
+        the fallback.  A zoom notch changes the key before a rebuild can run;
+        rather than drop to the flat cheap halo for that throttle window, the
+        still-covering chunk is blitted SCALED to the new zoom (the SCALED
+        BRIDGE) so the baked 8-band glow stays continuous.  The cheap fallback
+        (return False) only runs when the old chunk truly can't cover the view.
         """
         z = self.camera.zoom
         vw, vh = self.surface.get_size()
@@ -566,13 +576,9 @@ class Chart:
         vx1, vy1 = br
 
         def _covered() -> bool:
-            if self._ws_surf is None or self._ws_key != key:
-                return False
-            ox, oy = self._ws_origin
-            ww, wh = self._ws_world_size
-            eps = 1e-3   # world units (~0.004 px at max zoom) — float-safe slack
-            return (vx0 >= ox - eps and vy0 >= oy - eps
-                    and vx1 <= ox + ww + eps and vy1 <= oy + wh + eps)
+            # Crisp 1:1 blit requires the SAME key (zoom) AND world coverage.
+            return (self._ws_surf is not None and self._ws_key == key
+                    and self._chunk_world_covers(vx0, vy0, vx1, vy1))
 
         def _comfortable() -> bool:
             # Covered with margin to spare on every side — no rebuild worth
@@ -591,13 +597,64 @@ class Chart:
             if now - self._ws_built_ms >= WEB_STATIC_REBUILD_MS:
                 self._build_static_chunk(world, key)
                 covered = _covered()
-            # else: throttled — keep blitting the old chunk if it still covers.
+            # else: throttled — bridge with the scaled chunk below if it covers.
 
-        if not covered:
+        if covered:
+            sx, sy = self.camera.world_to_screen(self._ws_origin)
+            self.surface.blit(self._ws_surf, (round(sx), round(sy)))
+            return True
+
+        # Key mismatch (zoom changed, rebuild throttled): bridge with the old
+        # full-quality chunk scaled to the current zoom, as long as its WORLD
+        # rect still covers the view.  ONE smoothscale + blit — the baked glow
+        # comes along for free, no per-island ring redraw.
+        if (self._ws_surf is not None and self._ws_zoom > 0.0
+                and self._chunk_world_covers(vx0, vy0, vx1, vy1)):
+            scaled = self._get_scaled_chunk(z / self._ws_zoom)
+            if scaled is not None:
+                sx, sy = self.camera.world_to_screen(self._ws_origin)
+                self.surface.blit(scaled, (round(sx), round(sy)))
+                return True
+
+        return False
+
+    def _chunk_world_covers(self, vx0: float, vy0: float,
+                            vx1: float, vy1: float) -> bool:
+        """True if the stored chunk's WORLD rect geometrically contains the
+        given visible world rect — independent of the zoom it was built at, so
+        both the crisp-key check and the scaled bridge share one geometry test.
+        """
+        if self._ws_surf is None:
             return False
-        sx, sy = self.camera.world_to_screen(self._ws_origin)
-        self.surface.blit(self._ws_surf, (round(sx), round(sy)))
-        return True
+        ox, oy = self._ws_origin
+        ww, wh = self._ws_world_size
+        eps = 1e-3   # world units (~0.004 px at max zoom) — float-safe slack
+        return (vx0 >= ox - eps and vy0 >= oy - eps
+                and vx1 <= ox + ww + eps and vy1 <= oy + wh + eps)
+
+    def _get_scaled_chunk(self, scale: float) -> Optional[pygame.Surface]:
+        """Return the static chunk scaled by ``scale``, cached so a static hold
+        (no zoom change frame-to-frame) never re-scales.  Keyed on the chunk's
+        build tick + rounded scale, so a fresh chunk or a new scale invalidates
+        it.  smoothscale (bilinear) by default for a smooth glow; config toggle
+        falls back to nearest-neighbour scale.
+        """
+        skey = (self._ws_built_ms, round(scale, 3))
+        if self._ws_scaled_key == skey and self._ws_scaled_surf is not None:
+            return self._ws_scaled_surf
+        w, h = self._ws_surf.get_size()
+        nw = max(1, round(w * scale))
+        nh = max(1, round(h * scale))
+        try:
+            if WEB_STATIC_SMOOTHSCALE:
+                scaled = pygame.transform.smoothscale(self._ws_surf, (nw, nh))
+            else:
+                scaled = pygame.transform.scale(self._ws_surf, (nw, nh))
+        except (pygame.error, ValueError):
+            return None
+        self._ws_scaled_surf = scaled
+        self._ws_scaled_key = skey
+        return scaled
 
     def _build_static_chunk(self, world, key: tuple) -> None:
         """Render every static chart layer into a fresh camera-centered chunk.
@@ -660,6 +717,7 @@ class Chart:
         self._ws_origin = (ox, oy)
         self._ws_world_size = (ww, wh)
         self._ws_key = key
+        self._ws_zoom = z          # live build zoom — the scaled bridge's baseline
         self._ws_built_ms = pygame.time.get_ticks()
         if WEB_PROFILE:
             print("[WEBSTATIC] chunk %dx%d px (%.1f MB) at zoom %.2f" % (
