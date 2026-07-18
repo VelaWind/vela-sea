@@ -10,7 +10,7 @@ Do **not** paste all of this at once — it will compact and lose the plan.
 
 ## PREAMBLE (re-paste this at the top of every chunk)
 
-> **Project:** Python + Pygame maritime navigation simulator at `D:\gps-simulator`.
+> **Project:** Python + Pygame maritime navigation simulator at `D:\VelaSea`.
 > **Goal:** Make it look and behave like a real ECDIS / chartplotter (think Navionics /
 > Garmin BlueChart), not a game. Calm, muted, professional, legible.
 > **Hard rules:**
