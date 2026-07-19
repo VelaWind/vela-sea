@@ -125,8 +125,21 @@ def find_safe_path(start: Tuple[float, float],
             # per integer cell, point_in_island() is not, so the polygon test is
             # reserved for the few samples that actually need it.
             d = world.water_depth_at(p, -TIDE_RANGE)
-            if leg_len * (1.0 - t) <= SAFE_PATH_APPROACH_WU:
-                # Final approach: shallow is expected and permitted — only
+            # Both ends are exempt, for two DIFFERENT reasons.  Keep both.
+            #
+            # APPROACH end: the destination is definitionally in shallow water —
+            # a casualty is aground, a berth is against a coast — so depth-
+            # checking the run-in rejects arrivals that are perfectly normal
+            # rather than transits that are dangerous.
+            #
+            # DEPARTURE end: the vessel's current position is empirically
+            # navigable, because it is floating there right now.  Refusing to
+            # let a hull leave water it already occupies is incoherent, and it
+            # deadlocks: 232 of 232 "no route home" attempts failed on their own
+            # start position, stalling the fleet (arrivals 503 -> 157).
+            if (leg_len * (1.0 - t) <= SAFE_PATH_APPROACH_WU
+                    or leg_len * t <= SAFE_PATH_APPROACH_WU):
+                # In either window shallow is expected and permitted — only
                 # actual land disqualifies.  Note d == 0.0 does NOT imply land:
                 # water_depth_at() clamps at zero, so anything within the tidal
                 # range of drying reads 0.0 too.  Treating that as land rejected
