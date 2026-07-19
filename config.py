@@ -911,6 +911,55 @@ SAR_DISPATCH_RANGE_NM = 50.0    # nautical miles — auto-dispatch only within t
 # when a SAR rescuer reaches it, so it can motor to the nearest port for a full
 # refuel.  0.20 = 20 % capacity — enough for ~4 sim-hours at cruise speed.
 FUEL_EMERGENCY_REFUEL_FRACTION = 0.20
+
+# Safe-path depth sampling.  find_safe_path() used to test island polygons only,
+# so it would happily route a vessel through water far too shallow to float it:
+# a leg passing 1 wu off a beach contains no land point but is ~4 m deep.  Legs
+# are now sampled for depth as well, at LOW water — a path is only "safe" if it
+# stays safe on the ebb, otherwise the tide grounds the vessel mid-passage.
+SAFE_PATH_SAMPLE_STEP_WU = 2.0   # world units between depth samples along a leg
+
+# Casualty-approach exemption — structurally necessary, not a fudge.
+#
+# A vessel aground is by definition inside the shallow shelf.  At
+# DEPTH_COASTAL_SLOPE = 4 m/wu an 8 m-draft rescuer needs 2.88 wu of clearance
+# at low water, but the standoff it is aimed at sits only a few wu off that same
+# coast — so reaching ANY grounded casualty means crossing water a strict depth
+# check rejects.  Applied to the whole leg, the check refused 68% of dispatches:
+# casualties were never rescued, stayed stranded, and fleet arrivals fell
+# 452 -> 345.  Depth sampling is therefore skipped within this distance of the
+# leg's endpoint; keeping the rescuer off the bottom on the final run-in is the
+# tide/draft grounding trigger's job, not the router's.
+#
+# The size of this window is the whole trade-off: too small and rescuers cannot
+# reach casualties, too large and they ground beside them (at 10 wu the standoff
+# sat entirely inside the window, and Carrow incidents per arrival rose
+# 0.042 -> 0.053).  Keying it to ports instead was measured and is a no-op —
+# scheduled routes are static data, so SAR is the only caller of the router and
+# no leg it builds ever ends at a port.
+# Kept at the smaller of the two probed values: 5.0 and 6.0 produced byte-identical
+# dispatch results, so this constant was never the lever on the failures we saw —
+# those were a routing-topology gap, not an approach-window one.  Smaller window =
+# less unchecked water, so 5.0 stands.
+SAFE_PATH_APPROACH_WU = 5.0      # world units of endpoint exempt from depth checks
+
+# Standoff geometry.  Used when aiming a vessel at a casualty: the casualty's
+# own position is by definition water too shallow to float it, so steering a
+# rescuer there grounds the rescuer too.  Offset to nearby water that clears the
+# RESCUER's draft at low tide instead.
+STANDOFF_UKC_M   = 3.0   # metres under-keel clearance required at the standoff
+STANDOFF_STEP_WU = 2.0   # world units per outward probe ring
+STANDOFF_MAX_WU  = 24.0  # give up beyond this and fall back to the raw position
+
+# Dispatch retry cooldown.  _sar_dispatch runs every sim step, and for a casualty
+# nobody can route to it re-walked every candidate every tick — each attempt a
+# find_standoff (up to 192 depth probes) plus a find_safe_path (~2,300 samples).
+# One unreachable casualty measured 271k router calls in three sim-days, 89% of
+# wall time.  This is a 60 FPS survival requirement, not an optimisation: after a
+# failed sweep the casualty is skipped until the stamp expires, by which time the
+# fleet has moved and a route may exist.
+SAR_DISPATCH_RETRY_S = 600.0   # sim-seconds (10 sim-minutes) between retry sweeps
+
 SAR_PULSE_PERIOD            = 2.0   # seconds — one full pulse cycle on the distress ring
 PORT_ACTIVITY_PULSE_PERIOD  = 4.0   # seconds — slower pulse shown when a vessel is in port
 COLOR_SAR_DISTRESS    = (255, 70, 50)   # red-orange distress pulse ring

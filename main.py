@@ -29,6 +29,7 @@ from config import ARRIVAL_DISTANCE, PORT_DETECT_RADIUS, SHIP_SELECT_RADIUS
 from config import TIME_COMPRESSION
 from config import DRAFT_SAFETY_MARGIN_M
 from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR, FUEL_EMERGENCY_REFUEL_FRACTION
+from config import SAR_DISPATCH_RETRY_S
 from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
 from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM, THROTTLE_FLASH_MS
 from config import HULL_REPAIR_COST_PER_POINT
@@ -87,7 +88,7 @@ from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
                     WEB_MAX_SIM_STEPS_PER_FRAME,
                     WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H,
                     WEB_HUD_PERF, WEB_RENDER_SCALE)
-from engine.collision import update_collision_avoidance, find_safe_path
+from engine.collision import update_collision_avoidance, find_safe_path, find_standoff
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
 from engine.settings import Settings, DEFAULT_KEYBINDS
@@ -150,7 +151,18 @@ def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
     for grounded in vessels:
         if not grounded.distress or grounded.rescue_vessel is not None:
             continue
-        best, best_d = None, float("inf")
+        # Retry cooldown.  A casualty nobody can route to used to be re-swept
+        # against every candidate on every sim step, at ~2,500 depth lookups per
+        # attempt — 271k router calls in three sim-days, 89% of wall time, which
+        # would put the frame budget on the floor.  After a failed sweep, sit the
+        # casualty out for SAR_DISPATCH_RETRY_S; the fleet will have moved by then
+        # and a route may exist.  Counted down here rather than compared against a
+        # clock because environment.time_of_day wraps at 24 h and is not monotonic.
+        _cooldown = getattr(grounded, "_sar_retry_timer", 0.0)
+        if _cooldown > 0.0:
+            grounded._sar_retry_timer = _cooldown - SIM_TIMESTEP
+            continue
+        candidates = []
         for v in vessels:
             if v is grounded:
                 continue
@@ -161,13 +173,32 @@ def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
             if id(v) in active_rescuer_ids:
                 continue
             d = v.distance_to(grounded.position)
-            if d < best_d and d <= range_wu:
-                best, best_d = v, d
+            if d <= range_wu:
+                candidates.append((d, v))
+        candidates.sort(key=lambda c: c[0])
+
+        # Try candidates nearest-first and take the first one that can actually
+        # get there.  The nearest vessel is not always the right answer: it may
+        # be the far side of a shoal, and find_safe_path now returns [] rather
+        # than a leg it knows is too shallow.  Walking the list keeps a casualty
+        # from going unrescued just because its closest neighbour is blocked.
+        best, waypoints = None, None
+        for _d, v in candidates:
+            if world is None:
+                best, waypoints = v, [grounded.position]
+                break
+            # Aim at a standoff, not the casualty itself: the casualty is aground,
+            # so its exact position is by definition too shallow to float it — and
+            # a rescuer steered there grounds alongside it.  The standoff must
+            # clear the RESCUER's draft, which may be deeper than the casualty's.
+            target = find_standoff(grounded.position, v.draft_m, world)
+            path = find_safe_path(v.position, target, world, v.draft_m)
+            if path:
+                best, waypoints = v, path
+                break
+
         if best is not None:
-            if world is not None:
-                waypoints = find_safe_path(best.position, grounded.position, world)
-            else:
-                waypoints = [grounded.position]
+            grounded._sar_retry_timer = 0.0
             best.destination = waypoints[0]
             best.player_commanded = True
             grounded.rescue_vessel = best
@@ -178,6 +209,13 @@ def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
                 event_log.add(sim_time,
                               f"RESCUE — {best.name} → {grounded.name}",
                               EVENT_COLOR_RESCUE)
+        else:
+            # No reachable rescuer this sweep — stamp the cooldown so the next
+            # attempt waits for the fleet to move instead of re-running the same
+            # doomed search every tick.  Deliberately not logged: even at one
+            # message per cooldown this would clutter the event log with a
+            # situation the player cannot act on.
+            grounded._sar_retry_timer = SAR_DISPATCH_RETRY_S
 
 
 def _trigger_random_event(vessel, world, environment, event_log=None) -> None:
@@ -1759,7 +1797,14 @@ class Game:
                 port.release_berth(v.name)
             v._docked_port_name = None
             v.port_stay_timer = 0.0
-        waypoints = find_safe_path(v.position, world_pos, self.world)
+        waypoints = find_safe_path(v.position, world_pos, self.world, v.draft_m)
+        if not waypoints:
+            # No route with enough water for this hull.  Reject the order and say
+            # so — one-shot user action, so logging here cannot flood the log.
+            self.event_log.add(_sim_time_str(self.environment),
+                               f"{v.name} — no safe route to that position",
+                               EVENT_COLOR_WEATHER)
+            return
         v.destination = waypoints[0]
         v.player_commanded = True
         if len(waypoints) > 1:
@@ -2527,6 +2572,9 @@ class Game:
                     vessel.status = "aground"
                     vessel.current_speed = 0.0
                     vessel.distress = True   # triggers SAR dispatch next step
+                    # Fresh casualty — clear any cooldown left over from a
+                    # previous grounding so this one is swept immediately.
+                    vessel._sar_retry_timer = 0.0
                     vessel.mood = "stressed"
                     # Keep only the most recent groundings — this list is scanned
                     # every smart-decision tick, so it must not grow unbounded over

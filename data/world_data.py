@@ -525,6 +525,33 @@ _WP_NE_GATE    = (1120, 350)  # NE gate — east of Thornwick Rocks
 # (750, 680) is outside Brattlin South polygon and 157 wu clear of Tarn (655, 805, r=65).
 _WP_MERIN_VESPER = (750, 680)
 
+# NE mark used by the coast-guard patrol: south of Brattlin North, east of Carrow.
+_WP_NE_MARK      = (660, 600)
+
+# ── Router hub network ──────────────────────────────────────────────────────
+# find_safe_path() (engine/collision.py) detours via ONE of these when the direct
+# leg is unsafe.  Every entry is an open-sea position already verified for an 8 m
+# draft by tests/verify_new_routes.py.
+#
+# This list used to stop at x = 640 while seven of the ten ports sit further east,
+# so nothing beyond the Brattlins could be reached in a single hop.  That went
+# unnoticed only because the router used to return a detour without checking its
+# second leg — it handed back routes straight across Brattlin North.  Once that
+# leg was validated the gap turned into outright routing failure, and a single
+# unreachable casualty drove 271k router calls in three sim-days.
+#
+# Anything added here MUST be open water at low tide and reachable from the rest
+# of the network, or it silently becomes a dead hub.  tools/diag_groundings.py
+# and the coverage check are the ways to confirm that.
+ROUTER_HUBS = [
+    # Western and central sea
+    _WP_SE_OPEN, _WP_S_ISLANDS, _WP_ARDENT_APP, _WP_S_BRAT, _WP_S_CARROW,
+    _WP_WEST_SEA, _WP_FISH_OUT, _WP_FISH_GND, _WP_W_APPROACH, _WP_W_FISH_GND,
+    _WP_SAIL2_WEST,
+    # Eastern corridor — without these the whole eastern sea is unroutable
+    _WP_NE_MARK, _WP_BRAT_EAST, _WP_MERIN_VESPER, _WP_NE_GATE,
+]
+
 # MV Thornwick (cargo): Port Maren ↔ Thornwick Roads via south corridor then NE.
 # Uses proven south-corridor waypoints (SE_OPEN → S_ISLANDS → ARDENT_APP → S_BRAT)
 # to clear Carrow Island and Brattlin N, then (850,590) east of Brattlin S (x_max=822),

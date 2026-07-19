@@ -27,6 +27,13 @@ from config import (
     COLLISION_CLEAR_HYSTERESIS,
     COLLISION_EMERGENCY_CPA_FRAC,
     COLLISION_EMERGENCY_AVOID_DEG,
+    DRAFT_SAFETY_MARGIN_M,
+    TIDE_RANGE,
+    SAFE_PATH_SAMPLE_STEP_WU,
+    SAFE_PATH_APPROACH_WU,
+    STANDOFF_UKC_M,
+    STANDOFF_STEP_WU,
+    STANDOFF_MAX_WU,
 )
 
 # Convert detection range to world units once at module load (cheap pre-filter).
@@ -42,31 +49,93 @@ def _velocity_wu_per_s(vessel) -> Tuple[float, float]:
     return cos(h) * spd_wu_hr / 3600.0, sin(h) * spd_wu_hr / 3600.0
 
 
+def find_standoff(pos: Tuple[float, float], draft_m: float,
+                  world) -> Tuple[float, float]:
+    """Return the nearest position to `pos` that floats `draft_m` at ANY tide.
+
+    Probes outward in expanding rings (16 bearings each) and takes the deepest
+    bearing on the first ring that clears, so the result is the shortest nudge
+    that reaches genuinely navigable water rather than an arbitrary jump.
+
+    Depth is evaluated at LOW water (-TIDE_RANGE), never the tide of the moment:
+    a spot chosen at high water can dry out by the full tidal range a few hours
+    later, which just defers the grounding instead of preventing it.
+
+    Returns `pos` unchanged when nothing clears within STANDOFF_MAX_WU, leaving
+    the caller to decide — better than silently teleporting a vessel.
+    """
+    need = draft_m + STANDOFF_UKC_M
+    r = STANDOFF_STEP_WU
+    while r <= STANDOFF_MAX_WU:
+        best, best_depth = None, need
+        for i in range(16):
+            ang = radians(i * 22.5)
+            cand = (pos[0] + cos(ang) * r, pos[1] + sin(ang) * r)
+            d = world.water_depth_at(cand, -TIDE_RANGE)
+            if d >= best_depth:
+                best, best_depth = cand, d
+        if best is not None:
+            return best
+        r += STANDOFF_STEP_WU
+    return pos
+
+
 def find_safe_path(start: Tuple[float, float],
                    end: Tuple[float, float],
                    world,
-                   n_samples: int = 20) -> List[Tuple[float, float]]:
-    """Return a list of waypoints from start to end that avoids island polygons.
+                   draft_m: float = 0.0) -> List[Tuple[float, float]]:
+    """Return waypoints from start to end that keep water under the keel.
 
-    Checks the direct leg by sampling n_samples points.  If any point is inside
-    an island, tries routing via a pre-verified safe intermediate waypoint that
-    (a) has a clear leg from start and (b) is closer to end than start is.
-    Returns [end] when the direct path is clear, or [intermediate, end] for a
-    single-hop detour.  Falls back to [end] (direct) when no clear via-point
-    can be found — this is intentionally simple, not A*.
+    Legs are sampled every SAFE_PATH_SAMPLE_STEP_WU and rejected if any sample
+    is shallower than draft_m + DRAFT_SAFETY_MARGIN_M at LOW water.  Testing
+    island polygons alone was not enough: a leg passing a world unit off a beach
+    contains no land point yet is only a few metres deep, so SAR rescuers were
+    being routed straight onto the shoals they were sent to relieve.
+
+    Returns [end] when the direct leg is safe, or [intermediate, end] for a
+    single-hop detour via the pre-verified open-sea waypoint network.  Returns
+    [] when no safe route exists — callers MUST handle that rather than sail a
+    known-unsafe leg, which is what the old "fall back to direct" did.
+
+    Still intentionally simple (one hop, not A*).
     """
     sx, sy = start
     ex, ey = end
+    need_m = draft_m + DRAFT_SAFETY_MARGIN_M
 
     def _leg_clear(a_pos, b_pos):
-        """True when all sampled points along the leg are outside every island."""
+        """True when the TRANSIT part of the leg floats draft_m at low water.
+
+        Land is rejected over the whole leg.  Depth is checked over the whole
+        leg except its final SAFE_PATH_APPROACH_WU — see the config note: a
+        casualty always sits inside the shallow shelf, so a strict check over
+        the full leg makes every grounded vessel unreachable.
+        """
         ax, ay = a_pos
         bx, by = b_pos
-        for i in range(n_samples + 1):
-            t = i / n_samples
-            if world.point_in_island((ax + (bx - ax) * t,
-                                      ay + (by - ay) * t)):
-                return False
+        # Step by distance, not a fixed sample count: a fixed count spaces
+        # samples further apart the longer the leg, and a long ocean leg could
+        # step straight over a shoal narrower than the gap between samples.
+        leg_len = hypot(bx - ax, by - ay)
+        steps = max(1, int(leg_len / SAFE_PATH_SAMPLE_STEP_WU))
+        for i in range(steps + 1):
+            t = i / steps
+            p = (ax + (bx - ax) * t, ay + (by - ay) * t)
+            # One cached depth lookup per sample; water_depth_at() is memoised
+            # per integer cell, point_in_island() is not, so the polygon test is
+            # reserved for the few samples that actually need it.
+            d = world.water_depth_at(p, -TIDE_RANGE)
+            if leg_len * (1.0 - t) <= SAFE_PATH_APPROACH_WU:
+                # Final approach: shallow is expected and permitted — only
+                # actual land disqualifies.  Note d == 0.0 does NOT imply land:
+                # water_depth_at() clamps at zero, so anything within the tidal
+                # range of drying reads 0.0 too.  Treating that as land rejected
+                # every casualty run-in and deadlocked SAR entirely.
+                if d <= 0.0 and world.point_in_island(p):
+                    return False
+                continue
+            if d < need_m:
+                return False   # covers land as well: depth there is 0.0
         return True
 
     if _leg_clear(start, end):
@@ -76,16 +145,11 @@ def find_safe_path(start: Tuple[float, float],
     # Imported here (not at module level) to keep engine/ free of data/ at import
     # time while still reusing the already-verified safe positions.
     try:
-        from data.world_data import (   # noqa: PLC0415
-            _WP_SE_OPEN, _WP_S_ISLANDS, _WP_ARDENT_APP, _WP_S_BRAT,
-            _WP_S_CARROW, _WP_WEST_SEA, _WP_FISH_OUT, _WP_FISH_GND,
-            _WP_W_APPROACH, _WP_W_FISH_GND, _WP_SAIL2_WEST,
-        )
-        _SAFE_HUB_WPS: List[Tuple[float, float]] = [
-            _WP_SE_OPEN, _WP_S_ISLANDS, _WP_ARDENT_APP, _WP_S_BRAT,
-            _WP_S_CARROW, _WP_WEST_SEA, _WP_FISH_OUT, _WP_FISH_GND,
-            _WP_W_APPROACH, _WP_W_FISH_GND, _WP_SAIL2_WEST,
-        ]
+        # Single list owned by the data layer — see ROUTER_HUBS there for why the
+        # eastern entries matter.  Importing one name instead of eleven means a
+        # new hub is picked up automatically rather than silently ignored.
+        from data.world_data import ROUTER_HUBS   # noqa: PLC0415
+        _SAFE_HUB_WPS: List[Tuple[float, float]] = list(ROUTER_HUBS)
     except ImportError:
         _SAFE_HUB_WPS = []
 
@@ -101,6 +165,12 @@ def find_safe_path(start: Tuple[float, float],
             continue
         if not _leg_clear(start, wp):
             continue
+        # Validate the SECOND leg too.  Only start->wp used to be checked, so a
+        # detour could hand back a wp->end leg nobody had looked at; now that
+        # depth rejection makes detours common, that unchecked segment would be
+        # a live hazard rather than a dormant one.
+        if not _leg_clear(wp, end):
+            continue
         # Score by distance from start — choose the nearest viable intermediate.
         score = hypot(wx - sx, wy - sy)
         if score < best_score:
@@ -109,7 +179,41 @@ def find_safe_path(start: Tuple[float, float],
 
     if best_wp is not None:
         return [best_wp, end]
-    return [end]  # fallback: direct even if it crosses land
+
+    # ── Two hops ────────────────────────────────────────────────────────────
+    # Some water is reachable only via a hub that is itself not reachable in one
+    # leg.  The measured case is the notch on Brattlin North's east side: only
+    # the hubs east of that island can see into it, and clearing the island from
+    # the west means staying south of it first — so start->hub->hub->end is the
+    # shortest chain that exists.  That was 93% of all routing failures, and the
+    # same shape will recur for any future pocket behind an island.
+    #
+    # Bounded deliberately: exactly two hops, no recursion, and only reached
+    # after single-hop has already failed (which the dispatch cooldown makes
+    # rare).  Legs 1 and 3 are validated while building the two reachability
+    # sets, so the ordered scan below only has to check the middle leg.
+    from_start = [wp for wp in _SAFE_HUB_WPS if _leg_clear(start, wp)]
+    to_end = [wp for wp in _SAFE_HUB_WPS if _leg_clear(wp, end)]
+
+    chains = []
+    for a in from_start:
+        for b in to_end:
+            if a == b:
+                continue   # that is the single-hop case, already ruled out
+            chains.append((hypot(a[0] - sx, a[1] - sy)
+                           + hypot(b[0] - a[0], b[1] - a[1])
+                           + hypot(ex - b[0], ey - b[1]), a, b))
+    # Cheapest total distance first, so the first fully-valid chain is also the
+    # shortest one — no need to score the rest.
+    chains.sort(key=lambda c: c[0])
+    for _score, a, b in chains:
+        if _leg_clear(a, b):
+            return [a, b, end]
+
+    # No safe route.  Deliberately NOT falling back to the direct leg: we have
+    # just established it is too shallow for this vessel, and sailing it is how
+    # rescuers ended up aground beside the casualties they were sent to help.
+    return []
 
 
 def compute_cpa_tcpa(a, b) -> Tuple[float, float]:
