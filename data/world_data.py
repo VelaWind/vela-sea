@@ -350,7 +350,13 @@ FERRY_ROUTES = [
 
 # Intermediate open-sea waypoints — all verified at depth ≥ 60 m, no island.
 _WP_SE_OPEN    = (350, 460)  # SE of Port Maren; clear of mainland and Skerry south edge
-_WP_S_ISLANDS  = (500, 565)  # south of Carrow Island (island max y 532)
+# Moved south from (500, 565): the old position put the leg to _WP_ARDENT_APP
+# within 4.66 wu of Carrow's south rim at (562,536).  An 8 m-draft cargo grounds
+# at 2.88 wu off any coast at low water, and uncompensated leeway costs ~0.22 wu
+# of clearance per knot of onshore wind — so ~8 kn was enough to beach it, which
+# made this the busiest grounding site on the chart.  (505, 580) opens the pinch
+# to 13.25 wu, i.e. ~41 kn of tolerance, at the cost of ~5 wu of extra passage.
+_WP_S_ISLANDS  = (505, 580)  # south of Carrow Island (island max y 532)
 _WP_ARDENT_APP = (640, 500)  # E of Carrow (max x 632), W of Brattlin N (min x 658)
 _WP_S_BRAT     = (640, 590)  # S of Brattlin North (max y 582), N of Brattlin South
 _WP_S_CARROW   = (580, 610)  # S of Carrow, S of Brattlin North, W of Brattlin South
@@ -496,7 +502,8 @@ VESSEL_ROUTE_COAST_GUARD = [
     (300, 225),       # Saltgate Harbour
     (300, 420),       # return south before swinging east
     _WP_SKERRY_CLEAR, # explicit 140.9 wu clearance from Skerry Bank centre
-    (500, 565),       # _WP_S_ISLANDS — south of Carrow Island (avoids land)
+    _WP_S_ISLANDS,    # south of Carrow Island (avoids land) — use the constant
+                      # so this route cannot drift out of sync with the others
     (640, 500),    # _WP_ARDENT_APP
     (648, 460),    # Port Ardent
     (640, 590),    # _WP_S_BRAT
@@ -525,7 +532,7 @@ _WP_MERIN_VESPER = (750, 680)
 VESSEL_ROUTE_THORNWICK = [
     (105, 315),       # Port Maren
     _WP_SE_OPEN,      # (350, 460) — clears mainland coast and Skerry Bank south edge
-    _WP_S_ISLANDS,    # (500, 565) — south of Carrow Island (max y=532)
+    _WP_S_ISLANDS,    # (505, 580) — south of Carrow Island (max y=532)
     _WP_ARDENT_APP,   # (640, 500) — gap between Carrow (max x=632) and Brattlin N
     _WP_S_BRAT,       # (640, 590) — south of Brattlin North (max y=582)
     _WP_BRAT_EAST,    # (850, 590) — east of Brattlin South (max x=822)
