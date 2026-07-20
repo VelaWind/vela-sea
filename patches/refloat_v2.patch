@@ -1,0 +1,68 @@
+diff --git a/main.py b/main.py
+index 6024413..a205f41 100644
+--- a/main.py
++++ b/main.py
+@@ -105,7 +105,8 @@ def _sim_time_str(environment) -> str:
+     return f"{h:02d}:{m:02d}"
+ 
+ 
+-def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
++def _sar_refloat(grounded, event_log=None, sim_time: str = "",
++                 world=None) -> None:
+     """Refloat a grounded/adrift vessel and release its rescuer (if any).
+ 
+     Calls vessel.refloat() for the grounded vessel's own state, then
+@@ -114,6 +115,12 @@ def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
+     Fuel-exhaustion case: when the vessel ran dry (fuel == 0), give it an
+     emergency partial refuel so it can motor to the nearest port instead of
+     immediately going adrift again the moment the rescuer leaves.
++
++    Grounding case (world supplied): the vessel is moved to a seaward standoff
++    and re-aimed at its scheduled waypoint.  Refloating it in place left it in
++    the same shallow patch still steering the leg that put it there, so it
++    grounded again on the next tick — one vessel repeated that 157 times on a
++    single spot in a 14-day run.
+     """
+     rescuer = grounded.rescue_vessel
+     # Emergency refuel for fuel-exhausted vessels so they can reach a port.
+@@ -123,6 +130,20 @@ def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
+     if fuel_rescue:
+         grounded.fuel = grounded.fuel_capacity * FUEL_EMERGENCY_REFUEL_FRACTION
+     grounded.refloat()
++    if world is not None:
++        # find_standoff sizes against LOW water, so the spot stays navigable
++        # through the whole tide cycle.  Sizing against the tide of the moment
++        # is wrong here: refloat only fires as the tide rises, so the vessel
++        # would be parked somewhere that dries out again on the next ebb.
++        grounded.position = find_standoff(grounded.position,
++                                          grounded.draft_m, world)
++        # Re-aim at the scheduled waypoint.  Deliberately NOT find_safe_path:
++        # arrive() resolves the waypoint reached as route[route_index] rather
++        # than destination (ship.py), so handing this vessel a foreign
++        # intermediate would make it believe it had reached its scheduled
++        # waypoint — and dock in open water if that waypoint is a port.
++        if grounded.route:
++            grounded.destination = grounded.route[grounded.route_index]
+     if rescuer is not None and rescuer.player_commanded:
+         rescuer.player_commanded = False
+         if rescuer.route:
+@@ -2510,7 +2531,8 @@ class Game:
+                                     and grounded.rescue_vessel is vessel
+                                     and grounded.status in ("aground", "adrift")):
+                                 _sar_refloat(grounded, self.event_log,
+-                                             _sim_time_str(self.environment))
++                                             _sim_time_str(self.environment),
++                                             self.world)
+                                 break
+                     _was_player_cmd = vessel.player_commanded
+                     vessel.arrive(self.world)
+@@ -2556,7 +2578,8 @@ class Game:
+                     )
+                     if depth >= vessel.draft_m + DRAFT_SAFETY_MARGIN_M:
+                         _sar_refloat(vessel, self.event_log,
+-                                     _sim_time_str(self.environment))
++                                     _sim_time_str(self.environment),
++                                     self.world)
+                     continue
+                 # Skip vessels inside a port approach zone (no false groundings).
+                 if vessel._port_at(vessel.position, self.world) is not None:

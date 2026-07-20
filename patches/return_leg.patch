@@ -1,0 +1,187 @@
+diff --git a/engine/collision.py b/engine/collision.py
+index 1fbc26b..c12b83a 100644
+--- a/engine/collision.py
++++ b/engine/collision.py
+@@ -125,7 +125,14 @@ def find_safe_path(start: Tuple[float, float],
+             # per integer cell, point_in_island() is not, so the polygon test is
+             # reserved for the few samples that actually need it.
+             d = world.water_depth_at(p, -TIDE_RANGE)
+-            if leg_len * (1.0 - t) <= SAFE_PATH_APPROACH_WU:
++            # Exempt BOTH ends.  The approach end is the casualty/berth argument
++            # below; the departure end is the mirror of it — a vessel standing
++            # off a casualty is already in shallow water, and a router that
++            # depth-checks the water it is currently floating in can never let
++            # it leave.  Measured: 232 of 232 "no route home" cases failed on
++            # their own start position, stalling the fleet (arrivals 503 -> 157).
++            if (leg_len * (1.0 - t) <= SAFE_PATH_APPROACH_WU
++                    or leg_len * t <= SAFE_PATH_APPROACH_WU):
+                 # Final approach: shallow is expected and permitted — only
+                 # actual land disqualifies.  Note d == 0.0 does NOT imply land:
+                 # water_depth_at() clamps at zero, so anything within the tidal
+diff --git a/main.py b/main.py
+index 6024413..0438267 100644
+--- a/main.py
++++ b/main.py
+@@ -105,7 +105,8 @@ def _sim_time_str(environment) -> str:
+     return f"{h:02d}:{m:02d}"
+ 
+ 
+-def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
++def _sar_refloat(grounded, event_log=None, sim_time: str = "",
++                 world=None, player_paths: dict = None) -> None:
+     """Refloat a grounded/adrift vessel and release its rescuer (if any).
+ 
+     Calls vessel.refloat() for the grounded vessel's own state, then
+@@ -126,13 +127,63 @@ def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
+     if rescuer is not None and rescuer.player_commanded:
+         rescuer.player_commanded = False
+         if rescuer.route:
+-            rescuer.destination = rescuer.route[rescuer.route_index]
++            if world is not None:
++                # The rescuer is standing off a casualty, which is by definition
++                # close to shore and a long way from its own route — the worst
++                # possible place to start a straight-line leg home.
++                _resume_schedule(rescuer, world, player_paths)
++            else:
++                rescuer.destination = rescuer.route[rescuer.route_index]
+     if event_log is not None:
+         msg = (f"RESCUED — {grounded.name} (emergency fuel)"
+                if fuel_rescue else f"REFLOATED — {grounded.name}")
+         event_log.add(sim_time, msg, EVENT_COLOR_REFLOAT)
+ 
+ 
++def _resume_schedule(vessel, world, player_paths) -> None:
++    """Send a displaced vessel back to its schedule along a VALIDATED path.
++
++    Every "hand back to the schedule" site used to do
++    ``destination = route[route_index]`` — a bare straight line from wherever
++    the vessel had ended up.  Rescue duty, MOB searches, trawl wander and party
++    tenders all leave vessels a long way off their route, and those return legs
++    crossed whatever land lay between: 84% of all groundings measured in a
++    14-day run happened more than 15 wu off the vessel's own route, against 1%
++    on it.  Dispatch legs were validated; the journey home was not.
++
++    Uses the same router and multi-hop machinery as SAR dispatch, so a return
++    leg gets the two-hop treatment when a direct one is unsafe.
++    """
++    if not vessel.route:
++        return
++    target = vessel.route[vessel.route_index]
++    path = find_safe_path(vessel.position, target, world, vessel.draft_m)
++    if not path:
++        # No safe way home right now.  Emphatically do NOT sail the straight
++        # line — that is the behaviour this function exists to remove.  Hold
++        # station and retry on the same cooldown SAR dispatch uses; the fleet
++        # and the tide both move, so a route usually appears.  destination is
++        # cleared rather than left in place because the vessel has just reached
++        # it, and leaving it set would re-fire arrival every tick.
++        vessel.destination = None
++        vessel.player_commanded = False
++        vessel._return_retry_timer = SAR_DISPATCH_RETRY_S
++        return
++    vessel.destination = path[0]
++    vessel._return_retry_timer = 0.0
++    if len(path) > 1:
++        # Multi-hop: ride the dispatch machinery — player_commanded keeps the
++        # scheduler's hands off until the last hop is reached, at which point
++        # the arrival handler calls back in here and the direct leg succeeds.
++        vessel.player_commanded = True
++        if player_paths is not None:
++            player_paths[id(vessel)] = path[1:]
++    else:
++        vessel.player_commanded = False
++        if player_paths is not None:
++            player_paths.pop(id(vessel), None)
++
++
+ def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
+                   player_paths: dict = None, world=None) -> None:
+     """Auto-dispatch the nearest eligible vessel to each unrescued distressed vessel.
+@@ -1945,7 +1996,9 @@ class Game:
+                             and self._party_state.get("tender_for") == vid):
+                         tender.player_commanded = False
+                         if tender.route:
+-                            tender.destination = tender.route[tender.route_index]
++                            # Tender is alongside the yacht, off its own route.
++                            _resume_schedule(tender, self.world,
++                                             self._pending_player_paths)
+                         vessel.log_decision(_t, "Party over — tender returning to service")
+                     self._party_state.pop("tender_for", None)
+                 continue
+@@ -2389,6 +2442,18 @@ class Game:
+                             self._zone_timer = 0.0
+                             self._zone_warning_sent = False
+                 else:
++                    # Held after _resume_schedule found no safe way home: count
++                    # the cooldown down and retry.  Until a route exists the
++                    # vessel has no destination and simply loses way, which is
++                    # the correct seamanlike answer — heaving to beats sailing a
++                    # leg already known to cross land.
++                    _rt = getattr(vessel, "_return_retry_timer", 0.0)
++                    if _rt > 0.0:
++                        vessel._return_retry_timer = _rt - SIM_TIMESTEP
++                        if vessel._return_retry_timer <= 0.0:
++                            _resume_schedule(vessel, self.world,
++                                             self._pending_player_paths)
++
+                     # Navigation priority: MOB > trawling/anchoring > avoidance > normal.
+                     if vessel.mob_timer > 0:
+                         vessel.mob_timer = max(0.0, vessel.mob_timer - SIM_TIMESTEP)
+@@ -2400,7 +2465,9 @@ class Game:
+                             vessel.mob_position = None
+                             vessel.target_speed = vessel.max_speed
+                             if vessel.route:
+-                                vessel.destination = vessel.route[vessel.route_index]
++                                # MOB search wanders the vessel off its track.
++                                _resume_schedule(vessel, self.world,
++                                                 self._pending_player_paths)
+                     elif vessel.trawling_timer > 0:
+                         # Trawling (fishing) or anchoring (sailboat) pause at open-sea WP.
+                         vessel.trawling_timer = max(0.0, vessel.trawling_timer - SIM_TIMESTEP)
+@@ -2419,7 +2486,9 @@ class Game:
+                             vessel.target_speed = vessel.max_speed
+                             _set_underway_mission_status(vessel)
+                             if vessel.route:
+-                                vessel.destination = vessel.route[vessel.route_index]
++                                # Trawl/anchor wander leaves the vessel off track.
++                                _resume_schedule(vessel, self.world,
++                                                 self._pending_player_paths)
+                     elif vessel.status == "avoiding":
+                         vessel.turn_toward(vessel.avoid_heading, SIM_TIMESTEP)
+                     elif vessel.destination and vessel.status == "underway":
+@@ -2510,7 +2579,8 @@ class Game:
+                                     and grounded.rescue_vessel is vessel
+                                     and grounded.status in ("aground", "adrift")):
+                                 _sar_refloat(grounded, self.event_log,
+-                                             _sim_time_str(self.environment))
++                                             _sim_time_str(self.environment),
++                                             self.world, self._pending_player_paths)
+                                 break
+                     _was_player_cmd = vessel.player_commanded
+                     vessel.arrive(self.world)
+@@ -2527,6 +2597,15 @@ class Game:
+                             self._pending_player_paths[_vid] = _remaining[1:]
+                         else:
+                             del self._pending_player_paths[_vid]
++                    elif (_was_player_cmd and not _is_player
++                            and vessel.status == "underway" and vessel.route):
++                        # Last commanded hop reached and nothing queued behind it.
++                        # arrive() has just pointed this vessel at its schedule
++                        # along a straight line from wherever the task left it —
++                        # replace that with a validated route.  Excludes the
++                        # player, whose helm is their own business.
++                        _resume_schedule(vessel, self.world,
++                                         self._pending_player_paths)
+                     # Mission hooks on arrival
+                     if vessel.mission_type:
+                         if vessel.status == "in_port":
+@@ -2556,7 +2635,8 @@ class Game:
+                     )
+                     if depth >= vessel.draft_m + DRAFT_SAFETY_MARGIN_M:
+                         _sar_refloat(vessel, self.event_log,
+-                                     _sim_time_str(self.environment))
++                                     _sim_time_str(self.environment),
++                                     self.world, self._pending_player_paths)
+                     continue
+                 # Skip vessels inside a port approach zone (no false groundings).
+                 if vessel._port_at(vessel.position, self.world) is not None:
