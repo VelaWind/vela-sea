@@ -56,10 +56,8 @@ Rejected patches (each applies cleanly on `b5d7a64`, each fully measured):
 | `refloat_v2.patch` | on refloat, move to a low-water-sized seaward standoff instead of refloating in place | Kills the 157x same-spot loop and transforms rescue health (never-rescued 10% -> 3%), but re-exposes freed vessels: uniq/arr 0.125 -> 0.742 |
 | `return_leg.patch` | route the return leg via `find_safe_path` + `_pending_player_paths` | Off-route share unchanged (84% -> 83%); arrivals 503 -> 170. This is mechanism 1 above |
 
-The patches live in the session scratchpad
-(`%LOCALAPPDATA%\Temp\claude\d--VelaSea\<session-id>\scratchpad\`), which is
-**ephemeral** — copy them somewhere durable before relying on them, or
-regenerate from this note.
+The patches live in `patches/` (preserved in commit `ec8ceea`), with a
+README summarising each rejection. Each applies cleanly on `b5d7a64`.
 
 Measurement standard for any future attempt: `python tools/diag_groundings.py
 --days 14 --seeds 3`, and **normalise by arrivals, not raw event counts** — a
