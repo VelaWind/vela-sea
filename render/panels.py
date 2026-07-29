@@ -39,6 +39,7 @@ from config import (
     WORLD_WIDTH, WORLD_HEIGHT, LAND_COLORS, COLOR_WATER,
     TUTORIAL_STEPS, TUTORIAL_PANEL_ALPHA, COLOR_OBJECTIVE,
     BANNER_DURATION_MS, BANNER_FADE_MS, MONEY_COUNTUP_EASE,
+    WEB_HUD_PERF,
 )
 
 
@@ -1884,7 +1885,10 @@ class ControlsScreen:
         ("Mouse wheel",  "Zoom at cursor"),
         ("R",            "Restart (after game over)"),
         ("Esc",          "Quit"),
-    ]
+    # Web only: the perf overlay ships hidden (cold viewers shouldn't be shown
+    # debug numbers), so the key that brings it back has to be discoverable
+    # somewhere.  Omitted on desktop, where the overlay doesn't exist at all.
+    ] + ([("P", "Show / hide perf overlay")] if WEB_HUD_PERF else [])
 
     def __init__(self, surface: pygame.Surface) -> None:
         self.surface = surface

@@ -26,6 +26,13 @@ WEB_PROFILE = IS_WEB
 # only field telemetry — this makes every screenshot carry the numbers.
 WEB_HUD_PERF = IS_WEB
 
+# ...but it starts HIDDEN.  The web build is what cold viewers see first, and a
+# raw fps/ms/bucket readout over the chart reads as debug clutter rather than as
+# part of the sim.  P toggles it back on in-session whenever a screenshot needs
+# to carry the numbers.  Desktop is untouched: WEB_HUD_PERF is already False
+# there, so the overlay never drew in the first place.
+WEB_HUD_PERF_START_VISIBLE = False
+
 
 def resource_path(relative: str) -> str:
     """Absolute path to a bundled read-only resource (e.g. the sound wavs).

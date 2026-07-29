@@ -87,7 +87,7 @@ from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
                     WEB_TARGET_FPS, WEB_FRAME_DT_CLAMP_S, WEBTEST_BEACON_S,
                     WEB_MAX_SIM_STEPS_PER_FRAME,
                     WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H,
-                    WEB_HUD_PERF, WEB_RENDER_SCALE)
+                    WEB_HUD_PERF, WEB_HUD_PERF_START_VISIBLE, WEB_RENDER_SCALE)
 from engine.collision import update_collision_avoidance, find_safe_path, find_standoff
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
@@ -712,6 +712,10 @@ class Game:
         self._hud_prof_surf: Optional[pygame.Surface] = None
         self._hud_perf_frames = 0
         self._hud_perf_t0 = time.perf_counter()
+        # Runtime visibility, separate from WEB_HUD_PERF (which says the overlay
+        # EXISTS in this build).  Ships off so cold web viewers get a clean
+        # chart; P flips it.  Desktop never had the overlay, so this is inert.
+        self._hud_perf_visible = WEB_HUD_PERF_START_VISIBLE
         # [WEBTEST] beacon throttle; 0.0 -> first rendered web frame emits
         # immediately, so tests never wait a full period for the first line.
         self._webtest_last = 0.0
@@ -1687,6 +1691,20 @@ class Game:
                 # Toggle minimap
                 elif event.key == self.keys["minimap"]:
                     self.minimap.is_visible = not self.minimap.is_visible
+
+                # Toggle the perf overlay (web build only — it starts hidden so
+                # viewers aren't shown debug numbers; P brings it back when a
+                # screenshot needs telemetry).  P is deliberately NOT a
+                # rebindable action: it's a diagnostic, not a game control.
+                elif event.key == pygame.K_p:
+                    self._hud_perf_visible = not self._hud_perf_visible
+                    if self._hud_perf_visible:
+                        # Restart the 1 s sampling window.  While hidden the
+                        # frame counter doesn't advance, so without this reset
+                        # the first readout would divide frames-since-toggle by
+                        # seconds-since-boot and report a nonsense fps.
+                        self._hud_perf_frames = 0
+                        self._hud_perf_t0 = time.perf_counter()
 
                 # Skip onboarding — persisted so it never returns this save.
                 elif event.key == self.keys["skip_tutorial"] and self._tutorial_active:
@@ -2825,7 +2843,11 @@ class Game:
         # frames minus measured work — under the cap it reads ~budget-work by
         # design.  Text re-rendered once per second (through the text cache);
         # per-frame cost is two small blits.  Screenshots carry it all.
-        if WEB_HUD_PERF and self._hud_perf_font is not None:
+        # Hidden by default for viewers (see WEB_HUD_PERF_START_VISIBLE); the
+        # whole block — sampling included — is skipped while off, so it costs
+        # nothing and the counters are re-primed by the P handler on the way in.
+        if (WEB_HUD_PERF and self._hud_perf_visible
+                and self._hud_perf_font is not None):
             self._hud_perf_frames += 1
             _now_s = time.perf_counter()
             _elapsed = _now_s - self._hud_perf_t0

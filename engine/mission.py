@@ -71,7 +71,11 @@ class MissionManager:
             m = Mission(
                 mission_type="rescue",
                 description=f"MAYDAY — {vessel.name}",
-                objective="Dispatch any vessel to assist",
+                # Observational, not imperative: the web build is a spectator
+                # view with no vessel commands, and an order ("dispatch...")
+                # reads as an offer of control the viewer doesn't have — the
+                # first cold viewer asked "can I control ships?" off this line.
+                objective="Nearest vessel diverting to assist",
                 target_vessel_name="",  # any commanded vessel qualifies
                 target_position=target_pos,
                 reward_text=f"{vessel.name} has been assisted",
