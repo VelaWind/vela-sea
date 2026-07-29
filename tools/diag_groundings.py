@@ -60,6 +60,72 @@ _main_module.delete_save = lambda filepath=None: None
 
 REAL_DT = 0.016
 
+# One update_simulation(REAL_DT) call advances REAL_DT * TIME_COMPRESSION sim-s.
+SIM_S_PER_CALL = REAL_DT * TIME_COMPRESSION
+
+# Full emergency-state classification is sampled every N calls rather than every
+# call: at ~1.92 sim-s per call, 30 calls is ~1 sim-minute, which resolves every
+# emergency type here (the shortest, MOB, lasts 3600 sim-s) at 1/60th the cost of
+# per-tick sampling over 630k calls.  The ONE sub-minute phenomenon —
+# refloat -> immediate re-ground flapping — is counted per-tick instead, below.
+EMERG_SAMPLE_CALLS = 30
+
+# The five emergency/duty states a vessel can be in.  Deliberately split so that
+# the two very different causes of status == "adrift" (mechanical engine failure
+# vs fuel exhaustion) are never conflated, and so the three very different causes
+# of player_commanded (SAR rescuer duty, medical divert, party tender) are
+# separated -- the fleet-status panel labels ALL THREE "MEDICAL", which is what
+# made the live fleet look sicker than it was.
+EMERG_STATES = ("aground", "eng_fail", "fuel_adrift", "mob", "medical",
+                "rescuer", "tender_party")
+
+
+def _rescuer_ids(vessels):
+    """IDs of vessels currently pointed at by some casualty's rescue_vessel.
+
+    Mirrors _sar_dispatch's own active_rescuer_ids construction exactly.
+    """
+    return {id(v.rescue_vessel) for v in vessels if v.rescue_vessel is not None}
+
+
+def _emerg_flags(v, rescuer_ids):
+    """Classify one vessel into EMERG_STATES (a vessel can hold several).
+
+    Returns (tuple_of_bools, displayed_emergency).  `displayed_emergency`
+    reproduces exactly what FleetStatusPanel paints as an emergency-coloured
+    label (MOB / ENG FAIL / DISTRESS / MEDICAL), i.e. the number a viewer
+    counts off the screen -- see render/panels.py:977-991.
+    """
+    vid = id(v)
+    is_rescuer = vid in rescuer_ids
+    pc = bool(v.player_commanded)
+    aground = v.status == "aground"
+    eng = bool(v.engine_failure)
+    # status == "adrift" with no mechanical failure == ran the tank dry.
+    fuel_adrift = (v.status == "adrift" and not eng)
+    mob = v.mob_timer > 0
+    tender = pc and v.vessel_type == "tender"
+    medical = pc and not is_rescuer and not tender
+    displayed = bool(mob or eng or v.distress or pc)
+    return (aground, eng, fuel_adrift, mob, medical, is_rescuer, tender), displayed
+
+
+def _stale_assignments(vessels):
+    """Casualties whose assigned rescuer can no longer perform the rescue.
+
+    _sar_dispatch skips any casualty with rescue_vessel is not None, so an
+    assignment that goes bad is never reissued -- the pointer is a permanent
+    lock, not a lease.  Counts casualties whose rescuer is itself in distress
+    or is no longer in a state that can steer (aground/adrift/in_port/docked).
+    """
+    n = 0
+    for v in vessels:
+        r = v.rescue_vessel
+        if v.distress and r is not None:
+            if r.distress or r.status not in ("underway", "avoiding"):
+                n += 1
+    return n
+
 
 # ---------------------------------------------------------------------------
 # Geometry helpers (independent of engine internals, so they cross-check it)
@@ -158,10 +224,70 @@ def run(days, seed, verbose=True):
     episodes = []      # closed distress episodes
     active_ep = {}     # vid -> episode still open at this instant
 
+    # --- emergency-lifecycle tracking (all states, not just aground/adrift) ---
+    em_open = {}                       # (vid, state) -> start_h
+    em_eps = []                        # closed/never-closed per-state episodes
+    em_entries = Counter()             # state -> entry count
+    em_census = []                     # sampled: per-state simultaneous counts
+    prev_em = {id(v): tuple([False] * len(EMERG_STATES)) for v in world.vessels}
+    # Per-tick aground flap detection (sub-minute refloat -> re-ground cycling).
+    prev_aground = {id(v): v.status == "aground" for v in world.vessels}
+    last_afloat_h = {}                 # vid -> sim_h of most recent refloat
+    reground_gaps = []                 # hours between refloat and next grounding
+
     t0 = time.time()
     for i in range(calls):
         game.update_simulation(REAL_DT)
-        sim_s = i * REAL_DT * TIME_COMPRESSION
+        sim_s = i * SIM_S_PER_CALL
+        sim_h = sim_s / 3600.0
+
+        # Per-tick: refloat -> re-ground flapping.  Measured every call because
+        # the observed loop closes inside one sim-minute and 1-min sampling
+        # would step straight over it.
+        for v in world.vessels:
+            vid = id(v)
+            ag_now = v.status == "aground"
+            if prev_aground[vid] and not ag_now:
+                last_afloat_h[vid] = sim_h
+            elif ag_now and not prev_aground[vid] and vid in last_afloat_h:
+                reground_gaps.append(sim_h - last_afloat_h.pop(vid))
+            prev_aground[vid] = ag_now
+
+        # Sampled: full state classification, census, and rescuer-pool depth.
+        if i % EMERG_SAMPLE_CALLS == 0:
+            rids = _rescuer_ids(world.vessels)
+            counts = dict.fromkeys(EMERG_STATES, 0)
+            n_displayed = 0
+            for v in world.vessels:
+                vid = id(v)
+                flags, displayed = _emerg_flags(v, rids)
+                if displayed:
+                    n_displayed += 1
+                for si, st in enumerate(EMERG_STATES):
+                    if flags[si]:
+                        counts[st] += 1
+                    was, now = prev_em[vid][si], flags[si]
+                    if now and not was:
+                        em_entries[st] += 1
+                        em_open[(vid, st)] = sim_h
+                    elif was and not now and (vid, st) in em_open:
+                        em_eps.append({"vessel": v.name, "state": st,
+                                       "start_h": em_open.pop((vid, st)),
+                                       "end_h": sim_h})
+                prev_em[vid] = flags
+            # Dispatch eligibility, replicating _sar_dispatch's candidate filter.
+            eligible = sum(
+                1 for v in world.vessels
+                if v.status in ("underway", "avoiding")
+                and not v.player_commanded
+                and id(v) not in rids)
+            em_census.append({
+                "sim_h": round(sim_h, 3),
+                "displayed": n_displayed,
+                "eligible": eligible,
+                "stale": _stale_assignments(world.vessels),
+                **counts,
+            })
 
         for v in world.vessels:
             vid = id(v)
@@ -257,6 +383,12 @@ def run(days, seed, verbose=True):
         ep["stranded_at_end"] = True
         episodes.append(ep)
 
+    # Emergency episodes still open at run end never resolved: end_h = None.
+    _vid_name = {id(v): v.name for v in world.vessels}
+    for (vid, st), start_h in em_open.items():
+        em_eps.append({"vessel": _vid_name.get(vid, "?"), "state": st,
+                       "start_h": start_h, "end_h": None})
+
     return {
         "seed": seed,
         "sim_days": target_sim_s / 86400.0,
@@ -266,6 +398,10 @@ def run(days, seed, verbose=True):
         "episodes": episodes,
         "arrivals": dict(arrivals),
         "port_visits": dict(port_visits),
+        "em_eps": em_eps,
+        "em_entries": dict(em_entries),
+        "em_census": em_census,
+        "reground_gaps": [round(g, 4) for g in reground_gaps],
         "wall_s": round(time.time() - t0, 1),
     }
 
@@ -406,6 +542,98 @@ def report(runs):
               f"resc={str(e['was_rescuer'])[0]}")
 
 
+def report_emergency(runs):
+    """Emergency-lifecycle report: every state, not just aground/adrift.
+
+    The original harness counted only v.distress, so MEDICAL diverts, MOB
+    searches, rescuer duty and the engine-failure/fuel-exhaustion split were all
+    invisible -- which is how a fleet-wide emergency ratchet shipped through six
+    verified commits.
+    """
+    days = sum(r["sim_days"] for r in runs)
+    nv = runs[0]["n_vessels"]
+    vessel_days = days * nv
+    all_eps = [e for r in runs for e in r["em_eps"]]
+    entries = Counter()
+    for r in runs:
+        entries.update(r["em_entries"])
+
+    print("\n" + "=" * 74)
+    print("EMERGENCY LIFECYCLE — all states")
+    print("=" * 74)
+    print(f"  seeds={len(runs)}  vessel-days={vessel_days:,.0f}\n")
+    print(f"  {'state':<14} {'fires':>6} {'/vessel-day':>12} {'resolved':>9} "
+          f"{'NEVER':>6} {'median h':>9} {'max h':>8}")
+    for st in EMERG_STATES:
+        eps = [e for e in all_eps if e["state"] == st]
+        closed = [e for e in eps if e["end_h"] is not None]
+        never = len(eps) - len(closed)
+        durs = sorted(e["end_h"] - e["start_h"] for e in closed)
+        med = f"{durs[len(durs)//2]:9.2f}" if durs else f"{'-':>9}"
+        mx = f"{durs[-1]:8.2f}" if durs else f"{'-':>8}"
+        print(f"  {st:<14} {entries[st]:6d} {entries[st]/max(1e-9,vessel_days):12.3f} "
+              f"{len(closed):9d} {never:6d} {med} {mx}")
+    print("\n  NEVER = episode still open when the run ended (no resolution path")
+    print("  reached in the remaining sim time).")
+
+    # --- simultaneous-emergency distribution -------------------------------
+    census = [c for r in runs for c in r["em_census"]]
+    if not census:
+        return
+    print("\n  --- simultaneous emergencies (as the fleet panel paints them) ---")
+    print("  'displayed' = vessels showing MOB/ENG FAIL/DISTRESS/MEDICAL, i.e.")
+    print("  the count a viewer reads off the screen.")
+    hist = Counter(c["displayed"] for c in census)
+    ns = len(census)
+    for k in sorted(hist):
+        bar = "#" * int(60.0 * hist[k] / ns)
+        print(f"      {k:2d}/{nv}  {100.0*hist[k]/ns:5.1f}%  {bar}")
+    disp = sorted(c["displayed"] for c in census)
+    print(f"      median={disp[ns//2]}  p90={disp[int(ns*0.9)]}  max={disp[-1]}")
+
+    # --- rescuer pool over time --------------------------------------------
+    print("\n  --- eligible-rescuer pool (dispatch candidates fleet-wide) ---")
+    elig = sorted(c["eligible"] for c in census)
+    zero = sum(1 for c in census if c["eligible"] == 0)
+    print(f"      median={elig[ns//2]}  p10={elig[int(ns*0.1)]}  min={elig[0]}  "
+          f"max={elig[-1]}")
+    print(f"      samples with ZERO eligible rescuer: {zero}/{ns} "
+          f"({100.0*zero/ns:.1f}%)")
+    stale = [c["stale"] for c in census]
+    print(f"      casualties holding a dead rescuer pointer: "
+          f"mean={sum(stale)/ns:.2f}  max={max(stale)}")
+
+    print("\n  --- per sim-day trend (mean over each day, all seeds pooled) ---")
+    print(f"      {'day':>4} {'displayed':>10} {'eligible':>9} {'stale':>6} "
+          f"{'aground':>8} {'eng_fail':>9} {'medical':>8} {'rescuer':>8}")
+    per_day = defaultdict(list)
+    for c in census:
+        per_day[int(c["sim_h"] // 24)].append(c)
+    for d in sorted(per_day):
+        cs = per_day[d]
+        n = len(cs)
+        def _m(key):
+            return sum(c[key] for c in cs) / n
+        print(f"      {d:4d} {_m('displayed'):10.2f} {_m('eligible'):9.2f} "
+              f"{_m('stale'):6.2f} {_m('aground'):8.2f} {_m('eng_fail'):9.2f} "
+              f"{_m('medical'):8.2f} {_m('rescuer'):8.2f}")
+
+    # --- refloat -> re-ground flapping -------------------------------------
+    gaps = sorted(g for r in runs for g in r["reground_gaps"])
+    print("\n  --- refloat -> re-ground flapping (KNOWN_ISSUES #11) ---")
+    if gaps:
+        fast = [g for g in gaps if g <= 1.0 / 60.0]     # within one sim-minute
+        hour = [g for g in gaps if g <= 1.0]
+        print(f"      re-groundings after a refloat : {len(gaps):4d}")
+        print(f"      ... within 1 sim-MINUTE       : {len(fast):4d}  "
+              f"({100.0*len(fast)/len(gaps):.0f}%)")
+        print(f"      ... within 1 sim-hour         : {len(hour):4d}  "
+              f"({100.0*len(hour)/len(gaps):.0f}%)")
+        print(f"      median gap                    : {gaps[len(gaps)//2]*60:6.2f} sim-min")
+    else:
+        print("      none observed")
+
+
 def static_corridor_scan():
     """Independent static check: how close does each scheduled route leg pass
     to land, versus the depth needed by the vessel using it?"""
@@ -532,3 +760,4 @@ if __name__ == "__main__":
         json.dump(runs, fh, indent=1)
     print(f"\n[raw events written to {out}]")
     report(runs)
+    report_emergency(runs)
