@@ -10,6 +10,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+from config import RESCUE_MISSION_COOLDOWN_S, RESCUE_MISSION_TTL_S
+
 Position = Tuple[float, float]
 
 # How long the completion banner stays visible before the mission is cleared.
@@ -31,6 +33,12 @@ class Mission:
     # Elapsed sim-seconds are tracked by MissionManager.sim_elapsed_s.
     deadline_sim_time: float = 0.0
     failed: bool = False
+    # Slot TTL: expire_sim_time > 0 means the mission releases the single
+    # mission slot at that sim time even if never completed.  Without it an
+    # unresolvable rescue mission is immortal (generate_mission refuses to
+    # replace an incomplete mission, and clear_if_expired only drops completed
+    # ones), so the first mayday of a session is the only one ever shown.
+    expire_sim_time: float = 0.0
 
 
 class MissionManager:
@@ -40,10 +48,23 @@ class MissionManager:
         self.active_mission: Optional[Mission] = None
         # Accumulated simulated seconds since game start — used for deadline math.
         self.sim_elapsed_s: float = 0.0
+        # vessel name -> sim time its last rescue mission left the slot.  Keyed by
+        # name rather than id() so it survives any future vessel rebuild.
+        self._rescue_cooldown: dict = {}
 
     def update(self, dt: float) -> None:
         """Advance the internal sim clock by dt simulated seconds."""
         self.sim_elapsed_s += dt
+        # Release the slot when an incomplete rescue mission outlives its TTL.
+        m = self.active_mission
+        if (m is not None and not m.complete
+                and m.expire_sim_time > 0.0
+                and self.sim_elapsed_s > m.expire_sim_time):
+            # Stamp the cooldown too: the casualty is usually still in distress,
+            # and without the stamp it would re-raise and re-lock immediately.
+            if m.target_vessel_name:
+                self._rescue_cooldown[m.target_vessel_name] = self.sim_elapsed_s
+            self.active_mission = None
 
     # ------------------------------------------------------------------ generate
 
@@ -57,6 +78,15 @@ class MissionManager:
         if (self.active_mission is not None
                 and not self.active_mission.complete):
             return
+
+        # Per-vessel rescue cooldown.  A refloated vessel re-grounds in a median
+        # 1.2 sim-seconds, so the same hull would otherwise raise a fresh mayday
+        # (and a fresh toast) several times a sim-minute.
+        if mission_type == "rescue":
+            _last = self._rescue_cooldown.get(vessel.name)
+            if (_last is not None
+                    and self.sim_elapsed_s - _last < RESCUE_MISSION_COOLDOWN_S):
+                return
 
         if mission_type == "delivery":
             m = Mission(
@@ -76,9 +106,13 @@ class MissionManager:
                 # reads as an offer of control the viewer doesn't have — the
                 # first cold viewer asked "can I control ships?" off this line.
                 objective="Nearest vessel diverting to assist",
-                target_vessel_name="",  # any commanded vessel qualifies
+                # The casualty, not the rescuer: resolution is "this vessel is
+                # no longer in distress", which is the only test the vessel that
+                # actually performs the rescue can pass.  See check_completion.
+                target_vessel_name=vessel.name,
                 target_position=target_pos,
                 reward_text=f"{vessel.name} has been assisted",
+                expire_sim_time=self.sim_elapsed_s + RESCUE_MISSION_TTL_S,
             )
         elif mission_type == "patrol":
             m = Mission(
@@ -156,12 +190,21 @@ class MissionManager:
                 break
 
         elif m.mission_type == "rescue":
-            # Any player-commanded vessel that has reached the distress position.
+            # Completion is the CASUALTY being freed — not a commanded vessel
+            # touching its last known position.  The old test could never fire
+            # for the vessel that actually performed the rescue: a rescuer is
+            # aimed at a standoff at least STANDOFF_STEP_WU (2.0 wu) clear of the
+            # casualty against a PORT_DETECT_RADIUS (2.0 wu) tolerance, and by
+            # the time check_completion runs, both _sar_refloat and arrive() have
+            # already cleared its player_commanded flag.  Measured closest
+            # approach was 2.03 wu against the 2.00 wu tolerance.
             for v in world.vessels:
-                if (v.player_commanded
-                        and v.distance_to(m.target_position) <= tol):
+                if v.name != m.target_vessel_name:
+                    continue
+                if not v.distress and not v.engine_failure:
+                    self._rescue_cooldown[v.name] = self.sim_elapsed_s
                     self._mark_complete(m)
-                    break
+                break
 
         elif m.mission_type == "patrol":
             for v in world.vessels:

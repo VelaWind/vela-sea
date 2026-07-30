@@ -967,6 +967,25 @@ STANDOFF_MAX_WU  = 24.0  # give up beyond this and fall back to the raw position
 # fleet has moved and a route may exist.
 SAR_DISPATCH_RETRY_S = 600.0   # sim-seconds (10 sim-minutes) between retry sweeps
 
+# Rescue-mission (MAYDAY toast) slot management.
+#
+# MissionManager holds ONE mission at a time and refuses to replace an
+# incomplete one, so a rescue mission that cannot complete locks the slot for
+# the whole session: measured 242 rescue missions requested over 4 sim-days,
+# 1 created, 241 silently dropped, and the survivor held the slot for all
+# 95 h without completing.  Two guards:
+#
+# TTL — a casualty still in distress after this long is not going to be freed
+# by the mission currently on screen; release the slot so other maydays can be
+# seen.  6 sim-hours is long enough that a normal rescue (2.1 h median) always
+# completes first.
+RESCUE_MISSION_TTL_S = 21600.0     # sim-seconds an incomplete rescue mission may hold the slot
+# Per-vessel cooldown — refloat lands a vessel back on the same shoal in a
+# median 1.2 sim-seconds (84% of re-groundings close inside one sim-minute), so
+# without this the completion fix turns the toast into a mayday/rescued
+# machine-gun for the same hull.  One mayday per vessel per half sim-hour.
+RESCUE_MISSION_COOLDOWN_S = 1800.0  # sim-seconds before the same vessel may raise another
+
 SAR_PULSE_PERIOD            = 2.0   # seconds — one full pulse cycle on the distress ring
 PORT_ACTIVITY_PULSE_PERIOD  = 4.0   # seconds — slower pulse shown when a vessel is in port
 COLOR_SAR_DISTRESS    = (255, 70, 50)   # red-orange distress pulse ring

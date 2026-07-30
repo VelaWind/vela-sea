@@ -125,6 +125,7 @@ def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
     grounded.refloat()
     if rescuer is not None and rescuer.player_commanded:
         rescuer.player_commanded = False
+        rescuer.command_reason = ""
         if rescuer.route:
             rescuer.destination = rescuer.route[rescuer.route_index]
     if event_log is not None:
@@ -149,8 +150,36 @@ def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
     active_rescuer_ids = {id(v.rescue_vessel) for v in vessels if v.rescue_vessel is not None}
 
     for grounded in vessels:
-        if not grounded.distress or grounded.rescue_vessel is not None:
+        if not grounded.distress:
             continue
+        # The rescue_vessel pointer is a LEASE, not a lock.  This skip used to be
+        # unconditional on "rescue_vessel is not None", and the field is cleared
+        # only by refloat() — which needs the assigned rescuer to arrive.  So when
+        # a rescuer broke down en route (the random-event sweep below has no
+        # player_commanded guard, so a rescuer can take an engine failure or run
+        # aground like anyone else) the casualty held a pointer to a vessel that
+        # would never come, and was never re-swept.  Observed live: Ardent Pilot
+        # aground 70 h 55 m holding "FV North Fisher", itself flagged DISTRESS.
+        # Measured 3.70 casualties on average holding a dead pointer, rising to
+        # 6.33 by sim-day 13.  Drop the lease and re-sweep instead.
+        _r = grounded.rescue_vessel
+        if _r is not None:
+            if (_r.distress or _r.engine_failure
+                    or not _r.player_commanded
+                    or _r.status not in ("underway", "avoiding")):
+                grounded.rescue_vessel = None
+                grounded._sar_retry_timer = 0.0
+                # Deliberately NOT touching the ex-rescuer.  Releasing it here
+                # with destination = route[route_index] was measured and reverted:
+                # it is a new instance of the displacement-return problem
+                # (KNOWN_ISSUES #11 mechanism 2 — aiming a displaced vessel at the
+                # one waypoint it happened to be heading for), and it cost
+                # arrivals 498 -> 430 while shifting the whole port-visit
+                # distribution (Saltgate 112 -> 41, Thornwick 45 -> 88).  The
+                # ex-rescuer clears its own command state through arrive() as it
+                # always did; only the casualty's dead lease is our business here.
+            else:
+                continue
         # Retry cooldown.  A casualty nobody can route to used to be re-swept
         # against every candidate on every sim step, at ~2,500 depth lookups per
         # attempt — 271k router calls in three sim-days, 89% of wall time, which
@@ -201,6 +230,7 @@ def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
             grounded._sar_retry_timer = 0.0
             best.destination = waypoints[0]
             best.player_commanded = True
+            best.command_reason = "sar"
             grounded.rescue_vessel = best
             active_rescuer_ids.add(id(best))
             if player_paths is not None and len(waypoints) > 1:
@@ -243,6 +273,7 @@ def _trigger_random_event(vessel, world, environment, event_log=None) -> None:
         nearest = min(world.ports, key=lambda p: vessel.distance_to(p.position))
         vessel.destination = nearest.position
         vessel.player_commanded = True
+        vessel.command_reason = "medical"
         if event_log is not None:
             event_log.add(t, f"MEDICAL EMERGENCY — {vessel.name} → {nearest.name}",
                           EVENT_COLOR_MEDICAL)
@@ -1825,6 +1856,7 @@ class Game:
             return
         v.destination = waypoints[0]
         v.player_commanded = True
+        v.command_reason = "player"
         if len(waypoints) > 1:
             self._pending_player_paths[id(v)] = waypoints[1:]
         elif id(v) in self._pending_player_paths:
@@ -1962,6 +1994,7 @@ class Game:
                     if (tender.player_commanded
                             and self._party_state.get("tender_for") == vid):
                         tender.player_commanded = False
+                        tender.command_reason = ""
                         if tender.route:
                             tender.destination = tender.route[tender.route_index]
                         vessel.log_decision(_t, "Party over — tender returning to service")
@@ -1986,6 +2019,7 @@ class Game:
                 vessel.party_timer = random.uniform(PARTY_DURATION_MIN_S, PARTY_DURATION_MAX_S)
                 tender.destination = vessel.position
                 tender.player_commanded = True
+                tender.command_reason = "party"
                 self._party_state["tender_for"] = vid
                 vessel.log_decision(_t, "Party on deck — tender dispatched")
                 self.event_log.add(
@@ -2258,6 +2292,26 @@ class Game:
 
                 _is_player = getattr(vessel, 'is_player', False)
 
+                # MOB search timer — every vessel, player included.  The countdown
+                # used to live inside the AI branch below, so a player MOB never
+                # expired; and because mob_timer > 0 also suppresses all further
+                # random events for that vessel, one MOB silenced the player's
+                # events for the rest of the session.  Search STEERING stays in the
+                # AI branch — the player keeps their own helm.
+                if vessel.mob_timer > 0:
+                    vessel.mob_timer = max(0.0, vessel.mob_timer - SIM_TIMESTEP)
+                    if vessel.mob_timer <= 0.0:
+                        # Search complete — restore speed and hand back to schedule.
+                        vessel.mob_position = None
+                        self.event_log.add(
+                            _sim_time_str(self.environment),
+                            f"MOB RECOVERED — {vessel.name}",
+                            EVENT_COLOR_REFLOAT)
+                        if not _is_player:
+                            vessel.target_speed = vessel.max_speed
+                            if vessel.route:
+                                vessel.destination = vessel.route[vessel.route_index]
+
                 if _is_player:
                     # Player vessel: heading controlled by held turn keys each sim step.
                     if not self.settings_panel.is_visible:
@@ -2408,17 +2462,13 @@ class Game:
                             self._zone_warning_sent = False
                 else:
                     # Navigation priority: MOB > trawling/anchoring > avoidance > normal.
+                    # The countdown itself is hoisted above the player/AI split;
+                    # this branch is the AI search pattern only, and keeps its
+                    # place at the top of the chain so a searching vessel is never
+                    # pulled into trawling or normal navigation.
                     if vessel.mob_timer > 0:
-                        vessel.mob_timer = max(0.0, vessel.mob_timer - SIM_TIMESTEP)
-                        if vessel.mob_timer > 0:
-                            vessel.target_speed = MOB_SEARCH_SPEED_KN
-                            vessel.turn_toward(vessel.bearing_to(vessel.mob_position), SIM_TIMESTEP)
-                        else:
-                            # Search complete — restore speed and hand back to schedule.
-                            vessel.mob_position = None
-                            vessel.target_speed = vessel.max_speed
-                            if vessel.route:
-                                vessel.destination = vessel.route[vessel.route_index]
+                        vessel.target_speed = MOB_SEARCH_SPEED_KN
+                        vessel.turn_toward(vessel.bearing_to(vessel.mob_position), SIM_TIMESTEP)
                     elif vessel.trawling_timer > 0:
                         # Trawling (fishing) or anchoring (sailboat) pause at open-sea WP.
                         vessel.trawling_timer = max(0.0, vessel.trawling_timer - SIM_TIMESTEP)
@@ -2531,7 +2581,18 @@ class Game:
                                              _sim_time_str(self.environment))
                                 break
                     _was_player_cmd = vessel.player_commanded
+                    _was_reason = vessel.command_reason
                     vessel.arrive(self.world)
+                    # Medical diversion complete.  arrive() takes its early
+                    # player_commanded branch, so a medical vessel never actually
+                    # docks and nothing marked the end of the emergency — the
+                    # label just vanished, which reads on screen as help that
+                    # never resolved.  Say so explicitly.
+                    if (_was_reason == "medical" and not vessel.player_commanded):
+                        self.event_log.add(
+                            _sim_time_str(self.environment),
+                            f"MEDICAL LANDED — {vessel.name}",
+                            EVENT_COLOR_REFLOAT)
                     # Career hook: player docked at a port.
                     if _is_player and vessel.status == "in_port":
                         self._on_player_docked(vessel)
@@ -2541,6 +2602,9 @@ class Game:
                         _remaining = self._pending_player_paths[_vid]
                         vessel.destination = _remaining[0]
                         vessel.player_commanded = True  # keep commanding
+                        # arrive() cleared the reason; this is the same command
+                        # continuing to its next hop, so carry it across.
+                        vessel.command_reason = _was_reason
                         if len(_remaining) > 1:
                             self._pending_player_paths[_vid] = _remaining[1:]
                         else:
@@ -2560,14 +2624,19 @@ class Game:
                             and vessel.mob_timer <= 0):
                         vessel.target_speed = vessel.max_speed
 
+                # Distress age accrues in EVERY casualty state, not just aground.
+                # This used to sit inside the "aground" branch below, so ENG FAIL
+                # and fuel-exhaustion casualties — which are adrift, not aground —
+                # carried a permanent 0.0, leaving nothing to display and nothing
+                # for an age-based recovery path to measure against.
+                if vessel.distress:
+                    vessel.distress_timer += SIM_TIMESTEP
+
                 # Grounding check — skip in_port and docked vessels.
                 # For aground vessels: check tide refloating before skipping.
                 if vessel.status in ("in_port", "docked"):
                     continue
                 if vessel.status == "aground":
-                    # SAR distress timer
-                    if vessel.distress:
-                        vessel.distress_timer += SIM_TIMESTEP
                     # Tide refloating: depth now exceeds required UKC
                     depth = self.world.water_depth_at(
                         vessel.position, self.environment.tide_level

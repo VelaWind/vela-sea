@@ -79,9 +79,19 @@ class Vessel:
     # the vessel then resumes its scheduled route at the current route_index.
     player_commanded: bool = False
 
+    # WHY this vessel is commanded: "sar" (dispatched to a casualty), "medical"
+    # (diverting to the nearest port with a casualty aboard), "party" (tender
+    # running out to an anchored yacht), "player" (direct order), "" (not
+    # commanded).  player_commanded alone cannot distinguish these, and the fleet
+    # panel labelled all of them "MEDICAL" — so every rescuer the dispatcher
+    # drafted appeared on screen as a new medical emergency.  Set at each site
+    # that raises the flag and cleared wherever it drops.
+    command_reason: str = ""
+
     # SAR (Search and Rescue) state.
-    # distress    — True while the vessel is aground and awaiting rescue.
-    # distress_timer — cumulative sim-seconds since grounding.
+    # distress       — True while the vessel needs outside help: aground, or
+    #                  adrift from engine failure or fuel exhaustion.
+    # distress_timer — cumulative sim-seconds in distress, any casualty state.
     # rescue_vessel  — reference to the Vessel assigned to rescue this one, or None.
     distress: bool = False
     distress_timer: float = 0.0
@@ -214,6 +224,7 @@ class Vessel:
         if self.player_commanded:
             # Commanded destination reached — hand back to the schedule.
             self.player_commanded = False
+            self.command_reason = ""
             if self.route:
                 self.destination = self.route[self.route_index]
             self.status = "underway"
