@@ -118,8 +118,22 @@ def _emerg_flags(v, rescuer_ids):
         is_rescuer = vid in rescuer_ids
         tender = pc and v.vessel_type == "tender"
         medical = pc and not is_rescuer and not tender
+    # Two counts, deliberately both reported.
+    #
+    # `displayed` is the LEGACY definition — any vessel the old fleet panel painted
+    # with an emergency-coloured label, which included every commanded vessel
+    # because all three command reasons rendered as "MEDICAL".  Kept so numbers
+    # stay comparable with the c31e2c3 and dd6e07f baselines.
+    #
+    # `emergency` is what the panel paints now that duty states read RESCUING /
+    # PARTY instead: a genuine casualty or a medical case.  This is the honest
+    # "how many vessels are in trouble" number.
     displayed = bool(mob or eng or v.distress or pc)
-    return (aground, eng, fuel_adrift, mob, medical, is_rescuer, tender), displayed
+    label = v.display_state() if hasattr(v, "display_state") else ""
+    emergency = (label in ("MOB", "ENG FAIL", "AGROUND", "ADRIFT", "MEDICAL")
+                 if label else displayed)
+    return ((aground, eng, fuel_adrift, mob, medical, is_rescuer, tender),
+            displayed, emergency)
 
 
 def _stale_assignments(vessels):
@@ -270,11 +284,14 @@ def run(days, seed, verbose=True):
             rids = _rescuer_ids(world.vessels)
             counts = dict.fromkeys(EMERG_STATES, 0)
             n_displayed = 0
+            n_emergency = 0
             for v in world.vessels:
                 vid = id(v)
-                flags, displayed = _emerg_flags(v, rids)
+                flags, displayed, emergency = _emerg_flags(v, rids)
                 if displayed:
                     n_displayed += 1
+                if emergency:
+                    n_emergency += 1
                 for si, st in enumerate(EMERG_STATES):
                     if flags[si]:
                         counts[st] += 1
@@ -296,6 +313,7 @@ def run(days, seed, verbose=True):
             em_census.append({
                 "sim_h": round(sim_h, 3),
                 "displayed": n_displayed,
+                "emergency": n_emergency,
                 "eligible": eligible,
                 "stale": _stale_assignments(world.vessels),
                 **counts,
@@ -593,15 +611,20 @@ def report_emergency(runs):
     if not census:
         return
     print("\n  --- simultaneous emergencies (as the fleet panel paints them) ---")
-    print("  'displayed' = vessels showing MOB/ENG FAIL/DISTRESS/MEDICAL, i.e.")
-    print("  the count a viewer reads off the screen.")
-    hist = Counter(c["displayed"] for c in census)
+    print("  'emergency' = vessels labelled MOB/ENG FAIL/AGROUND/ADRIFT/MEDICAL.")
+    print("  'displayed' = the LEGACY count, which also swept in every commanded")
+    print("  vessel because all three command reasons rendered as MEDICAL.  Both")
+    print("  are shown so the series stays comparable across baselines.")
     ns = len(census)
+    hist = Counter(c.get("emergency", c["displayed"]) for c in census)
     for k in sorted(hist):
         bar = "#" * int(60.0 * hist[k] / ns)
         print(f"      {k:2d}/{nv}  {100.0*hist[k]/ns:5.1f}%  {bar}")
+    emg = sorted(c.get("emergency", c["displayed"]) for c in census)
     disp = sorted(c["displayed"] for c in census)
-    print(f"      median={disp[ns//2]}  p90={disp[int(ns*0.9)]}  max={disp[-1]}")
+    print(f"      emergency: median={emg[ns//2]}  p90={emg[int(ns*0.9)]}  max={emg[-1]}")
+    print(f"      displayed: median={disp[ns//2]}  p90={disp[int(ns*0.9)]}  max={disp[-1]}"
+          "   (legacy definition)")
 
     # --- rescuer pool over time --------------------------------------------
     print("\n  --- eligible-rescuer pool (dispatch candidates fleet-wide) ---")
@@ -616,7 +639,7 @@ def report_emergency(runs):
           f"mean={sum(stale)/ns:.2f}  max={max(stale)}")
 
     print("\n  --- per sim-day trend (mean over each day, all seeds pooled) ---")
-    print(f"      {'day':>4} {'displayed':>10} {'eligible':>9} {'stale':>6} "
+    print(f"      {'day':>4} {'emerg':>7} {'displayed':>10} {'eligible':>9} {'stale':>6} "
           f"{'aground':>8} {'eng_fail':>9} {'medical':>8} {'rescuer':>8}")
     per_day = defaultdict(list)
     for c in census:
@@ -626,7 +649,8 @@ def report_emergency(runs):
         n = len(cs)
         def _m(key):
             return sum(c[key] for c in cs) / n
-        print(f"      {d:4d} {_m('displayed'):10.2f} {_m('eligible'):9.2f} "
+        _emg = (sum(c.get("emergency", c["displayed"]) for c in cs) / n)
+        print(f"      {d:4d} {_emg:7.2f} {_m('displayed'):10.2f} {_m('eligible'):9.2f} "
               f"{_m('stale'):6.2f} {_m('aground'):8.2f} {_m('eng_fail'):9.2f} "
               f"{_m('medical'):8.2f} {_m('rescuer'):8.2f}")
 
