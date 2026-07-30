@@ -97,15 +97,27 @@ def _emerg_flags(v, rescuer_ids):
     counts off the screen -- see render/panels.py:977-991.
     """
     vid = id(v)
-    is_rescuer = vid in rescuer_ids
     pc = bool(v.player_commanded)
     aground = v.status == "aground"
     eng = bool(v.engine_failure)
     # status == "adrift" with no mechanical failure == ran the tank dry.
     fuel_adrift = (v.status == "adrift" and not eng)
     mob = v.mob_timer > 0
-    tender = pc and v.vessel_type == "tender"
-    medical = pc and not is_rescuer and not tender
+    # command_reason is authoritative when present.  Deriving "is a rescuer" from
+    # the rescue_vessel pointers instead is WRONG once the pointer is a lease: an
+    # ex-rescuer whose lease was dropped still carries a live "sar" command but is
+    # no longer pointed at by any casualty, and the pointer test files it as
+    # medical -- which inflated medical from 2.33 to 8.67 vessels/day before this
+    # was caught.  Fall back to the pointer scan only for pre-command_reason runs.
+    reason = getattr(v, "command_reason", "")
+    if pc and reason:
+        is_rescuer = reason == "sar"
+        tender = reason == "party"
+        medical = reason == "medical"
+    else:
+        is_rescuer = vid in rescuer_ids
+        tender = pc and v.vessel_type == "tender"
+        medical = pc and not is_rescuer and not tender
     displayed = bool(mob or eng or v.distress or pc)
     return (aground, eng, fuel_adrift, mob, medical, is_rescuer, tender), displayed
 
