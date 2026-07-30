@@ -103,6 +103,9 @@ class VesselInfoPanel:
         self.font_log   = safe_sysfont(FONT_DATA_NAME, FONT_SIZE_SMALL)
         self.width = 360
         self.height = 420
+        # Width of the screen column this card occupies while open, 0 when closed.
+        # Set on every draw; read by the mission toast to avoid overlapping it.
+        self.occupied_width = 0
 
     def _required_panel_height(self, vessel) -> int:
         """Compute the pixel height needed to fit all rows for this vessel.
@@ -130,7 +133,7 @@ class VesselInfoPanel:
             h += S(26) + S(32)         # fuel label + bar row
         else:
             h += S(26) + S(26)         # "Wind-powered" + "Wind Note" rows
-        if vessel.status == "aground" and getattr(vessel, 'distress', False):
+        if getattr(vessel, 'distress', False):
             h += S(24) + S(22) + S(22) + S(22) + S(18)  # DISTRESS header + 4 rows + gap
         log = getattr(vessel, 'captain_log', [])
         if log:
@@ -143,6 +146,7 @@ class VesselInfoPanel:
         # No selection → no panel.  The fleet list and Tab already advertise
         # how to select a vessel; an empty placeholder just blocks the chart.
         if vessel is None:
+            self.occupied_width = 0
             return
 
         S = ui_px   # identity on desktop; scales rows with the fonts on web
@@ -154,6 +158,9 @@ class VesselInfoPanel:
         )
         x = self.surface.get_width() - panel_width - panel_margin
         y = panel_margin
+        # Publish the column this card occupies so the bottom-right mission toast
+        # can step out of its way (see MissionPanel.draw right_offset).
+        self.occupied_width = panel_width + panel_margin
         self._draw_panel_background(x, y, panel_width, panel_height)
 
         padding = S(18)
@@ -183,9 +190,13 @@ class VesselInfoPanel:
         if len(_hull_int) >= 3:
             pygame.draw.polygon(self.surface, COLOR_TEXT_SECONDARY, _hull_int)
         current_y += S(26)
-        # Show mission_status when available (e.g. "TRAWLING", "BOARDING"), else status
-        _status_display = getattr(vessel, 'mission_status', '') or vessel.status.upper()
-        self._draw_label_value(x, current_y, panel_width, "Status", _status_display)
+        # One authoritative label — see Vessel.display_state().  Reading
+        # `mission_status or status` here is what made a tug aground 70 h report
+        # "STANDBY" while the DISTRESS section below counted its time on the bottom.
+        _status_display = vessel.display_state()
+        _status_col = _DISPLAY_STATE_COLOR.get(_status_display, COLOR_TEXT_PRIMARY)
+        self._draw_label_value(x, current_y, panel_width, "Status", _status_display,
+                               value_color=_status_col)
         current_y += S(32)
 
         self._draw_section_header(x, current_y, "Dimensions")
@@ -236,15 +247,21 @@ class VesselInfoPanel:
             current_y += S(26)
 
         # ── SAR distress section ──────────────────────────────────────────────
-        if vessel.status == "aground" and getattr(vessel, 'distress', False):
+        # Gated on `distress`, not on status == "aground": ENG FAIL and
+        # fuel-exhaustion casualties are ADRIFT, and while this was aground-only
+        # they showed no rescue information at all — which is why a viewer watching
+        # CG Sentinel sit in ENG FAIL for ~72 h saw nothing about a rescuer.
+        if getattr(vessel, 'distress', False):
             self._draw_section_header(x, current_y, "DISTRESS")
             current_y += S(24)
 
             hrs = int(vessel.distress_timer // 3600)
             mins = int((vessel.distress_timer % 3600) // 60)
             time_str = f"{hrs}h {mins:02d}m" if hrs else f"{mins}m"
-            self._draw_label_value(x, current_y, panel_width,
-                                   "Time aground", time_str, value_color=COLOR_WARNING)
+            self._draw_label_value(
+                x, current_y, panel_width,
+                "Time aground" if vessel.status == "aground" else "Time adrift",
+                time_str, value_color=COLOR_WARNING)
             current_y += S(22)
 
             rescuer = getattr(vessel, 'rescue_vessel', None)
@@ -490,7 +507,7 @@ class TechnicalSystemsPanel:
             dist_nm = dist * NM_PER_WORLD_UNIT
             card    = self._direction_to_cardinal(bearing)
             spd_kn  = other.current_speed
-            status  = getattr(other, 'mission_status', '') or other.status.upper()
+            status  = other.display_state()   # authoritative — see Vessel.display_state()
             value   = f"{dist_nm:.1f}nm {card} • {spd_kn:.1f}kn • {status}"
             dot_col = _AIS_TYPE_COLORS.get(other.vessel_type)
             entries.append((other.name, value, COLOR_TEXT_PRIMARY, dot_col))
@@ -903,6 +920,20 @@ _FLEET_STATUS_STYLE: dict = {
     "anchored":  ("ANCHORED",  (160, 160, 160)),
 }
 
+# Colours for the labels Vessel.display_state() can return.  The engine owns the
+# label, the render layer owns the colour.  Emergencies are red, MOB amber-orange,
+# duty states cool/neutral so a drafted rescuer no longer reads as a casualty.
+_DISPLAY_STATE_COLOR: dict = {
+    "MOB":       (255, 140,  50),
+    "ENG FAIL":  (255,  80,  50),
+    "AGROUND":   (255,  80,  50),
+    "ADRIFT":    (255,  80,  50),
+    "RESCUING":  ( 80, 200, 255),
+    "MEDICAL":   (220, 165,  50),
+    "PARTY":     (180, 140, 220),
+    "COMMANDED": (180, 180, 180),
+}
+
 
 class FleetStatusPanel:
     """Compact fleet overview in the top-left corner, below the compass.
@@ -973,22 +1004,18 @@ class FleetStatusPanel:
                 hl.fill(theme.ROW_SEL_FILL if is_sel else theme.ROW_HOVER_FILL)
                 self.surface.blit(hl, (x, row_y))
 
-            # Determine display status and color
-            mission_st = getattr(vessel, 'mission_status', '')
-            if vessel.mob_timer > 0:
-                label, col = "MOB",     (255, 140,  50)
-            elif vessel.engine_failure:
-                label, col = "ENG FAIL",(255,  80,  50)
-            elif vessel.distress:
-                label, col = "DISTRESS",(255,  80,  50)
-            elif vessel.player_commanded and not vessel.distress:
-                label, col = "MEDICAL", (220, 165,  50)
-            elif mission_st:
-                label = mission_st
-                col   = (180, 180, 180) if vessel.status == "underway" else (120, 120, 120)
-            else:
-                style = _FLEET_STATUS_STYLE.get(vessel.status, ("???", (150, 150, 150)))
-                label, col = style
+            # Display status comes from the vessel itself — see
+            # Vessel.display_state().  This panel used to derive its own, and
+            # labelled every commanded vessel "MEDICAL".
+            label = vessel.display_state()
+            col = _DISPLAY_STATE_COLOR.get(label)
+            if col is None:
+                # display_state fell through to mission_status or raw status.
+                if getattr(vessel, 'mission_status', ''):
+                    col = (180, 180, 180) if vessel.status == "underway" else (120, 120, 120)
+                else:
+                    label, col = _FLEET_STATUS_STYLE.get(
+                        vessel.status, ("???", (150, 150, 150)))
 
             name_col = theme.ROW_NAME_SEL if is_sel else theme.ROW_NAME
             status_surf = self._font_status.render(label, True, col)
@@ -1039,11 +1066,17 @@ class MissionPanel:
         self.MARGIN = ui_px(MissionPanel.MARGIN)
 
     def draw(self, mission_manager, sim_elapsed_s: float = 0.0,
-             bottom_offset: int = 0) -> None:
+             bottom_offset: int = 0, right_offset: int = 0) -> None:
         """Draw the mission panel if a mission is active.
 
         bottom_offset lifts the panel (e.g. above the minimap) so the two
         bottom-right elements never overlap.
+
+        right_offset shifts it left, out of the vessel-info card's column.  That
+        card is anchored TOP-right but grows with its content — up to the full
+        viewport height — so on a short viewport the toast landed on top of its
+        Fuel rows.  Both x computations derive from vw, so narrowing vw moves the
+        active and the completed banner together.
         """
         m = mission_manager.active_mission
         if m is None:
@@ -1051,6 +1084,7 @@ class MissionPanel:
 
         vw, vh = self.surface.get_size()
         vh -= bottom_offset
+        vw -= right_offset
         pad = self.PAD
 
         if m.complete:

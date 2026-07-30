@@ -1232,7 +1232,10 @@ class Chart:
         """Draw a small AIS tooltip near the mouse cursor for the hovered vessel."""
         mx, my = pygame.mouse.get_pos()
 
-        status_str = getattr(vessel, "mission_status", "") or vessel.status.upper()
+        # Same authoritative label as the fleet list and info panel — see
+        # Vessel.display_state().  Reading `mission_status or status` here is what
+        # let the chart badge disagree with the fleet list at the same instant.
+        status_str = vessel.display_state()
         line1 = self.font_label.render(vessel.name, True, (255, 255, 255))
         line2 = self.font_mono.render(
             f"{vessel.vessel_type.capitalize()} | {status_str}", True, (190, 205, 220))

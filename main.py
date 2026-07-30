@@ -29,7 +29,7 @@ from config import ARRIVAL_DISTANCE, PORT_DETECT_RADIUS, SHIP_SELECT_RADIUS
 from config import TIME_COMPRESSION
 from config import DRAFT_SAFETY_MARGIN_M
 from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR, FUEL_EMERGENCY_REFUEL_FRACTION
-from config import SAR_DISPATCH_RETRY_S
+from config import SAR_DISPATCH_RETRY_S, ENGINE_REPAIR_TIME_S
 from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
 from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM, THROTTLE_FLASH_MS
 from config import HULL_REPAIR_COST_PER_POINT
@@ -197,10 +197,21 @@ def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
                 continue
             if v.status not in ("underway", "avoiding"):
                 continue
-            if v.player_commanded:
-                continue
             if id(v) in active_rescuer_ids:
                 continue
+            if v.player_commanded:
+                # An ORPHANED rescuer is available.  Dropping a dead lease (above)
+                # leaves the ex-rescuer carrying a live "sar" command it will only
+                # shed when it happens to arrive somewhere — 7.52 of 16 vessels by
+                # sim-day 13, all of them ineligible, which is why zero-eligible
+                # samples rose to 48.5%.  It is serving no casualty by definition
+                # (nothing points at it, checked above), so it is free to be
+                # re-dispatched.  Its navigation is left completely alone: the
+                # alternative, handing it a fresh route waypoint, is the
+                # displacement-return pattern that cost arrivals 663 -> 430.
+                if not (v.command_reason == "sar"
+                        and v.status in ("underway", "avoiding")):
+                    continue
             d = v.distance_to(grounded.position)
             if d <= range_wu:
                 candidates.append((d, v))
@@ -2632,6 +2643,30 @@ class Game:
                 if vessel.distress:
                     vessel.distress_timer += SIM_TIMESTEP
 
+                # Engine repair — the only non-rescuer exit an adrift casualty has.
+                # The tide check below is gated on "aground", so before this an
+                # ENG FAIL vessel could only ever be freed by a rescuer arriving.
+                # Deliberately does NOT release the assigned rescuer here: it will
+                # clear its own command through arrive(), and retargeting it to
+                # route[route_index] is the displacement-return pattern that cost
+                # arrivals 663 -> 430 (see _sar_dispatch).  Until then it is an
+                # orphaned "sar" command, which dispatch now treats as available.
+                if (vessel.engine_failure
+                        and vessel.distress_timer >= ENGINE_REPAIR_TIME_S):
+                    vessel.engine_failure = False
+                    vessel.rescue_vessel = None
+                    # Fuel exhaustion is a separate casualty state with its own
+                    # fix (an emergency refuel); only clear distress when the
+                    # engine was the whole problem.
+                    if vessel.fuel is None or vessel.fuel > 0.0:
+                        vessel.status = "underway"
+                        vessel.distress = False
+                        vessel.distress_timer = 0.0
+                    self.event_log.add(
+                        _sim_time_str(self.environment),
+                        f"ENGINE RESTARTED — {vessel.name}",
+                        EVENT_COLOR_REFLOAT)
+
                 # Grounding check — skip in_port and docked vessels.
                 # For aground vessels: check tide refloating before skipping.
                 if vessel.status in ("in_port", "docked"):
@@ -2856,9 +2891,12 @@ class Game:
         # Mission panel lifts above the minimap when both occupy bottom-right.
         _mm_offset = (MINIMAP_HEIGHT_PX + MINIMAP_MARGIN_PX
                       if self.minimap.is_visible else 0)
+        # The vessel-info card is top-right but grows with its content, so on a
+        # short viewport it reaches the bottom-right corner the toast wants.
         self.mission_panel.draw(self.mission_manager,
                                 self.mission_manager.sim_elapsed_s,
-                                bottom_offset=_mm_offset)
+                                bottom_offset=_mm_offset,
+                                right_offset=self.vessel_info_panel.occupied_width)
         self.mission_manager.clear_if_expired()
         # Web: the minimap and the vessel-info card contend for the bottom-right
         # corner (the map clipped the card's log text — caught in the preview

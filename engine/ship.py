@@ -171,6 +171,41 @@ class Vessel:
     # Route / port-stay state machine (Chunk E)
     # ------------------------------------------------------------------
 
+    def display_state(self) -> str:
+        """Canonical UI label for this vessel — the single source of truth.
+
+        Four readers used to derive this independently and disagreed on screen at
+        the same instant:
+
+          * the fleet list ranked mob_timer > engine_failure > distress >
+            player_commanded > mission_status > status, and labelled ANY commanded
+            vessel "MEDICAL" — so every rescuer the dispatcher drafted appeared as
+            a fresh medical emergency, and a live viewer read the fleet as sicker
+            than it was;
+          * the info panel's Status row read `mission_status or status` and never
+            consulted distress at all, so a tug aground 70 h read "STANDBY";
+          * the DISTRESS section was gated on status == "aground", so ENG FAIL and
+            fuel-exhaustion casualties showed no rescue information whatsoever;
+          * the chart badge keyed off distress alone.
+
+        Precedence is worst-first: an emergency outranks a duty, and a duty
+        outranks a schedule label.  Pure Python — render reads it, never
+        recomputes it.  Colours stay in the render layer.
+        """
+        if self.mob_timer > 0:
+            return "MOB"
+        if self.engine_failure:
+            return "ENG FAIL"
+        if self.status == "aground":
+            return "AGROUND"
+        if self.status == "adrift":
+            return "ADRIFT"
+        if self.player_commanded:
+            # WHY it is commanded is the whole point — see command_reason.
+            return {"sar": "RESCUING", "medical": "MEDICAL",
+                    "party": "PARTY"}.get(self.command_reason, "COMMANDED")
+        return self.mission_status or self.status.upper()
+
     def refloat(self) -> None:
         """Restore underway status after grounding or engine failure resolves.
 

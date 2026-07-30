@@ -967,6 +967,15 @@ STANDOFF_MAX_WU  = 24.0  # give up beyond this and fall back to the raw position
 # fleet has moved and a route may exist.
 SAR_DISPATCH_RETRY_S = 600.0   # sim-seconds (10 sim-minutes) between retry sweeps
 
+# Engine repair.  A mechanical engine failure leaves the vessel adrift, and the
+# tide-refloat fallback that frees grounded vessels is gated on status ==
+# "aground" — so an adrift casualty had NO exit but a rescuer physically
+# arriving, and 4 of 24 never got one in 14 sim-days (one ran 73 h, and a live
+# viewer watched CG Sentinel sit in ENG FAIL for a full ~72 h).  The crew now
+# gets the engine turning again after this long adrift.  A rescuer arriving still
+# fixes it sooner, so this is a floor on recovery, not a replacement for SAR.
+ENGINE_REPAIR_TIME_S = 21600.0   # sim-seconds (6 sim-hours) adrift before self-repair
+
 # Rescue-mission (MAYDAY toast) slot management.
 #
 # MissionManager holds ONE mission at a time and refuses to replace an
