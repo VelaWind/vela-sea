@@ -3,6 +3,7 @@
 #   pyinstaller vela_sea.spec          # desktop build
 #   python tools/build_web.py              # experimental WebAssembly build (clean staged tree)
 -r requirements.txt
+pytest==8.4.2            # test suite: pytest tests/ -q
 pyinstaller==6.20.0
 pygbag==0.9.3
 playwright==1.61.0   # browser test suite (tools/browser_test.py); then: playwright install chromium
