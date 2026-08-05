@@ -9,6 +9,11 @@ Methodology:
   3. Assert total new overhead per frame < 0.5 ms.
 
 Uses SDL dummy driver so the test runs headlessly without a real display.
+
+Run manually with `python tests/test_visual_perf.py` from the repo root.
+Timing benchmarks are machine-dependent, so this script is not part of the
+pytest suite: everything that measures or asserts runs under __main__ only,
+and importing the module (as pytest collection does) executes no benchmarks.
 """
 
 import sys
@@ -60,8 +65,6 @@ def time_n(fn, n=REPS, warmup=WARMUP):
 def bench_vignette():
     chart.draw_ocean_vignette()
 
-ms_vignette = time_n(bench_vignette)
-
 # ---- 2: inland tint -- all islands in one pass (solid color, no SRCALPHA) ----
 _island_polys = []
 for isl in world.islands:
@@ -82,42 +85,48 @@ def bench_inland_tint():
             pygame.gfxdraw.filled_polygon(surface, inner, LAND_INLAND_TINT_COLOR)
 
 
-ms_inland = time_n(bench_inland_tint)
-
 # ---- 3: full draw_all timing for context ----
 def bench_full():
     surface.fill((10, 28, 52))
     chart.draw_all(world=world, environment=env)
 
-ms_full = time_n(bench_full, n=200, warmup=10)
 
-# ---- results ----
-ms_total_new = ms_vignette + ms_inland
-n_islands = len(_island_polys)
+def main():
+    ms_vignette = time_n(bench_vignette)
+    ms_inland = time_n(bench_inland_tint)
+    ms_full = time_n(bench_full, n=200, warmup=10)
 
-print()
-print("=" * 60)
-print("Chart polish -- per-frame overhead")
-print("=" * 60)
-print(f"  Ocean vignette (cached blit):  {ms_vignette:.4f} ms")
-print(f"  Inland tint ({n_islands} islands):    {ms_inland:.4f} ms")
-print(f"  ------------------------------------")
-print(f"  Total new overhead:            {ms_total_new:.4f} ms  (budget: < 0.50 ms)")
-print(f"  Full draw_all baseline:        {ms_full:.2f} ms  "
-      f"({1000/ms_full:.0f} theoretical FPS)")
-print("=" * 60)
+    # ---- results ----
+    ms_total_new = ms_vignette + ms_inland
+    n_islands = len(_island_polys)
 
-errors = []
-if ms_total_new >= 0.5:
-    errors.append(
-        f"New overhead {ms_total_new:.4f} ms exceeds 0.5 ms budget"
-    )
+    print()
+    print("=" * 60)
+    print("Chart polish -- per-frame overhead")
+    print("=" * 60)
+    print(f"  Ocean vignette (cached blit):  {ms_vignette:.4f} ms")
+    print(f"  Inland tint ({n_islands} islands):    {ms_inland:.4f} ms")
+    print(f"  ------------------------------------")
+    print(f"  Total new overhead:            {ms_total_new:.4f} ms  (budget: < 0.50 ms)")
+    print(f"  Full draw_all baseline:        {ms_full:.2f} ms  "
+          f"({1000/ms_full:.0f} theoretical FPS)")
+    print("=" * 60)
 
-print()
-if errors:
-    for e in errors:
-        print(f"FAIL: {e}")
-    sys.exit(1)
-else:
-    print("ALL CHECKS PASSED")
-print()
+    errors = []
+    if ms_total_new >= 0.5:
+        errors.append(
+            f"New overhead {ms_total_new:.4f} ms exceeds 0.5 ms budget"
+        )
+
+    print()
+    if errors:
+        for e in errors:
+            print(f"FAIL: {e}")
+        sys.exit(1)
+    else:
+        print("ALL CHECKS PASSED")
+    print()
+
+
+if __name__ == "__main__":
+    main()
