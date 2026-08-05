@@ -1,7 +1,7 @@
 # Vela Sea
 
 A maritime career simulator written in Python and Pygame. You command a cargo
-vessel on a 210 nautical mile sea: take contracts from a job board, navigate an
+vessel on a sea 210 by 147 nautical miles: take contracts from a job board, navigate an
 ECDIS-style chart with depth soundings and restricted zones, and deal with
 weather, groundings and fuel while fifteen AI vessels run their own schedules
 around you. The project was built to practise simulation architecture, so the
@@ -20,9 +20,10 @@ locally, as below.
 
 ## Features
 
-- **Fifteen AI vessels** with their own routes and duty states: cargo ships,
-  ferries on schedule, trawlers working the grounds, sailing yachts, a tug, a
-  pilot boat and a coast guard cutter that responds to distress calls.
+- **Fifteen AI vessels** with their own routes and duty states: four cargo
+  ships, three trawlers working the grounds, three sailing yachts, a ferry on
+  schedule, a tanker, a tug, a tender and a coast guard cutter that responds to
+  distress calls.
 - **Collision avoidance** based on COLREGS Rules 14, 15 and 17, using
   closest-point-of-approach and time-to-CPA calculations, with hysteresis so
   vessels do not oscillate between manoeuvres.
@@ -43,8 +44,10 @@ locally, as below.
   boundaries and navigation marks.
 - **Four achievements** and a career save written every time you dock.
 - **Generated audio**: seven sound files synthesised from the standard library
-  (`wave` and `struct`) rather than recorded, so the repository carries no audio
-  the code cannot rebuild.
+  (`wave` and `struct`) rather than recorded. The generated files are committed
+  so a packaged build has them on a read-only install, and any that are missing
+  are rebuilt at launch, so nothing in the repository is audio the code cannot
+  reproduce.
 
 Two limits worth stating plainly. The save is career-only: money, reputation,
 statistics, achievements and hull are persisted, but the active contract, world
@@ -82,7 +85,7 @@ render/          Pygame drawing, reads engine state
 data/world_data.py   Sea geography, ports, islands, zones and AI routes
 tests/               Headless pytest suite and a 16-scenario gameplay bot
 main.py              Game loop: input, fixed-timestep simulation, render
-config.py            Tunable constants (251 of them)
+config.py            Tunable constants (401 of them)
 ```
 
 Every tunable number lives in `config.py` rather than at its use site, so
@@ -174,3 +177,7 @@ Vela Sea was written with heavy use of Claude Code. The specifications, the
 architecture rules, the test strategy and the decisions about what to merge are
 mine, and the prompt files kept in the repository are part of that record. I am
 stating this rather than leaving it to be inferred from the commit history.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
