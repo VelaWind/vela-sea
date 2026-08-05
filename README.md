@@ -8,6 +8,14 @@ around you. The project was built to practise simulation architecture, so the
 simulation layer is pure Python with no Pygame imports and the whole game is
 testable headlessly, including a bot that plays through sixteen scenarios.
 
+**Watch it run in a browser: [velawind.github.io/vela-sea](https://velawind.github.io/vela-sea/)**
+The web build is a spectator view of the same simulation, compiled to
+WebAssembly with pygbag. The AI fleet, weather, tides and port traffic all run,
+and you can click a vessel to follow it, pan, zoom and change time speed, but
+there is no player vessel, no contracts and no sound. It takes 30 to 60 seconds
+to load about 11 MB on a first visit. Playing the career game means running it
+locally, as below.
+
 ![The chart in normal conditions](screenshots/01-chart.png)
 
 ## Features
