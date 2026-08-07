@@ -60,43 +60,6 @@ second that measured worse than the current behaviour and were not merged.
 
 ![Career panel and job board](screenshots/03-career.png)
 
-## Architecture
-
-The layering rule is that simulation never draws and rendering never mutates
-state. It is enforced by a simple property: nothing under `engine/`, `data/` or
-`config.py` imports Pygame, which is what makes the headless test suite
-possible.
-
-```
-engine/          Pure Python simulation, no Pygame
-  world.py       World, Port (berths, draft limits), Island, Zone, NavMark
-  ship.py        Vessel physics, fuel, route state machine, autopilot
-  environment.py Weather drift, fog/squall/storm events, tide, day/night
-  collision.py   COLREGS avoidance: CPA/TCPA, give-way logic, safe pathfinding
-  career.py      Career state, job board, contracts, ranks, save and load
-  mission.py     AI mission generation and tracking
-
-render/          Pygame drawing, reads engine state
-  camera.py      World to screen conversion, single source
-  chart.py       Chart layers, vessels, weather visuals, status bar
-  panels.py      HUD, career panel, docking menu, title, minimap, game over
-  sound.py       Sound manager and standard-library WAV synthesis
-
-data/world_data.py   Sea geography, ports, islands, zones and AI routes
-tests/               Headless pytest suite and a 16-scenario gameplay bot
-main.py              Game loop: input, fixed-timestep simulation, render
-config.py            Tunable constants (401 of them)
-```
-
-Every tunable number lives in `config.py` rather than at its use site, so
-balance changes are edits to one file.
-
-`main.py` is the weakest part of the structure at 3,544 lines, and some logic
-that belongs in `engine/` (search-and-rescue dispatch, AI decision helpers,
-vessel spawning) currently sits in the `Game` class instead.
-
-![Storm conditions](screenshots/04-storm.png)
-
 ## Stack
 
 Python 3.10 or newer. Pygame 2.6 is the only runtime dependency. Development
@@ -135,6 +98,69 @@ development. No accounts, API keys or network access are needed.
 Drift into a port at 2 knots or less and the port menu opens: refuel, repair the
 hull, browse the job board or cast off.
 
+## Builds
+
+`vela_sea.spec` is a PyInstaller recipe for a folder-based Windows build; see
+[DISTRIBUTION.md](DISTRIBUTION.md). `tools/build_web.py` produces a pygbag
+WebAssembly bundle, and the deployed output is tracked in `docs/`. Audio is
+disabled in the web build.
+
+<!-- site:case-study:start -->
+
+## Architecture
+
+The layering rule is that simulation never draws and rendering never mutates
+state. It is enforced by a simple property: nothing under `engine/`, `data/` or
+`config.py` imports Pygame, which is what makes the headless test suite
+possible.
+
+```
+engine/          Pure Python simulation, no Pygame
+  world.py       World, Port (berths, draft limits), Island, Zone, NavMark
+  ship.py        Vessel physics, fuel, route state machine, autopilot
+  environment.py Weather drift, fog/squall/storm events, tide, day/night
+  collision.py   COLREGS avoidance: CPA/TCPA, give-way logic, safe pathfinding
+  career.py      Career state, job board, contracts, ranks, save and load
+  mission.py     AI mission generation and tracking
+
+render/          Pygame drawing, reads engine state
+  camera.py      World to screen conversion, single source
+  chart.py       Chart layers, vessels, weather visuals, status bar
+  panels.py      HUD, career panel, docking menu, title, minimap, game over
+  sound.py       Sound manager and standard-library WAV synthesis
+
+data/world_data.py   Sea geography, ports, islands, zones and AI routes
+tests/               Headless pytest suite and a 16-scenario gameplay bot
+main.py              Game loop: input, fixed-timestep simulation, render
+config.py            Tunable constants (401 of them)
+```
+
+Every tunable number lives in `config.py` rather than at its use site, so
+balance changes are edits to one file.
+
+`main.py` is the weakest part of the structure at 3,544 lines, and some logic
+that belongs in `engine/` (search-and-rescue dispatch, AI decision helpers,
+vessel spawning) currently sits in the `Game` class instead.
+
+![Storm conditions](screenshots/04-storm.png)
+
+## Known limits
+
+Two limits are worth stating next to the architecture rather than leaving to be
+found. The save is career-only: money, reputation, statistics, achievements and
+hull persist, but the active contract, world state, weather and position do not,
+so Continue restores a career at the spawn point rather than resuming the
+passage that was under way. And a vessel displaced far from its route has no
+reliable way back to it, which is the largest remaining source of AI groundings:
+measured over three seeds and fourteen simulated days, 84% of groundings happen
+more than 15 world units off the vessel's own route, against 1% on it. Three
+attempted fixes each measured worse than the shipped behaviour and were not
+merged. [KNOWN_ISSUES.md](https://github.com/VelaWind/vela-sea/blob/main/KNOWN_ISSUES.md)
+carries every known defect with a severity rating, the measurements behind that
+second limit, and the rejected patches.
+
+<!-- site:case-study:end -->
+
 ## Tests
 
 ```bash
@@ -153,13 +179,6 @@ per-scenario pass or fail with enough detail to locate a failure.
 
 `test_visual_perf.py` is a timing benchmark rather than a unit test, so it runs
 only when invoked directly and is not collected by pytest.
-
-## Builds
-
-`vela_sea.spec` is a PyInstaller recipe for a folder-based Windows build; see
-[DISTRIBUTION.md](DISTRIBUTION.md). `tools/build_web.py` produces a pygbag
-WebAssembly bundle, and the deployed output is tracked in `docs/`. Audio is
-disabled in the web build.
 
 ## Project documents
 

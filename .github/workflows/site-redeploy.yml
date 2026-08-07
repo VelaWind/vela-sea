@@ -1,0 +1,27 @@
+name: Redeploy site
+
+# The velawind.dev case study renders the marked span of this README at build
+# time, so a README edit is only visible once the site rebuilds.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger the site deploy hook
+        env:
+          # Passed as an env var rather than interpolated into the command, so
+          # the hook URL never appears in the rendered step.
+          DEPLOY_HOOK: ${{ secrets.SITE_DEPLOY_HOOK }}
+        run: |
+          status=$(curl -sS -X POST -o /dev/null -w '%{http_code}' "$DEPLOY_HOOK")
+          echo "Deploy hook responded $status"
+          case "$status" in
+            2??) ;;
+            *) echo "Expected a 2xx response from the deploy hook." >&2; exit 1 ;;
+          esac
