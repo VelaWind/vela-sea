@@ -58,6 +58,82 @@ _main_module.save_career = (
         _career_module.save_career(career, _TMP_SAVE, hull_integrity))
 _main_module.delete_save = lambda filepath=None: None
 
+# --- why a sweep failed to assign a rescuer ---------------------------------
+# _sar_dispatch reports nothing when it gives up on a casualty: it stamps the
+# retry cooldown and moves on (deliberately -- see the comment at that site; the
+# player cannot act on it).  So "never assigned a rescuer" arrives here as a
+# bare count with no cause attached, and the three causes want completely
+# different fixes: an exhausted candidate pool is a fleet-availability problem,
+# out-of-range is a geography/SAR_DISPATCH_RANGE_NM problem, and route_refused
+# is a router problem.  Wrap the real function and classify each failure after
+# the fact rather than instrumenting main.py -- the harness stays read-only
+# w.r.t. game code, exactly as the save redirection above does.
+#
+# CAVEAT: this replicates _sar_dispatch's candidate filter (as the `eligible`
+# census counter already does).  If that filter changes in main.py, both copies
+# must change with it.  It deliberately does NOT re-run find_safe_path: the
+# router is 89% of this harness's wall time, and route_refused is derivable by
+# elimination -- candidates existed, they were in range, nobody got assigned.
+_FAIL_POOL_EMPTY   = "pool_empty"
+_FAIL_OUT_OF_RANGE = "out_of_range"
+_FAIL_ROUTE_REFUSED = "route_refused"
+
+_real_sar_dispatch = _main_module._sar_dispatch
+
+
+def _sar_candidate_pool(vessels, grounded, rescuer_ids):
+    """Vessels _sar_dispatch would consider for `grounded`, before the range cut."""
+    pool = []
+    for v in vessels:
+        if v is grounded:
+            continue
+        if v.status not in ("underway", "avoiding"):
+            continue
+        if id(v) in rescuer_ids:
+            continue
+        if v.player_commanded:
+            # Orphaned "sar" commands are re-dispatchable; every other command
+            # reason is not.  Mirrors the guard in _sar_dispatch.
+            if not (getattr(v, "command_reason", "") == "sar"
+                    and v.status in ("underway", "avoiding")):
+                continue
+        pool.append(v)
+    return pool
+
+
+def _sar_dispatch_traced(vessels, range_wu, event_log=None, sim_time="",
+                         player_paths=None, world=None):
+    # Only casualties the sweep will actually LOOK at: a casualty sitting out
+    # its retry cooldown is skipped, not failed, and must not be classified.
+    watched = [v for v in vessels
+               if v.distress
+               and v.rescue_vessel is None
+               and getattr(v, "_sar_retry_timer", 0.0) <= 0.0]
+
+    _real_sar_dispatch(vessels, range_wu, event_log, sim_time,
+                       player_paths=player_paths, world=world)
+
+    if not watched:
+        return
+    # Recomputed after the sweep so dropped leases and fresh assignments are
+    # both reflected in the pool the classification talks about.
+    rescuer_ids = {id(v.rescue_vessel) for v in vessels
+                   if v.rescue_vessel is not None}
+    for grounded in watched:
+        if grounded.rescue_vessel is not None:
+            continue                      # assigned this sweep -- not a failure
+        pool = _sar_candidate_pool(vessels, grounded, rescuer_ids)
+        if not pool:
+            reason = _FAIL_POOL_EMPTY
+        elif not any(v.distance_to(grounded.position) <= range_wu for v in pool):
+            reason = _FAIL_OUT_OF_RANGE
+        else:
+            reason = _FAIL_ROUTE_REFUSED
+        grounded._diag_fail_reason = reason   # last reason wins
+
+
+_main_module._sar_dispatch = _sar_dispatch_traced
+
 REAL_DT = 0.016
 
 # One update_simulation(REAL_DT) call advances REAL_DT * TIME_COMPRESSION sim-s.
@@ -391,11 +467,17 @@ def run(days, seed, verbose=True):
             # events, so episodes are tracked explicitly: was a rescuer ever
             # assigned, and did the episode ever end?
             if incident and not prev_incident[vid]:
+                # Drop any reason left on the vessel by an earlier episode so
+                # this one cannot inherit it.
+                v._diag_fail_reason = None
                 active_ep[vid] = {"vessel": v.name, "start_h": sim_s / 3600.0,
-                                  "rescued": False,
+                                  "rescued": False, "fail_reason": None,
                                   "land": hazard_at(world, v.position)[0]}
             if incident and vid in active_ep and v.rescue_vessel is not None:
                 active_ep[vid]["rescued"] = True
+            if incident and vid in active_ep and not active_ep[vid]["rescued"]:
+                active_ep[vid]["fail_reason"] = getattr(
+                    v, "_diag_fail_reason", None)
             if prev_incident[vid] and not incident and vid in active_ep:
                 ep = active_ep.pop(vid)
                 ep["end_h"] = sim_s / 3600.0
@@ -475,6 +557,14 @@ def report(runs):
         print(f"      episodes                     {len(all_eps):4d}")
         print(f"      never assigned a rescuer     {len(never):4d}  "
               f"({100.0*len(never)/max(1,len(all_eps)):.0f}%)")
+        if never:
+            by_reason = Counter(e.get("fail_reason") or "unclassified"
+                                for e in never)
+            for _r in ("pool_empty", "out_of_range", "route_refused",
+                       "unclassified"):
+                if by_reason.get(_r):
+                    print(f"        {_r:<24}   {by_reason[_r]:4d}  "
+                          f"({100.0*by_reason[_r]/len(never):.0f}% of never)")
         print(f"      still stranded at run end    {len(stranded):4d}")
         durs = [e["end_h"] - e["start_h"] for e in all_eps if e["end_h"] is not None]
         if durs:
