@@ -1,0 +1,381 @@
+diff --git a/config.py b/config.py
+index d82063a..50def2e 100644
+--- a/config.py
++++ b/config.py
+@@ -958,6 +958,29 @@ STANDOFF_UKC_M   = 3.0   # metres under-keel clearance required at the standoff
+ STANDOFF_STEP_WU = 2.0   # world units per outward probe ring
+ STANDOFF_MAX_WU  = 24.0  # give up beyond this and fall back to the raw position
+ 
++# Route rejoin geometry (KNOWN_ISSUES #11 mechanism 2).  A displaced vessel handed
++# back to its schedule used to be aimed at route[route_index] — the one waypoint it
++# happened to be steering for when it was pulled off station.  After a tow across
++# the sea that waypoint is frequently behind an island, which is why 84% of
++# groundings occur off-route.  Vessel.rejoin_route() re-indexes onto the nearest
++# LEG of the route instead; these two numbers bound that search.
++ROUTE_REJOIN_ON_ROUTE_WU = 6.0   # world units.  Within this of its own polyline a
++                                 # vessel is not displaced at all (it is mid-leg,
++                                 # or a waypoint-pass jittered it slightly off the
++                                 # line), so rejoin leaves route_index untouched.
++                                 # Sized just above SAFE_PATH_APPROACH_WU = 5.0 so
++                                 # normal approach wander never trips a re-index.
++ROUTE_REJOIN_MAX_LOOKAHEAD = 3   # waypoints to walk FORWARD when the run-in to
++                                 # the nearest leg-end is itself blocked.  Only
++                                 # the DEPTH of the run-in may refuse a candidate:
++                                 # refusing one for being the index the vessel
++                                 # already holds is what made rejoin non-idempotent
++                                 # (it stepped forward, then snapped back the next
++                                 # tick — 22,347 flap events on stationary vessels).
++                                 # Beyond a few waypoints the vessel is most of a
++                                 # lap from where it belongs and the nearest
++                                 # leg-end is the better answer.
++
+ # Dispatch retry cooldown.  _sar_dispatch runs every sim step, and for a casualty
+ # nobody can route to it re-walked every candidate every tick — each attempt a
+ # find_standoff (up to 192 depth probes) plus a find_safe_path (~2,300 samples).
+diff --git a/engine/collision.py b/engine/collision.py
+index 2c9c357..79f79ee 100644
+--- a/engine/collision.py
++++ b/engine/collision.py
+@@ -80,6 +80,56 @@ def find_standoff(pos: Tuple[float, float], draft_m: float,
+     return pos
+ 
+ 
++def leg_is_clear(a_pos, b_pos, world, draft_m: float = 0.0) -> bool:
++    """True when the TRANSIT part of the leg floats draft_m at low water.
++
++    Land is rejected over the whole leg.  Depth is checked over the whole
++    leg except its final SAFE_PATH_APPROACH_WU — see the config note: a
++    casualty always sits inside the shallow shelf, so a strict check over
++    the full leg makes every grounded vessel unreachable.
++    """
++    need_m = draft_m + DRAFT_SAFETY_MARGIN_M
++    ax, ay = a_pos
++    bx, by = b_pos
++    # Step by distance, not a fixed sample count: a fixed count spaces
++    # samples further apart the longer the leg, and a long ocean leg could
++    # step straight over a shoal narrower than the gap between samples.
++    leg_len = hypot(bx - ax, by - ay)
++    steps = max(1, int(leg_len / SAFE_PATH_SAMPLE_STEP_WU))
++    for i in range(steps + 1):
++        t = i / steps
++        p = (ax + (bx - ax) * t, ay + (by - ay) * t)
++        # One cached depth lookup per sample; water_depth_at() is memoised
++        # per integer cell, point_in_island() is not, so the polygon test is
++        # reserved for the few samples that actually need it.
++        d = world.water_depth_at(p, -TIDE_RANGE)
++        # Both ends are exempt, for two DIFFERENT reasons.  Keep both.
++        #
++        # APPROACH end: the destination is definitionally in shallow water —
++        # a casualty is aground, a berth is against a coast — so depth-
++        # checking the run-in rejects arrivals that are perfectly normal
++        # rather than transits that are dangerous.
++        #
++        # DEPARTURE end: the vessel's current position is empirically
++        # navigable, because it is floating there right now.  Refusing to
++        # let a hull leave water it already occupies is incoherent, and it
++        # deadlocks: 232 of 232 "no route home" attempts failed on their own
++        # start position, stalling the fleet (arrivals 503 -> 157).
++        if (leg_len * (1.0 - t) <= SAFE_PATH_APPROACH_WU
++                or leg_len * t <= SAFE_PATH_APPROACH_WU):
++            # In either window shallow is expected and permitted — only
++            # actual land disqualifies.  Note d == 0.0 does NOT imply land:
++            # water_depth_at() clamps at zero, so anything within the tidal
++            # range of drying reads 0.0 too.  Treating that as land rejected
++            # every casualty run-in and deadlocked SAR entirely.
++            if d <= 0.0 and world.point_in_island(p):
++                return False
++            continue
++        if d < need_m:
++            return False   # covers land as well: depth there is 0.0
++    return True
++
++
+ def find_safe_path(start: Tuple[float, float],
+                    end: Tuple[float, float],
+                    world,
+@@ -101,55 +151,10 @@ def find_safe_path(start: Tuple[float, float],
+     """
+     sx, sy = start
+     ex, ey = end
+-    need_m = draft_m + DRAFT_SAFETY_MARGIN_M
+ 
+     def _leg_clear(a_pos, b_pos):
+-        """True when the TRANSIT part of the leg floats draft_m at low water.
+-
+-        Land is rejected over the whole leg.  Depth is checked over the whole
+-        leg except its final SAFE_PATH_APPROACH_WU — see the config note: a
+-        casualty always sits inside the shallow shelf, so a strict check over
+-        the full leg makes every grounded vessel unreachable.
+-        """
+-        ax, ay = a_pos
+-        bx, by = b_pos
+-        # Step by distance, not a fixed sample count: a fixed count spaces
+-        # samples further apart the longer the leg, and a long ocean leg could
+-        # step straight over a shoal narrower than the gap between samples.
+-        leg_len = hypot(bx - ax, by - ay)
+-        steps = max(1, int(leg_len / SAFE_PATH_SAMPLE_STEP_WU))
+-        for i in range(steps + 1):
+-            t = i / steps
+-            p = (ax + (bx - ax) * t, ay + (by - ay) * t)
+-            # One cached depth lookup per sample; water_depth_at() is memoised
+-            # per integer cell, point_in_island() is not, so the polygon test is
+-            # reserved for the few samples that actually need it.
+-            d = world.water_depth_at(p, -TIDE_RANGE)
+-            # Both ends are exempt, for two DIFFERENT reasons.  Keep both.
+-            #
+-            # APPROACH end: the destination is definitionally in shallow water —
+-            # a casualty is aground, a berth is against a coast — so depth-
+-            # checking the run-in rejects arrivals that are perfectly normal
+-            # rather than transits that are dangerous.
+-            #
+-            # DEPARTURE end: the vessel's current position is empirically
+-            # navigable, because it is floating there right now.  Refusing to
+-            # let a hull leave water it already occupies is incoherent, and it
+-            # deadlocks: 232 of 232 "no route home" attempts failed on their own
+-            # start position, stalling the fleet (arrivals 503 -> 157).
+-            if (leg_len * (1.0 - t) <= SAFE_PATH_APPROACH_WU
+-                    or leg_len * t <= SAFE_PATH_APPROACH_WU):
+-                # In either window shallow is expected and permitted — only
+-                # actual land disqualifies.  Note d == 0.0 does NOT imply land:
+-                # water_depth_at() clamps at zero, so anything within the tidal
+-                # range of drying reads 0.0 too.  Treating that as land rejected
+-                # every casualty run-in and deadlocked SAR entirely.
+-                if d <= 0.0 and world.point_in_island(p):
+-                    return False
+-                continue
+-            if d < need_m:
+-                return False   # covers land as well: depth there is 0.0
+-        return True
++        """Bind this call's world/draft to the shared leg test."""
++        return leg_is_clear(a_pos, b_pos, world, draft_m)
+ 
+     if _leg_clear(start, end):
+         return [end]
+diff --git a/engine/ship.py b/engine/ship.py
+index 83787bc..4f145b7 100644
+--- a/engine/ship.py
++++ b/engine/ship.py
+@@ -17,6 +17,7 @@ from config import (
+     SAIL_NO_GO_ANGLE, SAIL_EFFICIENCY, SAIL_RUN_FACTOR,
+     REFUEL_FRACTION, PORT_DETECT_RADIUS,
+     VESSEL_TRAIL_MAX_POINTS, VESSEL_TRAIL_SAMPLE_STEPS,
++    ROUTE_REJOIN_ON_ROUTE_WU, ROUTE_REJOIN_MAX_LOOKAHEAD,
+ )
+ 
+ Position = Tuple[float, float]
+@@ -242,6 +243,130 @@ class Vessel:
+         self.route_index = (self.route_index + 1) % len(self.route)
+         self.destination = self.route[self.route_index]
+ 
++    def _nearest_leg_end(self) -> Tuple[float, int]:
++        """Return (distance_to_route, index of the waypoint ENDING the nearest leg).
++
++        Distance is measured to the route POLYLINE — every leg, by perpendicular
++        projection onto the segment — not to the waypoints.  Measuring to
++        waypoints picks the nearest corner, which for a vessel sitting beside the
++        middle of a long leg is the wrong end of the wrong leg.
++        """
++        n = len(self.route)
++        px, py = self.position
++        best_d, best_end = float("inf"), self.route_index
++        # Leg i runs route[i] -> route[i+1].  A looping route has one extra leg
++        # closing route[n-1] -> route[0]; a non-looping one does not, and pretending
++        # it does would offer a rejoin across a leg the vessel never sails.
++        last = n if self.route_loop else n - 1
++        for i in range(last):
++            ax, ay = self.route[i]
++            bx, by = self.route[(i + 1) % n]
++            dx, dy = bx - ax, by - ay
++            seg2 = dx * dx + dy * dy
++            if seg2 <= 0.0:
++                continue                      # degenerate leg (duplicate waypoint)
++            # Projection parameter clamped to the segment, so a vessel off the END
++            # of a leg measures to that endpoint rather than to the infinite line.
++            t = ((px - ax) * dx + (py - ay) * dy) / seg2
++            t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
++            cx, cy = ax + dx * t, ay + dy * t
++            d = sqrt((px - cx) ** 2 + (py - cy) ** 2)
++            if d < best_d:
++                best_d, best_end = d, (i + 1) % n
++        return best_d, best_end
++
++    def rejoin_route(self, world=None) -> bool:
++        """Re-index a DISPLACED vessel onto the nearest leg of its own route.
++
++        Returns True when route_index/destination were corrected, False when the
++        vessel's current aim was already viable and nothing needed changing.
++
++        This is the fix for KNOWN_ISSUES #11 mechanism 2.  Every "hand back to the
++        schedule" site used to do ``destination = route[route_index]`` — the one
++        waypoint the vessel happened to be steering for when it was pulled off
++        station.  A vessel towed 200 wu by a rescue, an MOB search or a tide
++        refloat is then aimed at a waypoint that may sit behind an island, which
++        is why 84% of groundings happen off-route against 1% on it.
++
++        Deliberately NOT player_commanded and NOT a multi-hop find_safe_path
++        route.  That was mechanism 1, measured and rejected twice: command state
++        IS the off-route condition (vessels stayed commanded 73-97% of runtime
++        with near-zero waypoint advances), and a commanded vessel is excluded from
++        SAR dispatch eligibility, so routing displaced vessels home that way
++        starved the rescuer pool and cost arrivals 503 -> 170.  The vessel resumes
++        ordinary schedule navigation; only the INDEX it resumes from is corrected.
++
++        IDEMPOTENT BY CONSTRUCTION, and that is a hard requirement, not a nicety.
++        The answer depends only on position, route and depth — never on the
++        current route_index — so calling this repeatedly at one position always
++        yields the same index.  The first version keyed a guard off route_index
++        ("if the nearest leg-end is the one I am already aimed at, take the next
++        one along"), which made the index oscillate 2,1,2,1,... on a stationary
++        vessel and cost arrivals 791 -> 237 with 22,347 re-groundings.
++
++        INTERVENES ONLY WHEN THE CURRENT AIM IS BLOCKED.  "Nearest leg-end" has no
++        notion of forward progress, so re-indexing a vessel whose run-in is
++        perfectly clear rewinds its schedule to a waypoint it already passed — it
++        then sails back, re-passes, and churns there forever.  Measured: released
++        rescuers churned 3 -> 2 -> 3 across 16k releases for a single vessel in
++        three sim-days.  So a clear current aim is always left alone; only a
++        blocked one is replaced.
++        """
++        if not self.route:
++            self.destination = None
++            return False
++        n = len(self.route)
++        if n == 1:
++            self.route_index = 0
++            self.destination = self.route[0]
++            return False
++
++        d_route, nearest_end = self._nearest_leg_end()
++
++        # Already on its own line: not displaced at all.  A vessel mid-leg, or
++        # jittered a world unit off it by a waypoint pass, owes the waypoints it
++        # is still heading for, and re-indexing would skip them.
++        if d_route <= ROUTE_REJOIN_ON_ROUTE_WU:
++            self.destination = self.route[self.route_index]
++            return False
++
++        # Displaced.  Depth-check the aim it already has before changing anything;
++        # see the anti-rewind note above.  Same test the SAR router uses, so
++        # "clear" means the same thing in both places.
++        if world is not None:
++            from engine.collision import leg_is_clear   # local import: keeps
++            # engine.collision off ship.py's module-load path, which data/ and
++            # several tests import for the dataclass alone.
++            if leg_is_clear(self.position, self.route[self.route_index],
++                            world, self.draft_m):
++                self.destination = self.route[self.route_index]
++                return False
++
++            # The current aim is genuinely blocked — this is the stale-waypoint-
++            # behind-an-island case rejoin exists for.  Take the nearest leg-end
++            # whose run-in is clear, walking forward if the nearest is not.
++            for step in range(ROUTE_REJOIN_MAX_LOOKAHEAD + 1):
++                cand = (nearest_end + step) % n
++                if leg_is_clear(self.position, self.route[cand],
++                                world, self.draft_m):
++                    if cand == self.route_index:
++                        self.destination = self.route[cand]
++                        return False
++                    self.route_index = cand
++                    self.destination = self.route[cand]
++                    return True
++
++        # Either no world was supplied (unit tests, callers without one) or
++        # nothing in the lookahead cleared.  Fall back to the nearest leg-end: it
++        # is still a measured answer where the stale index is not, and the
++        # grounding trigger remains the backstop.
++        if nearest_end == self.route_index:
++            self.destination = self.route[nearest_end]
++            return False
++        self.route_index = nearest_end
++        self.destination = self.route[nearest_end]
++        return True
++
+     def arrive(self, world) -> None:
+         """Handle arrival at the current destination waypoint.
+ 
+diff --git a/main.py b/main.py
+index 38d7995..aabc237 100644
+--- a/main.py
++++ b/main.py
+@@ -105,7 +105,8 @@ def _sim_time_str(environment) -> str:
+     return f"{h:02d}:{m:02d}"
+ 
+ 
+-def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
++def _sar_refloat(grounded, event_log=None, sim_time: str = "",
++                 world=None) -> None:
+     """Refloat a grounded/adrift vessel and release its rescuer (if any).
+ 
+     Calls vessel.refloat() for the grounded vessel's own state, then
+@@ -126,8 +127,10 @@ def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
+     if rescuer is not None and rescuer.player_commanded:
+         rescuer.player_commanded = False
+         rescuer.command_reason = ""
+-        if rescuer.route:
+-            rescuer.destination = rescuer.route[rescuer.route_index]
++        # The rescuer has just been steered to wherever the casualty grounded, so
++        # its route_index is stale by definition — aiming it back at that stale
++        # waypoint is KNOWN_ISSUES #11 mechanism 2.  Re-index onto the nearest leg.
++        rescuer.rejoin_route(world)
+     if event_log is not None:
+         msg = (f"RESCUED — {grounded.name} (emergency fuel)"
+                if fuel_rescue else f"REFLOATED — {grounded.name}")
+@@ -2006,8 +2009,10 @@ class Game:
+                             and self._party_state.get("tender_for") == vid):
+                         tender.player_commanded = False
+                         tender.command_reason = ""
+-                        if tender.route:
+-                            tender.destination = tender.route[tender.route_index]
++                        # The tender ran out to the anchored yacht and is nowhere
++                        # near its own schedule now — re-index, do not resume on a
++                        # stale waypoint.
++                        tender.rejoin_route(self.world)
+                         vessel.log_decision(_t, "Party over — tender returning to service")
+                     self._party_state.pop("tender_for", None)
+                 continue
+@@ -2320,8 +2325,10 @@ class Game:
+                             EVENT_COLOR_REFLOAT)
+                         if not _is_player:
+                             vessel.target_speed = vessel.max_speed
+-                            if vessel.route:
+-                                vessel.destination = vessel.route[vessel.route_index]
++                            # An MOB search wanders the vessel well off its line;
++                            # rejoin at the nearest leg rather than the waypoint it
++                            # happened to be steering for when the man went over.
++                            vessel.rejoin_route(self.world)
+ 
+                 if _is_player:
+                     # Player vessel: heading controlled by held turn keys each sim step.
+@@ -2497,8 +2504,9 @@ class Game:
+                             vessel.trawling_heading_timer = 0.0
+                             vessel.target_speed = vessel.max_speed
+                             _set_underway_mission_status(vessel)
+-                            if vessel.route:
+-                                vessel.destination = vessel.route[vessel.route_index]
++                            # Trawl wander drifts the vessel off-route over the
++                            # whole pause; resume from a corrected index.
++                            vessel.rejoin_route(self.world)
+                     elif vessel.status == "avoiding":
+                         vessel.turn_toward(vessel.avoid_heading, SIM_TIMESTEP)
+                     elif vessel.destination and vessel.status == "underway":
+@@ -2589,7 +2597,8 @@ class Game:
+                                     and grounded.rescue_vessel is vessel
+                                     and grounded.status in ("aground", "adrift")):
+                                 _sar_refloat(grounded, self.event_log,
+-                                             _sim_time_str(self.environment))
++                                             _sim_time_str(self.environment),
++                                             self.world)
+                                 break
+                     _was_player_cmd = vessel.player_commanded
+                     _was_reason = vessel.command_reason
+@@ -2678,7 +2687,8 @@ class Game:
+                     )
+                     if depth >= vessel.draft_m + DRAFT_SAFETY_MARGIN_M:
+                         _sar_refloat(vessel, self.event_log,
+-                                     _sim_time_str(self.environment))
++                                     _sim_time_str(self.environment),
++                                     self.world)
+                     continue
+                 # Skip vessels inside a port approach zone (no false groundings).
+                 if vessel._port_at(vessel.position, self.world) is not None:

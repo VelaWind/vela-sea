@@ -21,9 +21,10 @@ An honest list of what doesn't work perfectly, with severity ratings.
 
 ## Design note — the displacement-return problem (open)
 
-Three separate attempts to fix this each measured *worse* than the shipped
-baseline (`b5d7a64`), which is why none of them landed. They are recorded
-here because the failures were informative and the patches still apply.
+Four separate attempts to fix this each measured *worse* than the shipped
+baseline current at the time, which is why none of them landed. They are
+recorded here because the failures were informative and the patches still
+apply.
 
 **Why it is a design question, not a bug.** `b5d7a64` reaches a state where
 relatively few vessels are displaced, and those that ground mostly stay
@@ -45,9 +46,43 @@ Two concrete mechanisms were identified and neither is addressed:
    vessel dragged 200 wu away is aimed at the one waypoint it happened to be
    heading for, which may be on the far side of an island.
 
-Worth deciding before more code: should a displaced vessel rejoin at its
-nearest route *entry point*? Should routes carry explicit entry/exit nodes?
-Should rescuers return under schedule control rather than command state?
+   **Attacked three times, rejected three times** — `return_leg` (route the
+   return via `find_safe_path`), `rejoin` v1 (nearest leg-end, non-idempotent),
+   and `rejoin_v2` (nearest leg-end, idempotent by construction). All three
+   measured worse than their baseline, and v2 failed *with every pre-gate
+   green*: proven idempotent over 17,974 displaced start-states x 8 calls,
+   proven to actually fire (84.7% of shallow positions), 4/4 unit cases,
+   16/16 pytest, 16/16 bot. A correct implementation of the idea still cost
+   arrivals 791 -> 538 and drove 13.57 of 16 vessels aground by day 13.
+
+   **The hypothesis the results support: "nearest" is the wrong question.**
+   Re-indexing has no notion of *forward progress*. Any nearest-point
+   correction — leg-end, entry node, projection, however good the search — can
+   silently rewind a vessel onto a corridor it already sailed, where it
+   re-sails, re-passes, and can re-ground on the same shoal. The route data
+   cannot rule this out, because it does not record which waypoints a vessel
+   has already completed: `route_index` is a *cursor*, not a progress log, and
+   a displaced vessel's cursor is exactly the thing that is stale. So
+   "nearest" and "next" are indistinguishable from the route data alone, and
+   no better nearest-point search can distinguish them. v2's anti-rewind guard
+   (leave a clear aim alone, re-index only a depth-blocked one) is the best
+   available proxy and it is not sufficient — a *blocked* aim is precisely the
+   case where the vessel must re-index, and precisely the case where the data
+   to re-index *correctly* is missing.
+
+   **Any future attempt needs progress state on the route, not a better
+   nearest-point search** — e.g. per-vessel completed-waypoint / lap tracking,
+   or explicit directional entry nodes — so that a rejoin can pick the nearest
+   waypoint *ahead of* the vessel's actual progress. Adding that state is the
+   prerequisite; until it exists, this lane is closed.
+
+Worth deciding before more code. "Should a displaced vessel rejoin at its
+nearest route *entry point*?" is now **answered: no** — `rejoin_v2` measured
+it and it fails for the reason above. The open questions are the ones that add
+progress state rather than search quality: should vessels track completed
+waypoints (or laps) so "ahead" is computable? Should routes carry explicit
+directional entry/exit nodes? Should rescuers return under schedule control
+rather than command state?
 
 Rejected patches (each applies cleanly on `b5d7a64`, each fully measured):
 
@@ -56,9 +91,11 @@ Rejected patches (each applies cleanly on `b5d7a64`, each fully measured):
 | `crab.patch` | leeway/crab-angle compensation in `Vessel.crabbed_heading` — steers course-over-ground, not bearing | **Correct and unit-proven**: holds pinch-leg clearance flat at 4.66 wu across 0–25 kn wind (was bleeding 0.22 wu/kn and grounding at 15 kn). But only ~1% of groundings are on-route, so it does not move the total: uniq/arr 0.125 -> 0.857 |
 | `refloat_v2.patch` | on refloat, move to a low-water-sized seaward standoff instead of refloating in place | Kills the 157x same-spot loop and transforms rescue health (never-rescued 10% -> 3%), but re-exposes freed vessels: uniq/arr 0.125 -> 0.742 |
 | `return_leg.patch` | route the return leg via `find_safe_path` + `_pending_player_paths` | Off-route share unchanged (84% -> 83%); arrivals 503 -> 170. This is mechanism 1 above |
+| `rejoin_v2.patch` | `Vessel.rejoin_route()` re-indexes a displaced vessel onto the nearest *leg* of its own route (idempotent by construction, anti-rewind guard), wired at all four hand-back sites | **All four gates failed** on `c6338b7` vs `7655ac5`: arrivals 791 -> 538, flap 876 -> 3194, zero-pool 15.2% -> 33.5%, emergency median 10 -> 13; 13.57/16 aground and pool 0.23 by day 13. The never-assigned 9% -> 2% is denominator inflation (74 absolute over 3266 episodes), not a pass. This is mechanism 2 above |
 
-The patches live in `patches/` (preserved in commit `ec8ceea`), with a
-README summarising each rejection. Each applies cleanly on `b5d7a64`.
+The patches live in `patches/` (the first three preserved in commit
+`ec8ceea`), with a README summarising each rejection. The first three apply
+cleanly on `b5d7a64`; `rejoin_v2.patch` is cut against `c6338b7`.
 
 Measurement standard for any future attempt: `python tools/diag_groundings.py
 --days 14 --seeds 3`, and **normalise by arrivals, not raw event counts** — a
@@ -109,6 +146,15 @@ not rejected on its own merits.** Answer that question and this patch is a
 candidate again. (One row is still missing: the matching `7655ac5` uniq/arr was
 never measured, so the patched 0.781 cannot be read against the historical
 `b5d7a64` figure of 0.742.)
+
+**Update 2026-08-24 — `refloat_v2` remains blocked, and the block got harder.**
+The plan was to fix its retimed flap (1622 re-groundings at a 6.08-minute
+median gap) with the nearest-entry-point rejoin, since the residue is entirely
+`destination = route[route_index]` re-aiming. That rejoin has now been built,
+proven idempotent, and **rejected** — see `rejoin_v2` in the design note above,
+which failed all four gates on its own. So the fix `refloat_v2` was waiting on
+does not exist and is not coming from this direction: the nearest-entry-point
+lane is closed until routes carry progress state. `refloat_v2` stays parked.
 
 ---
 
