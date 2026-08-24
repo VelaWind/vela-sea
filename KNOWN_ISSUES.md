@@ -14,7 +14,7 @@ An honest list of what doesn't work perfectly, with severity ratings.
 | 8 | **AI vessels ignore contract clauses.** Hazmat double-fines and charter speed caps apply to the player only; AI traffic has its own independent mission system. | Low (by design) |
 | 9 | **Time speed tops out at 3×** (key 4). Long passages across the full 210 nm sea can still take several real minutes. | Low |
 | 10 | **Docking refusal reuses the departure-grace mechanism**: after being refused at a draft-restricted port you must leave its radius before any new docking attempt there registers. | Low |
-| 11 | **Displaced vessels have no defined way back to their route.** Routes in `data/world_data.py` are verified as geometry (`tests/verify_new_routes.py`), but rescue duty, MOB searches, trawl wander, party-tender runs and tide refloating all move vessels far off that geometry, and every "hand back to the schedule" site then sets `destination = route[route_index]` — a straight line from wherever the vessel ended up. Measured over 3 seeds x 14 sim-days: **84% of groundings occur >15 wu from the vessel's own route, against 1% on it.** See the design note below. | Medium — the largest remaining source of AI groundings |
+| 11 | **Displaced vessels have no defined way back to their route.** Routes in `data/world_data.py` are verified as geometry (`tests/verify_new_routes.py`), but rescue duty, MOB searches, trawl wander, party-tender runs and tide refloating all move vessels far off that geometry, and every "hand back to the schedule" site then sets `destination = route[route_index]` — a straight line from wherever the vessel ended up. Measured over 3 seeds x 14 sim-days: **84% of groundings occur >15 wu from the vessel's own route, against 1% on it.** See the design note below. | Medium — with depth-aware routing closed (`route_refused` = 0) and the emergency lifecycle fixed, refloat flap is now the sole remaining driver |
 | 12 | **Rescue completion fires on waypoint arrival, not on reaching the casualty.** `find_safe_path` can hand a SAR rescuer a multi-hop route, and the arrival check in `update_simulation` calls `_sar_refloat` on the first hop it reaches while `player_commanded` is still set — it tests `at_destination(vessel.destination)`, never the rescuer's distance to the casualty. A rescuer can therefore "complete" a rescue from the far side of an island, which inflates rescue-success and episode-resolution metrics against the reachability numbers in `tools/diag_groundings.py`. | Medium — corrupts the SAR metrics the routing work is graded on; gameplay effect is a casualty freed early |
 
 ---
@@ -64,3 +64,31 @@ Measurement standard for any future attempt: `python tools/diag_groundings.py
 --days 14 --seeds 3`, and **normalise by arrivals, not raw event counts** — a
 vessel stuck aground stops generating both, so a change that strands traffic
 looks like a fix if you only count groundings.
+
+---
+
+## Baseline measurement — 2026-08-24 (HEAD `6986462`)
+
+`python tools/diag_groundings.py --days 14 --seeds 3` (3 seeds x 14 sim-days),
+the standard normalise-by-arrivals run:
+
+| metric | value |
+|--------|-------|
+| arrivals (the normaliser) | 791 |
+| simultaneous emergencies | median **10** / 15 (legacy `displayed` median 13) |
+| samples with a ZERO eligible-rescuer pool | **15.2%** |
+| casualties holding a dead rescuer pointer (stale) | **0.00** mean |
+| casualties never assigned a rescuer | **9%** — 75% `out_of_range`, 23% `pool_empty`, **0% `route_refused`** |
+| engine-failure casualties NEVER rescued | **1** |
+| refloat -> re-ground flap | **876** re-groundings, **82%** inside one sim-minute |
+
+Two readings of these numbers. **(a)** `route_refused` = 0: not one dispatch
+failed because `find_safe_path` could not produce a depth-legal route, so the
+depth-aware routing arc is complete and costs zero rescues — that lane is
+closed and needs no further work. **(b)** The 75% `out_of_range` share is *not*
+evidence for raising `SAR_DISPATCH_RANGE_NM`: the eligible pool collapses from
+10.00 on day 0 to 1.32 by day 13, so by then the one surviving candidate is far
+away as a matter of geometry, not of range tuning — widening the range would
+dispatch that last vessel across the sea and relabel the failure, masking pool
+exhaustion rather than fixing it. The pool is the variable to attack, not the
+radius.
