@@ -65,6 +65,51 @@ Measurement standard for any future attempt: `python tools/diag_groundings.py
 vessel stuck aground stops generating both, so a change that strands traffic
 looks like a fix if you only count groundings.
 
+
+### Re-measurement — 2026-08-24: `refloat_v2.patch` on `7655ac5`
+
+Re-run because the tree gained depth-aware SAR routing (two-hop, eastern hubs,
+departure exemption), the rescuer-pointer lease, and the emergency lifecycle
+fixes since the patch was rejected on `b5d7a64` — so its failure mode was worth
+retesting. `git apply` **failed** on context drift (`rescuer.command_reason = ""`
+now sits below the insertion point); `git apply --3way` applied it cleanly with
+no conflict and no hand-porting. Both `_sar_refloat` call sites are covered; the
+two test call sites pass no `world` and exercise the unchanged path. Gates:
+`py_compile` OK, `pytest` 16/16, `test_bot.py` 16/16.
+
+| metric | `7655ac5` | + `refloat_v2` |
+|--------|-----------|----------------|
+| arrivals | 791 | **830** |
+| samples with a ZERO eligible pool | 15.2% | **0.6%** |
+| never assigned a rescuer | 9% | **2%** |
+| ... of which `pool_empty` | 23% | **2%** |
+| eligible pool on day 13 | 1.32 | **3.78** |
+| simultaneous emergencies (median) | 10 | **5** |
+| engine-failure casualties NEVER rescued | 1 | **0** |
+| refloat -> re-ground flap | 876 | **1622** |
+| ... share inside one sim-minute | 82% | **0%** (7 events) |
+| ... median gap | — | **6.08 sim-min** |
+
+**The original rejection reason no longer holds on this tree.** `refloat_v2` was
+rejected for stranding traffic and re-exposing freed vessels; here arrivals
+*rise* 791 -> 830 and every rescue-health metric improves sharply — the pool
+stops collapsing, `pool_empty` all but disappears, and concurrent emergencies
+halve. Whatever it did to `b5d7a64`, it does not do to `7655ac5`.
+
+**What remains is not its bug.** The seaward standoff kills the instant bounce
+(sub-minute flap 82% -> 0%, seven events in three seeds) but total post-refloat
+re-groundings nearly double, at a 6.08-minute median gap: the vessel is placed in
+safe water and then steers straight back into the same shallow patch, because the
+re-aim is still `destination = route[route_index]`. That is mechanism 2 of #11 —
+the return target is a single scheduled waypoint rather than the nearest sensible
+entry point — which this patch never claimed to address.
+
+`refloat_v2` is therefore **blocked on the nearest-entry-point return question,
+not rejected on its own merits.** Answer that question and this patch is a
+candidate again. (One row is still missing: the matching `7655ac5` uniq/arr was
+never measured, so the patched 0.781 cannot be read against the historical
+`b5d7a64` figure of 0.742.)
+
 ---
 
 ## Baseline measurement — 2026-08-24 (HEAD `6986462`)
