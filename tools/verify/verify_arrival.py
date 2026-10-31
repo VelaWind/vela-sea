@@ -9,7 +9,8 @@ import sys
 import os
 
 # Ensure the project root is on the path so all engine/config imports resolve.
-sys.path.insert(0, os.path.dirname(__file__))
+# The repository root, two levels up, so engine/ and config.py import.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 
 from config import SIM_TIMESTEP, ARRIVAL_DISTANCE, TIME_COMPRESSION
 from engine.ship import Vessel
@@ -115,3 +116,6 @@ elif min_dist <= ARRIVAL_DISTANCE * 3 and not latched:
 else:
     print(f"RESULT: DID NOT ARRIVE in {MAX_STEPS} steps. "
           f"Closest approach: {min_dist:.3f} wu.")
+
+# Exit status for CI: zero only when the vessel docked.
+sys.exit(0 if latched else 1)

@@ -14,7 +14,8 @@ WebAssembly with pygbag. The AI fleet, weather, tides and port traffic all run,
 and you can click a vessel to follow it, pan, zoom and change time speed, but
 there is no player vessel, no contracts and no sound. It takes 30 to 60 seconds
 to load about 11 MB on a first visit. Playing the career game means running it
-locally, as below.
+locally, as below. It is made for a desktop browser with a mouse and keyboard and has not been
+tested on phones.
 
 ![The chart in normal conditions](screenshots/01-chart.png)
 
@@ -168,7 +169,16 @@ pip install -r requirements-dev.txt
 pytest tests/ -q                    # 16 tests
 python tests/test_bot.py            # 16 gameplay scenarios end to end
 python tests/test_visual_perf.py    # per-frame render budget, machine-dependent
+python tools/verify/verify_cog_math.py   # and the other tools/verify scripts
 ```
+
+`.github/workflows/ci.yml` runs all of it except the timing benchmark on every
+push and pull request to `main`, under SDL's dummy drivers: the layering rule as
+a grep (no Pygame import under `engine/`, `data/` or `config.py`), the pytest
+suite, the bot, and the four verification scripts in `tools/verify/`. Those
+scripts predate the pytest suite; each drives the real engine through one
+scenario (arrival and docking, wind and current drift, tidal grounding, the
+course-over-ground maths) and exits non-zero if its check fails.
 
 The bot drives a real `Game` instance with SDL's dummy video and audio drivers
 and plays through movement, contract completion, zone fines, grounding damage,
@@ -192,10 +202,12 @@ only when invoked directly and is not collected by pytest.
 
 ## Note on how this was built
 
-Vela Sea was written with heavy use of Claude Code. The specifications, the
-architecture rules, the test strategy and the decisions about what to merge are
-mine, and the prompt files kept in the repository are part of that record. I am
-stating this rather than leaving it to be inferred from the commit history.
+Vela Sea was built solo with heavy use of Claude Code. The specifications, the
+architecture rules, the test strategy and the decisions about what to merge
+stay with the author; the AI drafts to that direction, and nothing ships
+unread. The prompt files kept in the repository (`PHASE_2_PROMPTS.md`,
+`REALISM_OVERHAUL_PROMPTS.md`) are part of that record, and this is stated
+rather than left to be inferred from the commit history.
 
 ## Licence
 

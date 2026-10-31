@@ -17,7 +17,8 @@ If drift ≈ 0° the current vector is not being added — the bug is in _cog_di
 """
 
 import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+# The repository root, two levels up, so engine/ and config.py import.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 
 from math import atan2, cos, sin, degrees, radians, hypot
 from engine.ship import Vessel
@@ -147,3 +148,6 @@ else:
         print("  diverging ~26 deg from the dashed blue heading predictor for this scenario.")
     else:
         print(f"  VERDICT: BUG -- expected ~{expected_drift:.1f} deg, got {actual_drift:.1f} deg")
+
+# Exit status for CI: zero only when the function returned a COG and the drift matches.
+sys.exit(0 if result is not None and ok else 1)
