@@ -208,7 +208,7 @@ def _body_block() -> str:
     return f"""<div id="{PAGE_MARKER}-splash">
   <div class="ms-word">VELA<span>&nbsp;SEA</span></div>
   <div class="ms-sub">ambient maritime simulator</div>
-  <div class="ms-note">Watch-only demo. Best on a desktop browser; loads in about 30 seconds.</div>
+  <div class="ms-note">Watch-only demo. Best on a desktop browser; the first load can take up to a minute.</div>
   <div class="ms-narrow">The chart needs a mouse, so it is hard to use on a small touch screen.</div>
   <div class="ms-bar"><div></div></div>
 </div>

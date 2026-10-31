@@ -31,7 +31,7 @@ testable headlessly, including a bot that plays through sixteen scenarios.
 The web build is a spectator view of the same simulation, compiled to
 WebAssembly with pygbag. The AI fleet, weather, tides and port traffic all run,
 and you can click a vessel to follow it, pan, zoom and change time speed, but
-there is no player vessel, no contracts and no sound. It takes 30 to 60 seconds
+there is no player vessel, no contracts and no sound. It can take up to a minute
 to load about 11 MB on a first visit. Playing the career game means the Windows
 download or running it from source, as above. It is made for a desktop browser with a mouse and keyboard and has not been
 tested on phones.

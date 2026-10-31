@@ -1,4 +1,4 @@
-# Vela Sea — v0.6.1 Release Notes
+# Vela Sea v0.6.1 release notes
 
 A stability and clarity pass on top of v0.6.0: real fullscreen, the helm can
 never be taken away from you, no more pan-into-the-void crash, and hull damage
@@ -10,7 +10,7 @@ you can actually see coming.
 - **Your helm always wins.** While avoiding traffic, the player vessel could be
   assigned the give-way role and have its wheel, autopilot, and throttle quietly
   locked out until the encounter cleared (the "steering randomly does nothing"
-  bug). The player is now always a stand-on obstacle — AI ships still give way to
+  bug). The player is now always a stand-on obstacle. AI ships still give way to
   you correctly, but you are never auto-steered, and any manual input instantly
   reclaims the helm.
 
@@ -21,7 +21,7 @@ you can actually see coming.
   restores correctly, and toggling repeatedly rebuilds the view without crashing.
 
 ### Crashes & stability
-- Fixed an **OverflowError crash when free-panning the camera** far off the map —
+- Fixed an **OverflowError crash when free-panning the camera** far off the map:
   the camera is now clamped to the world plus a margin.
 - Quitting from the title screen is honoured immediately; **pausing now preserves
   your time-compression setting** instead of snapping it back to 1×.
@@ -33,15 +33,15 @@ you can actually see coming.
 ### Hull damage you can see
 - Taking hull damage now **flashes the screen red** (grounding or storm), a
   persistent pulsing **"HULL CRITICAL"** banner warns you below 25% integrity,
-  and the **game-over screen explains the cause in plain English** — "ran aground
-  once too often", "caught out in heavy seas", or bankruptcy — instead of a bare
+  and the **game-over screen explains the cause in plain English** ("ran aground
+  once too often", "caught out in heavy seas", or bankruptcy) instead of a bare
   "Hull failure".
 
 Tests: pytest 16/16; gameplay bot 16/16; draw-budget check passing.
 
 ---
 
-# Vela Sea — v0.6.0 Release Notes
+# Vela Sea v0.6.0 release notes
 
 Clickable menus and a complete, persisted settings system, reachable from the
 title screen and in-game.
@@ -57,12 +57,12 @@ title screen and in-game.
 
 ### Settings (persisted to `settings.json`)
 - **Audio:** master / effects / music volume sliders, applied live.
-- **Display:** windowed/fullscreen toggle + resolution selector — changes re-init
+- **Display:** windowed/fullscreen toggle + resolution selector; changes re-init
   the window and rebuild the view without losing your game.
-- **Controls:** rebind any core action (throttle, helm, pause, follow-cam, etc.)
-  — click a row and press the new key. Duplicate and reserved keys are rejected
+- **Controls:** rebind any core action (throttle, helm, pause, follow-cam, etc.):
+  click a row and press the new key. Duplicate and reserved keys are rejected
   with a warning.
-- **Gameplay:** difficulty preset (Easy / Normal / Hard — scales zone fines and
+- **Gameplay:** difficulty preset (Easy / Normal / Hard; scales zone fines and
   grounding damage by 0.5× / 1.0× / 1.5×) and a voyage-flavour log toggle.
 - Settings save to the same user-writable place as the career save
   (`%APPDATA%/VelaSea/settings.json` in the packaged build); defaults exactly
@@ -76,7 +76,7 @@ title screen and in-game.
 
 ---
 
-# Vela Sea — v0.4.0 Release Notes
+# Vela Sea v0.4.0 release notes
 
 This release turns the passive traffic simulator into a full maritime career
 game with a progression loop: accept contract → navigate → dock → earn →
@@ -93,11 +93,11 @@ unlock better contracts → repeat.
 - Career persisted to `save.json` (stdlib JSON, version-stamped)
 - Auto-save every time the player docks; corrupt/wrong-version files are
   rejected cleanly
-- Game over deletes the save — a lost run cannot be continued
+- Game over deletes the save, so a lost run cannot be continued
 
 ### Docking & port menu
 - Drift into any port at ≤ 2 kn to dock; menu opens automatically
-- FUEL (8/pt) and REPAIR HULL (50/pt) purchases — costs shown, unaffordable
+- FUEL (8/pt) and REPAIR HULL (50/pt) purchases, costs shown, unaffordable
   options disabled in red; free auto-refuel removed for the player
 - JOB BOARD shortcut and DEPART (also W or SPACE)
 
@@ -113,9 +113,9 @@ unlock better contracts → repeat.
 - All AI routes re-verified safe against the new geography
 
 ### New contract types
-- **Hazmat** — ×1.8 rate, rep 50+, 4–6 h deadline, zone fines doubled
-- **Charter** — 100/nm, 8–12 h deadline, hard 10 kn speed cap
-- **VIP charter** — ×2.5 rate, Master Mariner (rep 75) exclusive
+- **Hazmat**: ×1.8 rate, rep 50+, 4–6 h deadline, zone fines doubled
+- **Charter**: 100/nm, 8–12 h deadline, hard 10 kn speed cap
+- **VIP charter**: ×2.5 rate, Master Mariner (rep 75) exclusive
 
 ### Weather with teeth
 - Fog (< 150 m): AIS hover disabled, LOW VISIBILITY HUD warning, traffic
