@@ -1,5 +1,24 @@
 # Vela Sea
 
+## Play it
+
+- **Windows: [download the latest release](https://github.com/VelaWind/vela-sea/releases/latest/download/VelaSea-windows.zip)**
+  (`VelaSea-windows.zip`). Unzip it and run `VelaSea/VelaSea.exe`. This is the
+  full career game and needs no Python install.
+- **In a browser: [watch it run](https://velawind.github.io/vela-sea/)**.
+  A watch-only spectator view of the simulation, with no player vessel. Made
+  for a desktop browser with a mouse.
+- **From source** (Python 3.10 or newer):
+  `pip install -r requirements.txt` then `python main.py`. See
+  [Running it](#running-it).
+
+The Windows download is not code-signed, so on first launch Windows SmartScreen
+shows "Windows protected your PC". To run it anyway, click **More info**, then
+**Run anyway**. Every release is built from this repository by
+[`release.yml`](.github/workflows/release.yml), and the
+[release page](https://github.com/VelaWind/vela-sea/releases/latest) lists
+the exact version.
+
 A maritime career simulator written in Python and Pygame. You command a cargo
 vessel on a sea 210 by 147 nautical miles: take contracts from a job board, navigate an
 ECDIS-style chart with depth soundings and restricted zones, and deal with
@@ -12,9 +31,9 @@ testable headlessly, including a bot that plays through sixteen scenarios.
 The web build is a spectator view of the same simulation, compiled to
 WebAssembly with pygbag. The AI fleet, weather, tides and port traffic all run,
 and you can click a vessel to follow it, pan, zoom and change time speed, but
-there is no player vessel, no contracts and no sound. It takes 30 to 60 seconds
-to load about 11 MB on a first visit. Playing the career game means running it
-locally, as below. It is made for a desktop browser with a mouse and keyboard and has not been
+there is no player vessel, no contracts and no sound. It can take up to a minute
+to load about 11 MB on a first visit. Playing the career game means the Windows
+download or running it from source, as above. It is made for a desktop browser with a mouse and keyboard and has not been
 tested on phones.
 
 ![The chart in normal conditions](screenshots/01-chart.png)

@@ -3405,8 +3405,15 @@ class Game:
                                EVENT_COLOR_WEATHER)
             self._flavor_last_s = now_s
 
-    async def run(self, skip_title: bool = False) -> None:
+    async def run(self, skip_title: bool = False,
+                  smoke_seconds: Optional[float] = None) -> None:
         """Run the title menu, then the main game loop until quit.
+
+        smoke_seconds: when set (desktop `--smoke-seconds N`), the loop ends by
+        itself after N wall-clock seconds of real frames and the process exits
+        with status 0.  The release workflow uses this to prove the packaged
+        .exe boots, builds the world and renders frames on a machine with no
+        display.  A crash never reaches the clean exit, so it fails the check.
 
         Async so the frame loop can `await asyncio.sleep(0)` once per frame — the
         yield pygbag needs to hand control back to the browser's event loop each
@@ -3441,7 +3448,17 @@ class Game:
         # -> 20 fps — the same boundary bug the pacing audit killed.)
         _web_budget = 1.0 / WEB_TARGET_FPS
         _web_last = _web_next = time.perf_counter()
+        # Smoke-test deadline (None in every normal run, so this costs nothing).
+        _smoke_end = (time.perf_counter() + smoke_seconds
+                      if smoke_seconds is not None else None)
+        _smoke_frames = 0
         while self.running:
+            if _smoke_end is not None and time.perf_counter() >= _smoke_end:
+                # Printed for local runs; the windowed .exe has no console, so
+                # CI relies on the exit status instead.
+                print(f"SMOKE OK: {_smoke_frames} frames rendered")
+                self.running = False
+                break
             if IS_WEB:
                 _now = time.perf_counter()
                 if _now < _web_next:
@@ -3477,6 +3494,7 @@ class Game:
             if _prof is not None:
                 _prof.sim += time.perf_counter() - _s
             self.render()
+            _smoke_frames += 1
             if _prof is not None:
                 _prof.n += 1
                 _prof.steps += self.last_sim_steps
@@ -3509,6 +3527,21 @@ class Game:
             sys.exit()
 
 
+def _smoke_seconds_arg(argv) -> Optional[float]:
+    """Parse `--smoke-seconds N` from the command line, or None if absent.
+
+    Kept out of config.py on purpose: it is a test switch passed by the release
+    workflow, not a tunable game value.  A bad or missing number is a usage
+    error, so it raises instead of silently running a normal session.
+    """
+    if "--smoke-seconds" not in argv:
+        return None
+    i = argv.index("--smoke-seconds")
+    if i + 1 >= len(argv):
+        raise SystemExit("--smoke-seconds needs a number of seconds")
+    return float(argv[i + 1])
+
+
 async def main():
     """Entry point.
 
@@ -3523,9 +3556,10 @@ async def main():
     """
     try:
         skip_title = "--skip-title" in sys.argv
+        smoke_seconds = _smoke_seconds_arg(sys.argv)
         while True:
             game = Game()
-            await game.run(skip_title=skip_title)
+            await game.run(skip_title=skip_title, smoke_seconds=smoke_seconds)
             if not getattr(game, '_restart_requested', False):
                 break
         pygame.quit()

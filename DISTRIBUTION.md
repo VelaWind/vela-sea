@@ -54,6 +54,26 @@ for r,_,fs in os.walk(src) for f in fs]; z.close()"
 `config.py` (e.g. `VelaSea_v0.6.0.zip`). Bump `GAME_VERSION` first, rebuild,
 then zip — the version shows on the title screen and is stamped into saves.
 
+## Automated releases (GitHub Actions)
+
+`.github/workflows/release.yml` does the build above on a Windows runner:
+
+- **Every pull request** that touches the game builds `VelaSea.exe`, checks
+  its version metadata, runs a smoke start
+  (`VelaSea.exe --skip-title --smoke-seconds 5` under SDL's dummy drivers; the
+  game quits by itself with status 0 after five seconds of frames) and uploads
+  the zip as a workflow artifact. Nothing is published.
+- **Pushing a tag `v<GAME_VERSION>`** (for example `v0.6.1`) runs the same
+  build and publishes a GitHub Release with `VelaSea-windows.zip` attached and
+  the newest section of `RELEASE_NOTES.md` as its notes. The tag must match
+  `GAME_VERSION` in `config.py` or the build stops.
+
+The release asset keeps one fixed name, `VelaSea-windows.zip`, so the link
+`https://github.com/VelaWind/vela-sea/releases/latest/download/VelaSea-windows.zip`
+always points at the newest build. The version is in the release title and in
+the exe's Properties > Details tab, which `vela_sea.spec` fills with public
+project metadata only.
+
 ## For testers
 
 1. Download `VelaSea_v0.6.0.zip`.

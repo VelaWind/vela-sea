@@ -173,6 +173,19 @@ def _head_block(sea: str) -> str:
   .ms-word span {{ color: #4fd1e0; font-weight: 400; }}
   .ms-sub  {{ color: #6c8096; font-size: 13px; letter-spacing: .22em;
               margin-top: 10px; text-transform: lowercase; }}
+  /* Sets expectations before the 11 MB load finishes: what the page is and
+     roughly how long to wait.  max-width keeps it wrapping inside phones. */
+  .ms-note {{ color: #9fb3c8; font-size: 14px; line-height: 1.5;
+              margin-top: 22px; max-width: 90vw; text-align: center; }}
+  /* Phone/narrow-window hint, shown only below 700px wide: the chart is
+     driven by mouse hover, click and wheel, which a touch screen lacks. */
+  .ms-narrow {{ display: none; color: #e0a13a; font-size: 13px;
+                line-height: 1.5; margin-top: 8px; max-width: 90vw;
+                text-align: center; }}
+  @media (max-width: 699px) {{
+    .ms-narrow {{ display: block; }}
+    .ms-word {{ font-size: 32px; }}   /* 44px wordmark overflows a 375px phone */
+  }}
   .ms-bar  {{ width: 220px; height: 2px; margin-top: 26px; overflow: hidden;
               border-radius: 2px; background: rgba(140,170,200,.14); }}
   .ms-bar div {{ width: 40%; height: 100%; background: #4fd1e0;
@@ -195,6 +208,8 @@ def _body_block() -> str:
     return f"""<div id="{PAGE_MARKER}-splash">
   <div class="ms-word">VELA<span>&nbsp;SEA</span></div>
   <div class="ms-sub">ambient maritime simulator</div>
+  <div class="ms-note">Watch-only demo. Best on a desktop browser; the first load can take up to a minute.</div>
+  <div class="ms-narrow">The chart needs a mouse, so it is hard to use on a small touch screen.</div>
   <div class="ms-bar"><div></div></div>
 </div>
 <script id="{PAGE_MARKER}-script">
