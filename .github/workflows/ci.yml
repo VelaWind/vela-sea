@@ -1,0 +1,43 @@
+name: CI
+
+# The simulation layer runs with no window, so the whole suite runs here under
+# SDL's dummy video and audio drivers: no display, no sound card.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: pytest · gameplay bot · verification scripts
+    runs-on: ubuntu-latest
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt pytest==8.4.2
+      - name: Layering rule (nothing under engine/, data/ or config.py imports Pygame)
+        run: |
+          if grep -rnE '^\s*(import pygame|from pygame)' engine data config.py; then
+            echo "::error::Pygame imported inside the simulation layer."
+            exit 1
+          fi
+      - name: Unit tests
+        run: pytest tests/ -q
+      - name: Gameplay bot (16 scenarios)
+        run: python tests/test_bot.py
+      - name: Verification scripts
+        run: |
+          for f in tools/verify/verify_*.py; do
+            echo "::group::$f"
+            python "$f"
+            echo "::endgroup::"
+          done
