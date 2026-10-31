@@ -11,7 +11,8 @@ No Pygame required.
 """
 
 import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+# The repository root, two levels up, so engine/ and config.py import.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 
 from engine.world import World
 from engine.environment import Environment
@@ -170,3 +171,6 @@ print()
 print("=" * 58)
 all_ok = ok1 and ok2a and ok2b and ok3
 print(f"ALL TESTS PASSED: {all_ok}")
+
+# Exit status for CI: zero only when every check passed.
+sys.exit(0 if all_ok else 1)

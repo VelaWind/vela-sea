@@ -10,7 +10,8 @@ No Pygame required.
 """
 
 import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+# The repository root, two levels up, so engine/ and config.py import.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 
 from math import atan2, cos, sin, degrees, radians, sqrt
 
@@ -252,3 +253,6 @@ print()
 print("=" * 60)
 all_ok = ok1 and ok2 and ok3a and ok3b and ok3c and ok4
 print(f"ALL TESTS PASSED: {all_ok}")
+
+# Exit status for CI: zero only when every check passed.
+sys.exit(0 if all_ok else 1)
