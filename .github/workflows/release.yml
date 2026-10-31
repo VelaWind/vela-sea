@@ -1,0 +1,185 @@
+name: Windows release
+
+# Builds the standalone Windows game (PyInstaller, folder build from
+# vela_sea.spec), proves it starts, zips it and, for a version tag, publishes
+# it as a GitHub Release.
+#
+#   Pull request -> build + smoke start + zip, uploaded as a workflow artifact.
+#                   Nothing is published.  This is the check a reviewer sees.
+#   Tag v*       -> the same build, then a GitHub Release with the zip attached
+#                   and notes taken from the top section of RELEASE_NOTES.md.
+#
+# The release asset always has the same name (VelaSea-windows.zip) so the
+# README can link to .../releases/latest/download/VelaSea-windows.zip and that
+# link never goes stale when a new version ships.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+    # Only PRs that can change the packaged game trigger a Windows build.
+    paths:
+      - 'main.py'
+      - 'config.py'
+      - 'engine/**'
+      - 'render/**'
+      - 'data/**'
+      - 'assets/**'
+      - 'vela_sea.spec'
+      - 'requirements.txt'
+      - '.github/workflows/release.yml'
+
+# Read-only by default; only the publish job below asks for write access.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows executable
+    runs-on: windows-latest
+    env:
+      # No display or sound card on the runner: SDL renders to memory instead.
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+      ASSET_NAME: VelaSea-windows.zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # Runtime dependency plus the PyInstaller version pinned in
+      # requirements-dev.txt.  The rest of the dev list (pygbag, playwright)
+      # is not needed to build the desktop game.
+      - name: Install
+        run: pip install -r requirements.txt pyinstaller==6.20.0
+
+      # A tag must match the version the game shows on its title screen, or
+      # the release page and the exe would disagree about what was shipped.
+      - name: Check tag matches GAME_VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          game_version=$(python -c "from config import GAME_VERSION; print(GAME_VERSION)")
+          if [ "${GITHUB_REF_NAME}" != "v${game_version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match config.GAME_VERSION ${game_version}."
+            exit 1
+          fi
+
+      - name: Build with PyInstaller
+        run: pyinstaller vela_sea.spec --clean --noconfirm
+
+      # The exe's Properties > Details tab ships to every player, so check it
+      # holds exactly the public project metadata from vela_sea.spec.
+      - name: Check exe version metadata
+        shell: pwsh
+        run: |
+          $info = (Get-Item dist/VelaSea/VelaSea.exe).VersionInfo
+          $info | Format-List CompanyName, FileDescription, ProductName, ProductVersion, FileVersion, LegalCopyright, OriginalFilename
+          $version = python -c "from config import GAME_VERSION; print(GAME_VERSION)"
+          $expected = @{
+            CompanyName      = 'VelaWind'
+            FileDescription  = 'Vela Sea'
+            ProductName      = 'Vela Sea'
+            ProductVersion   = $version
+            LegalCopyright   = 'Copyright (c) 2026 VelaWind'
+            OriginalFilename = 'VelaSea.exe'
+          }
+          foreach ($k in $expected.Keys) {
+            if ($info.$k -ne $expected[$k]) {
+              Write-Error "$k is '$($info.$k)', expected '$($expected[$k])'"
+              exit 1
+            }
+          }
+
+      # Smoke start: launch the packaged exe straight into the game (no title
+      # menu) and let it run its own frame loop for a few seconds.
+      # --smoke-seconds makes the game quit by itself with exit status 0 once
+      # that time has passed.  Anything else fails the step: a crash exits
+      # non-zero, and a windowed PyInstaller crash shows an error dialog that
+      # keeps the process alive, which the timeout below catches.
+      - name: Smoke start
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist/VelaSea/VelaSea.exe `
+                 -ArgumentList '--skip-title', '--smoke-seconds', '5' -PassThru
+          $null = $p.Handle   # keep the handle open so ExitCode is readable
+          if (-not $p.WaitForExit(120000)) {
+            Stop-Process -Id $p.Id -Force
+            Write-Error 'VelaSea.exe did not exit within 120 s (hung or crash dialog).'
+            exit 1
+          }
+          if ($p.ExitCode -ne 0) {
+            Write-Error "VelaSea.exe exited with code $($p.ExitCode)."
+            exit 1
+          }
+          Write-Host 'Smoke start passed: the exe ran its frame loop and exited cleanly.'
+
+      # Python's zipfile rather than Compress-Archive: PowerShell 5.1 writes
+      # backslash separators, a non-standard zip (see DISTRIBUTION.md).
+      # Entries sit under VelaSea/ so unzipping gives one tidy folder.
+      - name: Zip
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import os, zipfile
+          src = "dist/VelaSea"
+          with zipfile.ZipFile(os.environ["ASSET_NAME"], "w",
+                               zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for root, _, files in os.walk(src):
+                  for f in files:
+                      path = os.path.join(root, f)
+                      rel = os.path.relpath(path, src).replace(os.sep, "/")
+                      z.write(path, "VelaSea/" + rel)
+          print(f"wrote {os.environ['ASSET_NAME']} "
+                f"({os.path.getsize(os.environ['ASSET_NAME']):,} bytes)")
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VelaSea-windows
+          path: ${{ env.ASSET_NAME }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to create the release and upload the zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: VelaSea-windows
+
+      # Release notes = the newest section of RELEASE_NOTES.md (everything
+      # above the first '---' divider), plus the unsigned-download note.
+      - name: Write release notes
+        run: |
+          python3 - <<'EOF'
+          text = open("RELEASE_NOTES.md", encoding="utf-8").read()
+          top = text.split("\n---", 1)[0].strip()
+          top += (
+              "\n\n## Download\n\n"
+              "Download `VelaSea-windows.zip`, unzip it and run "
+              "`VelaSea/VelaSea.exe`. No Python install is needed.\n\n"
+              "The exe is not code-signed, so Windows SmartScreen shows "
+              "\"Windows protected your PC\" on first launch. Click "
+              "**More info**, then **Run anyway**.\n"
+          )
+          open("release_notes.md", "w", encoding="utf-8").write(top + "\n")
+          EOF
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" VelaSea-windows.zip \
+            --title "Vela Sea ${GITHUB_REF_NAME}" \
+            --notes-file release_notes.md
