@@ -1,3 +1,58 @@
+# Vela Sea v0.6.2 release notes
+
+A chart-accuracy and rescue pass on top of v0.6.1: the scale bar and range
+rings now show true distances, the chart shows where a ship is actually
+going, rescues finish only when the rescuer reaches the casualty, and the
+web demo works on a phone. Careers saved by v0.6.1 carry over.
+
+## Fixes
+
+### Chart
+- **The scale bar and range rings show true nautical miles.** Both drew a
+  distance in nautical miles as if it were in chart units, so every distance
+  read about 6.7 times too short: the bar labelled "50 nm" covered 7.5 nm. The
+  bar now picks a round distance that fits at the current zoom (50 nm
+  zoomed fully out, 5 nm zoomed fully in) and is drawn at its true length. The range rings step with zoom like a
+  radar's range setting, for example 16, 32 and 48 nm zoomed out and 2, 4 and
+  6 nm zoomed in, and each ring is drawn at its true radius.
+
+### Search and rescue
+- **A rescue completes only when the rescuer reaches the casualty.** A rescuer
+  given a route around an island used to free the stranded vessel as soon as it
+  reached the first turning point, sometimes from the far side of the island.
+  It now has to come within 3.9 nm of the casualty. Rescues take longer, rescue
+  vessels spend more time on rescue duty, and AI traffic visits ports less
+  often as a result.
+
+## New
+
+### Chart
+- **Course-over-ground arrow.** The player's ship and the followed ship show a
+  green arrow along the direction they are actually moving whenever current
+  and wind push them off their heading by more than half a degree. The hull
+  still points along the heading, so the angle between the two shows the
+  drift.
+
+### Web demo (velawind.github.io/vela-sea)
+- **Works on a phone.** On a narrow screen the fleet list starts as a one-tap
+  "Fleet (15)" button, the status bar shortens its wording so no readout
+  overlaps another, the compass no longer sits under the status bar, and a
+  selected ship opens a short sheet along the bottom instead of a card that
+  covered the whole screen. Tapping the map closes it.
+- The loading screen says what the demo is and how long it takes to load, with
+  a note on narrow screens that the chart needs a mouse.
+
+## Saves
+- Careers saved by v0.6.1 load in v0.6.2. The save format is unchanged, and
+  the game now accepts saves from any listed compatible version instead of
+  only its own.
+
+Tests: pytest 31; gameplay bot 16/16. Moving the zone rules into their own
+module left every fine, warning and AI speed cap identical in a seeded
+comparison.
+
+---
+
 # Vela Sea v0.6.1 release notes
 
 A stability and clarity pass on top of v0.6.0: real fullscreen, the helm can

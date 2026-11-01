@@ -187,7 +187,7 @@ second limit, and the rejected patches.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/ -q                    # 25 tests
+pytest tests/ -q                    # 31 tests
 python tests/test_bot.py            # 16 gameplay scenarios end to end
 python tests/test_visual_perf.py    # per-frame render budget, machine-dependent
 python tools/verify/verify_cog_math.py   # and the other tools/verify scripts

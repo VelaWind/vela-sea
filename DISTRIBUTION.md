@@ -36,7 +36,7 @@ What the spec does:
 
 ```
 python -c "import zipfile,os; src='dist/VelaSea'; \
-z=zipfile.ZipFile('VelaSea_v0.6.0.zip','w',zipfile.ZIP_DEFLATED,compresslevel=9); \
+z=zipfile.ZipFile('VelaSea_v0.6.2.zip','w',zipfile.ZIP_DEFLATED,compresslevel=9); \
 [z.write(os.path.join(r,f),'VelaSea/'+os.path.relpath(os.path.join(r,f),src).replace(os.sep,'/')) \
 for r,_,fs in os.walk(src) for f in fs]; z.close()"
 ```
@@ -51,7 +51,7 @@ for r,_,fs in os.walk(src) for f in fs]; z.close()"
 ## Version naming
 
 `VelaSea_v<MAJOR>.<MINOR>.<PATCH>.zip`, matching `GAME_VERSION` in
-`config.py` (e.g. `VelaSea_v0.6.0.zip`). Bump `GAME_VERSION` first, rebuild,
+`config.py` (e.g. `VelaSea_v0.6.2.zip`). Bump `GAME_VERSION` first, rebuild,
 then zip — the version shows on the title screen and is stamped into saves.
 
 ## Automated releases (GitHub Actions)
@@ -63,7 +63,7 @@ then zip — the version shows on the title screen and is stamped into saves.
   (`VelaSea.exe --skip-title --smoke-seconds 5` under SDL's dummy drivers; the
   game quits by itself with status 0 after five seconds of frames) and uploads
   the zip as a workflow artifact. Nothing is published.
-- **Pushing a tag `v<GAME_VERSION>`** (for example `v0.6.1`) runs the same
+- **Pushing a tag `v<GAME_VERSION>`** (for example `v0.6.2`) runs the same
   build and publishes a GitHub Release with `VelaSea-windows.zip` attached and
   the newest section of `RELEASE_NOTES.md` as its notes. The tag must match
   `GAME_VERSION` in `config.py` or the build stops.
@@ -76,7 +76,8 @@ project metadata only.
 
 ## For testers
 
-1. Download `VelaSea_v0.6.0.zip`.
+1. Download `VelaSea-windows.zip` from the latest GitHub Release (or a
+   `VelaSea_v<version>.zip` built by hand as above).
 2. Unzip anywhere (Desktop, Downloads — anywhere writable).
 3. Open the `VelaSea` folder and run **`VelaSea.exe`**.
 

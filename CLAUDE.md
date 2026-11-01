@@ -1,7 +1,7 @@
 # CLAUDE.md — AI Context for gps-simulator (Vela Sea)
 
 ## Project Overview
-**Vela Sea** — a Python + Pygame maritime career simulator (v0.6.1,
+**Vela Sea**: a Python + Pygame maritime career simulator (v0.6.2,
 Steam release candidate). The player captains MV Velawind on a 210 nm
 fictional sea: accept contracts, navigate, dock, earn money and reputation,
 unlock higher-tier work. 15 AI vessels run autonomous schedules around them
@@ -72,7 +72,7 @@ config.py          Every constant: physics, colors, career, sound, polish
   (engine, ambient) + one-shots (docking, warning, mayday)
 
 ## Testing
-- `pytest tests/ -q`: 25 tests (collision, traffic, save/load, rules, rescue range, bot)
+- `pytest tests/ -q`: 31 tests (collision, traffic, save/load, rules, rescue range, scale, bot)
 - `python tests/test_bot.py` — human-readable 16-scenario report
 - `python tests/verify_new_routes.py` — run after ANY geography change
 - `python tests/test_visual_perf.py` — draw_all budget (< 8 ms)

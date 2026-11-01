@@ -1,4 +1,4 @@
-# Known Issues — v0.6.1
+# Known Issues: v0.6.2
 
 An honest list of what doesn't work perfectly, with severity ratings.
 
@@ -16,9 +16,8 @@ An honest list of what doesn't work perfectly, with severity ratings.
 | 10 | **Docking refusal reuses the departure-grace mechanism**: after being refused at a draft-restricted port you must leave its radius before any new docking attempt there registers. | Low |
 | 11 | **Displaced vessels have no defined way back to their route.** Routes in `data/world_data.py` are verified as geometry (`tests/verify_new_routes.py`), but rescue duty, MOB searches, trawl wander, party-tender runs and tide refloating all move vessels far off that geometry, and every "hand back to the schedule" site then sets `destination = route[route_index]` — a straight line from wherever the vessel ended up. Measured over 3 seeds x 14 sim-days: **84% of groundings occur >15 wu from the vessel's own route, against 1% on it.** See the design note below. | Medium — with depth-aware routing closed (`route_refused` = 0) and the emergency lifecycle fixed, refloat flap is now the sole remaining driver |
 | 14 | **COG maths and `Vessel.move()` still compute the same velocity separately.** `cog_direction` (heading + current + wind drift, in knots) and `move()` (the same terms as distances) are two implementations. `tools/verify/verify_cog_math.py` now runs one real `move()` step and fails if the two disagree, so drift between them is caught, but merging them would change `move()`'s floating-point order and was not done here. | Low |
-| 15 | **The scale bar and range rings understate distance by a factor of 6.7.** Both pass nautical miles to `camera.distance_to_screen`, which takes world units (1 wu = 0.15 nm), so the bar labelled "50 nm" spans 50 wu (7.5 nm) and a ring labelled "8 nm" is drawn at 8 wu (1.2 nm). Found while drawing the COG vector, which converts correctly. Not fixed in `fix/open-items-a` because it is outside that branch's scope. | Medium (a chart that misreports distance) |
 
-## Resolved after v0.6.1: tests that checked copies (branch `fix/tests-use-real-code`)
+## Resolved in v0.6.2: tests that checked copies (branch `fix/tests-use-real-code`)
 
 Three checks used to test hand-copied code instead of the game's own:
 `tools/verify/verify_cog_math.py` held a copy of `_cog_direction` from
@@ -36,7 +35,7 @@ identical frames before and after. One difference for the tests: their old
 copy of the steering step lacked the game's approach slowdown, so they now
 exercise slightly different (the game's real) behaviour, and still pass.
 
-## Resolved after v0.6.1: open items A (branch `fix/open-items-a`)
+## Resolved in v0.6.2: open items A (branch `fix/open-items-a`)
 
 **COG vector (was #13).** The chart now draws the course-over-ground vector
 for the player and the followed vessel: a teal-green line with an arrowhead
@@ -82,6 +81,22 @@ their whole route, and that time comes out of port runs. The earlier arrival
 and rescue figures were inflated by the bug, so the before column is not a
 clean baseline, but arrivals are the diagnostic's health counter and halving them
 is a real change in how the sea looks. Open question for review.
+
+## Resolved in v0.6.2: scale bar and range rings (was #15, branch `fix/scale-bar`)
+
+Both passed nautical miles to `Camera.distance_to_screen`, which takes world
+units (1 wu = `NM_PER_WORLD_UNIT` = 0.15 nm), so they drew 6.7 times too
+short: the "50 nm" bar was 7.5 nm and an "8 nm" ring was 1.2 nm. Chart
+annotations now convert through `Camera.nm_to_screen`, and
+`render/camera.choose_scale_nm` picks a round distance from
+`SCALE_BAR_CANDIDATES_NM` or `SHIP_RANGE_RING_CANDIDATES_NM`. The scale bar is
+no longer clamped, since a clamped bar no longer matches its label. The range
+rings now step with zoom (16 nm zoomed out, 2 nm zoomed in) to keep their
+designed on-screen size; a fixed true 8 nm would have put the outer ring 640 px
+out at full zoom. `tests/test_scale.py` converts known world distances, runs
+the chart's real drawing code at seven zooms, and fails on the old behaviour.
+`tools/verify_chunk4.py` used a copy of the buggy logic and now calls the same
+functions.
 
 ---
 
@@ -250,7 +265,7 @@ dispatch that last vessel across the sea and relabel the failure, masking pool
 exhaustion rather than fixing it. The pool is the variable to attack, not the
 radius.
 
-## Resolved after v0.6.1: web demo on phones (branch `fix/web-small-screen`)
+## Resolved in v0.6.2: web demo on phones (branch `fix/web-small-screen`)
 
 On a phone (375 to 390 CSS px wide) the web demo opened with the fleet list
 covering most of the chart, the status bar's visibility readout running into
