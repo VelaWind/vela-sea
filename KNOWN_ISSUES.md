@@ -5,7 +5,7 @@ An honest list of what doesn't work perfectly, with severity ratings.
 | # | Issue | Severity |
 |---|-------|----------|
 | 1 | **Save scope is career-only.** Money, reputation, stats, achievements, and hull are persisted — the active contract, world state, weather, and the player's position are not. "Continue" starts a fresh session at the spawn point with your career restored. | Medium (by design for 0.4.0; full session persistence is future work) |
-| 2 | **No Steam packaging yet.** The game runs from source (`python main.py`); there is no built executable, installer, Steamworks integration, or store screenshots. The README has a screenshot placeholder. | High for actual Steam submission — must be done before shipping |
+| 2 | **No Steam packaging yet.** A Windows build exists: `.github/workflows/release.yml` builds `VelaSea.exe` with PyInstaller and attaches `VelaSea-windows.zip` to each GitHub Release (v0.6.1 is the first). It is unsigned, so Windows SmartScreen warns on first launch, and there is no Mac or Linux build. Still missing for Steam: an installer, Steamworks integration and a store page. | High for actual Steam submission; must be done before shipping |
 | 3 | **"Clean Record" can become permanently unobtainable.** It requires 5 deliveries with `fines_paid == 0`; a single fine anywhere in the career locks it out forever, because fines never reset. | Low-Medium (arguably fair, but probably should reset per-run) |
 | 4 | **Occasional frame spikes in heavy weather.** Sustained averages are well under the 16.7 ms/60 FPS budget (~9 ms at 3× in storm+fog), but isolated frames can hit ~25 ms on a software renderer (OS scheduling / sim catch-up steps). Not visible as sustained stutter. | Low |
 | 5 | **Engine hum starts/stops without a fade**, so crossing the 2 kn threshold repeatedly can sound abrupt. | Low |
@@ -219,6 +219,10 @@ compass and scale bar move down by the extra height the UI scale adds to the
 status bar. Desktop is unchanged: seeded desktop frames are byte-identical
 before and after, as are web frames at the 1440 px layout.
 
-Still open on phones: selecting a vessel opens its information card, which
-fills almost the whole screen. Tapping away from the ship closes it. A
-compact card for narrow screens would be the next step.
+Selecting a vessel used to open the full information card, which filled
+almost the whole phone screen (branch `fix/phone-vessel-card`). In the narrow
+layout it is now a short sheet along the bottom: name and status; type,
+speed and heading; distance and ETA; fuel (or "Wind-powered"); a distress
+line when in distress; and "Tap the map to close". The followed ship stays
+visible above it. While the sheet is open the event log is hidden and the
+mission notice moves above it. Wide windows keep the full card.

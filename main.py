@@ -2833,7 +2833,11 @@ class Game:
         # Web: keep chart labels out from under the vessel-info column so they
         # can't ghost through its translucent card (see chart.label_occluders).
         if IS_WEB:
-            if self.selected_vessel is not None:
+            _sheet = self.vessel_info_panel.sheet_rect
+            if self.selected_vessel is not None and _sheet is not None:
+                # Phone layout: the card is a bottom sheet (last frame's rect).
+                self.chart.label_occluders = [_sheet.copy()]
+            elif self.selected_vessel is not None:
                 _vw, _vh = self.display.get_size()
                 _pw = min(ui_px(360), max(ui_px(280), _vw - ui_px(40)))
                 self.chart.label_occluders = [pygame.Rect(
@@ -2880,12 +2884,21 @@ class Game:
         self.vessel_info_panel.draw(self.selected_vessel, self.environment, self.world)  # Phase 2
         self.tech_systems_panel.draw(self.world, self.environment, self.selected_vessel)  # Phase 3
         self.settings_panel.draw(self.environment, self.sound)  # Phase 4
-        self.event_log.draw()
+        # Phone layout: the vessel sheet spans the bottom of the screen where
+        # the event log sits, so the log pauses while the sheet is open.
+        _sheet_open = (self.selected_vessel is not None
+                       and self.vessel_info_panel.sheet_rect is not None)
+        if not _sheet_open:
+            self.event_log.draw()
         if not self.settings_panel.is_visible:
             self.fleet_panel.draw(self.world, self.selected_vessel)
         # Mission panel lifts above the minimap when both occupy bottom-right.
         _mm_offset = (MINIMAP_HEIGHT_PX + MINIMAP_MARGIN_PX
                       if self.minimap.is_visible else 0)
+        if _sheet_open:
+            # Lift the toast above the phone vessel sheet.
+            _mm_offset = max(_mm_offset, self.display.get_height()
+                             - self.vessel_info_panel.sheet_rect.top)
         # The vessel-info card is top-right but grows with its content, so on a
         # short viewport it reaches the bottom-right corner the toast wants.
         self.mission_panel.draw(self.mission_manager,
