@@ -106,6 +106,10 @@ class VesselInfoPanel:
         # Width of the screen column this card occupies while open, 0 when closed.
         # Set on every draw; read by the mission toast to avoid overlapping it.
         self.occupied_width = 0
+        # Narrow web layout only: the bottom sheet's rect while it is open,
+        # None otherwise.  main.py reads it to keep chart labels, the event log
+        # and the mission toast clear of the sheet.
+        self.sheet_rect: Optional[pygame.Rect] = None
 
     def _required_panel_height(self, vessel) -> int:
         """Compute the pixel height needed to fit all rows for this vessel.
@@ -147,7 +151,14 @@ class VesselInfoPanel:
         # how to select a vessel; an empty placeholder just blocks the chart.
         if vessel is None:
             self.occupied_width = 0
+            self.sheet_rect = None
             return
+        if web_narrow_layout(self.surface):
+            # Phones: the full card (up to ~800 design px tall) would cover the
+            # whole screen, so show a short sheet along the bottom instead.
+            self._draw_compact_sheet(vessel)
+            return
+        self.sheet_rect = None
 
         S = ui_px   # identity on desktop; scales rows with the fonts on web
         panel_margin = S(20)
@@ -332,6 +343,94 @@ class VesselInfoPanel:
                 )
                 self.surface.blit(entry_surf, (x + S(20), current_y))
                 current_y += S(18)
+
+    def _draw_compact_sheet(self, vessel) -> None:
+        """Narrow web layout: the essentials in a sheet across the bottom.
+
+        Rows: name + status; type, speed, heading; distance and ETA (when the
+        vessel has a destination); fuel bar or "Wind-powered"; a distress line
+        when in distress; then a hint that tapping the map closes the sheet.
+        The followed vessel sits at screen centre, above the sheet.
+        """
+        S = ui_px
+        margin, pad = S(12), S(14)
+        w = self.surface.get_width() - margin * 2
+        inner = w - pad * 2
+        row = S(24)
+
+        # Build the rows first so the sheet height fits them exactly.
+        rows = []   # (kind, payload)
+        rows.append(("title", None))
+        speed_line = (f"{vessel.vessel_type.capitalize()}  ·  "
+                      f"{vessel.current_speed:.1f} kn  ·  {vessel.heading:.0f}°")
+        rows.append(("text", (speed_line, COLOR_TEXT_PRIMARY)))
+        if vessel.destination:
+            dist_nm = vessel.distance_to(vessel.destination) * NM_PER_WORLD_UNIT
+            nav = f"{dist_nm:.1f} nm to go"
+            if vessel.current_speed > 0.1:
+                nav += f"  ·  ETA {_format_duration(dist_nm / vessel.current_speed)}"
+            rows.append(("text", (nav, COLOR_TEXT_SECONDARY)))
+        if vessel.fuel is not None:
+            rows.append(("fuel", None))
+        else:
+            rows.append(("text", ("Wind-powered", COLOR_ACCENT)))
+        if getattr(vessel, 'distress', False):
+            hrs = int(vessel.distress_timer // 3600)
+            mins = int((vessel.distress_timer % 3600) // 60)
+            t = f"{hrs}h {mins:02d}m" if hrs else f"{mins}m"
+            state = "Aground" if vessel.status == "aground" else "Adrift"
+            rescuer = getattr(vessel, 'rescue_vessel', None)
+            who = rescuer.name if rescuer is not None else "no rescuer yet"
+            rows.append(("text", (f"{state} {t}  ·  {who}", COLOR_WARNING)))
+        rows.append(("hint", None))
+
+        title_h = self.font_title.get_height()
+        h = pad * 2 + title_h + S(8) + row * (len(rows) - 1)
+        x = margin
+        y = self.surface.get_height() - h - margin
+        self._draw_panel_background(x, y, w, h)
+        self.sheet_rect = pygame.Rect(x, y, w, h)
+        self.occupied_width = 0   # not a right-hand column; see sheet_rect
+
+        cy = y + pad
+        for kind, payload in rows:
+            if kind == "title":
+                label = vessel.display_state()
+                col = _DISPLAY_STATE_COLOR.get(label, COLOR_TEXT_PRIMARY)
+                st = self.font_label.render(label, True, col)
+                name_w = inner - st.get_width() - S(10)
+                # Prefer the title font; if the name would be cut, the smaller
+                # section font usually fits it whole (narrowest phones).
+                font = (self.font_title if self.font_title.size(vessel.name)[0] <= name_w
+                        else self.font_header)
+                name = font.render(_truncate_text(vessel.name, font, name_w),
+                                   True, COLOR_ACCENT)
+                self.surface.blit(name, (x + pad, cy + (title_h - name.get_height()) // 2))
+                self.surface.blit(st, (x + pad + inner - st.get_width(),
+                                       cy + (title_h - st.get_height()) // 2))
+                cy += title_h + S(8)
+            elif kind == "text":
+                text, col = payload
+                surf = self.font_label.render(
+                    _truncate_text(text, self.font_label, inner), True, col)
+                self.surface.blit(surf, (x + pad, cy))
+                cy += row
+            elif kind == "fuel":
+                pct = (vessel.fuel / vessel.fuel_capacity) * 100 if vessel.fuel_capacity else 0
+                col = COLOR_ACCENT if pct > 25 else COLOR_WARNING
+                lab = self.font_label.render(f"Fuel {pct:.0f}%", True, col)
+                self.surface.blit(lab, (x + pad, cy))
+                bx = x + pad + lab.get_width() + S(10)
+                bw = x + pad + inner - bx
+                bh = S(10)
+                by = cy + (lab.get_height() - bh) // 2
+                pygame.draw.rect(self.surface, COLOR_FRAME, (bx, by, bw, bh), border_radius=5)
+                pygame.draw.rect(self.surface, col, (bx, by, int(bw * pct / 100), bh),
+                                 border_radius=5)
+                cy += row
+            elif kind == "hint":
+                hint = self.font_small.render("Tap the map to close", True, COLOR_TEXT_DIM)
+                self.surface.blit(hint, (x + pad, cy + S(4)))
 
     def _draw_panel_background(self, x: int, y: int, width: int, height: int) -> None:
         from config import IS_WEB
@@ -984,9 +1083,9 @@ class FleetStatusPanel:
         y = self.TOP_Y
         self._toggle_rect = None
         if self._narrow and selected_vessel is not None:
-            # The selected vessel's info card fills a phone screen; a fleet
-            # button drawn over it would collide with its text.  Tapping away
-            # from the ship deselects it and brings the button back.
+            # While a vessel's sheet is open the fleet list stays hidden: opened,
+            # its rows would run underneath the sheet.  Tapping the map closes
+            # the sheet and brings the button back.
             self._rows = []
             self._collapsed = True
             self.occupied_width = 0
