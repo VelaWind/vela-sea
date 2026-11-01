@@ -17,7 +17,7 @@ from collections import OrderedDict
 
 import pygame
 
-from config import (IS_WEB, FONT_DATA_NAME,
+from config import (IS_WEB, FONT_DATA_NAME, WEB_NARROW_LAYOUT_W,
                     FONT_WEB_UI_PATH, FONT_WEB_DATA_PATH)
 
 # ---------------------------------------------------------------------------
@@ -103,6 +103,19 @@ def get_ui_scale() -> float:
 def ui_px(value: float) -> int:
     """Scale a design-time pixel value (tuned for 720p) by the UI scale."""
     return int(round(value * _UI_SCALE))
+
+
+def web_narrow_layout(surface) -> bool:
+    """True when the WEB build is showing on a narrow viewport (a phone or a
+    narrow window), so panels should use their compact layout.
+
+    Measured in design pixels (framebuffer width / UI scale) so a high-density
+    phone counts as narrow even though its framebuffer is wide.  Always False
+    on desktop, which keeps every desktop layout exactly as before.
+    """
+    if not IS_WEB:
+        return False
+    return surface.get_width() / _UI_SCALE < WEB_NARROW_LAYOUT_W
 
 
 def safe_sysfont(name, size, bold=False, italic=False):

@@ -1940,7 +1940,10 @@ class Game:
                     self.mission_manager.sim_elapsed_s) is not None:
                 return
 
-        # Fleet status panel click — check before chart click
+        # Fleet status panel click — check before chart click.  The open/close
+        # button only exists in the narrow web layout; elsewhere this is False.
+        if self.fleet_panel.handle_toggle(screen_pos):
+            return
         clicked = self.fleet_panel.handle_click(screen_pos)
         if clicked is not None:
             self.selected_vessel = clicked
@@ -2834,7 +2837,7 @@ class Game:
         # WIDTH wide) when it's showing, so the panel can't clip them; else hug
         # the left edge.  The fleet panel is drawn whenever settings is hidden.
         _fleet_visible = not self.settings_panel.is_visible
-        _y_label_x = (20 + self.fleet_panel.WIDTH + 8) if _fleet_visible else 4
+        _y_label_x = (20 + self.fleet_panel.occupied_width + 8) if _fleet_visible else 4
         # Web: keep chart labels out from under the vessel-info column so they
         # can't ghost through its translucent card (see chart.label_occluders).
         if IS_WEB:
