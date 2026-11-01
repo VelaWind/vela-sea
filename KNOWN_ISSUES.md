@@ -15,7 +15,6 @@ An honest list of what doesn't work perfectly, with severity ratings.
 | 9 | **Time speed tops out at 3×** (key 4). Long passages across the full 210 nm sea can still take several real minutes. | Low |
 | 10 | **Docking refusal reuses the departure-grace mechanism**: after being refused at a draft-restricted port you must leave its radius before any new docking attempt there registers. | Low |
 | 11 | **Displaced vessels have no defined way back to their route.** Routes in `data/world_data.py` are verified as geometry (`tests/verify_new_routes.py`), but rescue duty, MOB searches, trawl wander, party-tender runs and tide refloating all move vessels far off that geometry, and every "hand back to the schedule" site then sets `destination = route[route_index]` — a straight line from wherever the vessel ended up. Measured over 3 seeds x 14 sim-days: **84% of groundings occur >15 wu from the vessel's own route, against 1% on it.** See the design note below. | Medium — with depth-aware routing closed (`route_refused` = 0) and the emergency lifecycle fixed, refloat flap is now the sole remaining driver |
-| 14 | **COG maths and `Vessel.move()` still compute the same velocity separately.** `cog_direction` (heading + current + wind drift, in knots) and `move()` (the same terms as distances) are two implementations. `tools/verify/verify_cog_math.py` now runs one real `move()` step and fails if the two disagree, so drift between them is caught, but merging them would change `move()`'s floating-point order and was not done here. | Low |
 
 ## Resolved in v0.6.2: tests that checked copies (branch `fix/tests-use-real-code`)
 
@@ -97,6 +96,35 @@ out at full zoom. `tests/test_scale.py` converts known world distances, runs
 the chart's real drawing code at seven zooms, and fails on the old behaviour.
 `tools/verify_chunk4.py` used a copy of the buggy logic and now calls the same
 functions.
+
+## Resolved in v0.6.2: simulation out of main.py, one velocity (was #14, branch `refactor/sim-out-of-main`)
+
+The search-and-rescue dispatch and the AI decision helpers moved out of
+`main.py` into Pygame-free modules: `engine/sar.py` (`sar_dispatch`,
+`sar_refloat`), `engine/ai.py` (`trigger_random_event`, the three mission
+status helpers, `apply_smart_decisions`) and `engine/events.py`
+(`sim_time_str` and event kinds). `main.py` imports them under their old
+names. Engine code logs an event kind and `main.py` maps it to the event-log
+colour, so `engine/` does not import `render/`. `main.py` went from 3,570 to
+3,159 lines.
+
+`Vessel.move()` and `cog_direction` used to compute the vessel's velocity over
+ground separately (#14). Both now use `Vessel.ground_velocity_terms`, summed
+in the original order, which keeps results bit-identical while
+`CURRENT_INFLUENCE` is 1.0.
+
+A seeded 6,000-frame run (8.9 sim-hours, with rescues, refloats, maydays and
+medical diversions) hashed every vessel's state as exact floats, every rendered
+frame, and every event-log line with its colour: identical before the move,
+after it, and after the velocity change. The same check run with
+`CURRENT_INFLUENCE` changed to 1.000000001 differs from the first frame, so it
+would have caught a floating-point change.
+
+Still in `main.py`: vessel spawning (`_random_spawn`), and most of the per-step
+simulation inside `Game.update_simulation` (player helm, groundings, the party
+tender, the MOB search). `apply_smart_decisions` moved verbatim, so its
+thresholds (150 m visibility, 60% speed and so on) are still literals rather
+than `config.py` constants.
 
 ---
 

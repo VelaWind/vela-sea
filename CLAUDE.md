@@ -26,6 +26,8 @@ with COLREGS collision avoidance, dynamic weather, tides, and SAR rescue.
 engine/            Pure simulation logic
   world.py         World, Port (berths, max_draft_m), Island, Zone, NavMark
   ship.py          Vessel dataclass: physics, fuel, routes, is_player,
+                   ground_velocity_terms (the one velocity definition,
+                   used by move() and cog_direction),
                    hull_integrity, autopilot_destination
   environment.py   Weather OU-drift, events (fog/squall/storm), tide, time
   collision.py     CPA/TCPA COLREGS avoidance + find_safe_path
@@ -34,6 +36,11 @@ engine/            Pure simulation logic
                    (shared by main.py and the tests; never copy them)
   rules.py         RulesEngine: zone speed caps, fines, grace/cooldown
                    (main.py only applies the side effects)
+  sar.py           sar_dispatch, sar_refloat (main.py calls them as
+                   _sar_dispatch/_sar_refloat; diag_groundings patches those)
+  ai.py            random emergencies, mission status, apply_smart_decisions
+  events.py        event kinds + sim_time_str; engine logs a KIND and
+                   main.py's _EngineEventLog maps it to the panel colour
   career.py        PlayerCareer (money/rep/achievements/tier_name), JobBoard,
                    Contract (7 types), save_career/load_career/delete_save,
                    REP tiers, ACHIEVEMENT_DEFS

@@ -137,11 +137,14 @@ possible.
 ```
 engine/          Pure Python simulation, no Pygame
   world.py       World, Port (berths, draft limits), Island, Zone, NavMark
-  ship.py        Vessel physics, fuel, route state machine, autopilot
+  ship.py        Vessel physics (one velocity definition), fuel, routes
   environment.py Weather drift, fog/squall/storm events, tide, day/night
   collision.py   COLREGS avoidance: CPA/TCPA, give-way logic, safe pathfinding
   navigation.py  AI steering step, grounding rule, COG maths, rescue range
   rules.py       Zone rules: speed caps, fines, grace period and cooldown
+  sar.py         Search and rescue: dispatching rescuers, completing rescues
+  ai.py          AI emergencies, mission status, captain decisions
+  events.py      Event kinds and sim-time format shared with main.py
   career.py      Career state, job board, contracts, ranks, save and load
   mission.py     AI mission generation and tracking
 
@@ -160,9 +163,11 @@ config.py            Tunable constants (401 of them)
 Every tunable number lives in `config.py` rather than at its use site, so
 balance changes are edits to one file.
 
-`main.py` is the weakest part of the structure at 3,570 lines, and some logic
-that belongs in `engine/` (search-and-rescue dispatch, AI decision helpers,
-vessel spawning) currently sits in the `Game` class instead.
+`main.py` is still the weakest part of the structure at 3,159 lines. The
+search-and-rescue dispatch and the AI decision helpers have moved to
+`engine/sar.py` and `engine/ai.py`, but vessel spawning and most of the
+per-step simulation (the player's helm, groundings, the party tender) still
+sit in `main.py` and the `Game` class.
 
 ![Storm conditions](screenshots/04-storm.png)
 
