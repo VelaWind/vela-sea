@@ -16,6 +16,26 @@ An honest list of what doesn't work perfectly, with severity ratings.
 | 10 | **Docking refusal reuses the departure-grace mechanism**: after being refused at a draft-restricted port you must leave its radius before any new docking attempt there registers. | Low |
 | 11 | **Displaced vessels have no defined way back to their route.** Routes in `data/world_data.py` are verified as geometry (`tests/verify_new_routes.py`), but rescue duty, MOB searches, trawl wander, party-tender runs and tide refloating all move vessels far off that geometry, and every "hand back to the schedule" site then sets `destination = route[route_index]` — a straight line from wherever the vessel ended up. Measured over 3 seeds x 14 sim-days: **84% of groundings occur >15 wu from the vessel's own route, against 1% on it.** See the design note below. | Medium — with depth-aware routing closed (`route_refused` = 0) and the emergency lifecycle fixed, refloat flap is now the sole remaining driver |
 | 12 | **Rescue completion fires on waypoint arrival, not on reaching the casualty.** `find_safe_path` can hand a SAR rescuer a multi-hop route, and the arrival check in `update_simulation` calls `_sar_refloat` on the first hop it reaches while `player_commanded` is still set — it tests `at_destination(vessel.destination)`, never the rescuer's distance to the casualty. A rescuer can therefore "complete" a rescue from the far side of an island, which inflates rescue-success and episode-resolution metrics against the reachability numbers in `tools/diag_groundings.py`. | Medium — corrupts the SAR metrics the routing work is graded on; gameplay effect is a casualty freed early |
+| 13 | **The course-over-ground (COG) vector is not drawn.** `cog_direction` (now `engine/navigation.py`, previously `_cog_direction` in `render/chart.py`) computes the track over ground, and `COLOR_COG_VECTOR` exists in `config.py`, but nothing calls the function to draw it: the chart shows heading and predictor lines only. Found while moving the function out of `render/`. Behaviour was left unchanged on purpose. | Low (missing chart aid; the maths is tested) |
+| 14 | **COG maths and `Vessel.move()` still compute the same velocity separately.** `cog_direction` (heading + current + wind drift, in knots) and `move()` (the same terms as distances) are two implementations. `tools/verify/verify_cog_math.py` now runs one real `move()` step and fails if the two disagree, so drift between them is caught, but merging them would change `move()`'s floating-point order and was not done here. | Low |
+
+## Resolved after v0.6.1: tests that checked copies (branch `fix/tests-use-real-code`)
+
+Three checks used to test hand-copied code instead of the game's own:
+`tools/verify/verify_cog_math.py` held a copy of `_cog_direction` from
+`render/chart.py` (so it could run without Pygame), and `tests/test_collision.py`
+and `tests/test_traffic.py` each re-implemented the AI steering step and the
+grounding rule from `main.py`. Nothing kept the copies in step with the
+originals.
+
+Those rules now live once, in `engine/navigation.py` (pure Python):
+`cog_direction`, `steer_ai_vessel` and `below_safe_depth`. `main.py` calls
+`steer_ai_vessel` and `below_safe_depth` in `update_simulation`; the verify
+script and both tests import the same functions. The game's behaviour is
+unchanged: a seeded 6,000-frame run produces identical vessel state and
+identical frames before and after. One difference for the tests: their old
+copy of the steering step lacked the game's approach slowdown, so they now
+exercise slightly different (the game's real) behaviour, and still pass.
 
 ---
 
