@@ -1,153 +1,127 @@
-"""Verify _cog_direction() math headlessly — no pygame / no display.
+"""Verify the course-over-ground (COG) maths headlessly: no Pygame, no display.
 
-Exact copy of the render/chart.py function body so the logic is tested
-directly without needing to import pygame.
+Tests engine.navigation.cog_direction, the function itself (it used to be a
+hand-copied body of a function in render/chart.py, which could drift from the
+original without anyone noticing).
 
-Setup:  vessel heading=0° (east in world coords), speed=6 kn
-        current_direction=90° (southward), speed=3 kn
-        wind=0 (isolated)
+Two checks:
 
-Expected COG:
-  vx = cos(0°)*6 + cos(90°)*3  =  6 + 0  = 6
-  vy = sin(0°)*6 + sin(90°)*3  =  0 + 3  = 3
-  COG angle = atan2(3, 6) ≈ 26.565°
-  Drift     = 26.565° - 0°    ≈ 26.6°
+1. Known answer.  Vessel heading 0 deg (east in world coords) at 6 kn, current
+   3 kn toward 90 deg (south), no wind:
+       vx = cos(0)*6 + cos(90)*3 = 6
+       vy = sin(0)*6 + sin(90)*3 = 3
+       COG = atan2(3, 6) = 26.565 deg, so drift from heading = 26.565 deg
 
-If drift ≈ 0° the current vector is not being added — the bug is in _cog_direction.
+2. Agreement with the physics.  cog_direction() and Vessel.move() compute the
+   same velocity (heading + current + wind drift) separately.  One real move()
+   step is taken with wind added, and the direction and speed of the actual
+   displacement must match what cog_direction() reports.  If either side
+   changes alone, this check fails.
+
+Exit status is 0 only when both checks pass (CI relies on it).
 """
 
-import sys, os
+import copy
+import os
+import sys
+from math import atan2, cos, degrees, hypot, radians, sin
+
 # The repository root, two levels up, so engine/ and config.py import.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 
-from math import atan2, cos, sin, degrees, radians, hypot
-from engine.ship import Vessel
+from config import CURRENT_INFLUENCE, KNOTS_TO_UNITS_PER_HOUR
 from engine.environment import Environment
-from config import CURRENT_INFLUENCE, COG_MIN_DRIFT_DEG
+from engine.navigation import cog_direction
+from engine.ship import Vessel
 
+TOLERANCE_DEG = 0.001   # angle agreement for check 1 (pure arithmetic)
+MOVE_DT_S = 1.0         # one sim-second for the move() comparison in check 2
+MOVE_TOL_DEG = 0.01     # move() vs cog_direction() direction agreement
+MOVE_TOL_KN = 0.001     # move() vs cog_direction() speed agreement
+
+
+def make_vessel() -> Vessel:
+    return Vessel(
+        name="Test",
+        vessel_type="cargo",
+        position=(500.0, 350.0),
+        heading=0.0,           # 0 deg = east in world coords
+        target_speed=6.0,
+        current_speed=6.0,     # already at cruise, no ramp needed
+        max_speed=12.0,
+        acceleration=0.020,
+        deceleration=0.017,
+        turn_rate=1.0,
+        length_m=150.0,
+        beam_m=25.0,
+        draft_m=8.0,
+        fuel=80.0,
+        fuel_capacity=100.0,
+        fuel_consumption_rate=3.5,
+    )
+
+
+print("=" * 55)
+print("COG MATH VERIFICATION (engine.navigation.cog_direction)")
+print("=" * 55)
 
 # ---------------------------------------------------------------------------
-# Exact copy of _cog_direction from render/chart.py (no pygame dependency)
+# Check 1: known answer, current only
 # ---------------------------------------------------------------------------
-def _cog_direction(vessel, environment):
-    if environment is None or vessel.current_speed <= 0:
-        return None
-
-    h_rad = radians(vessel.heading)
-    vx = cos(h_rad) * vessel.current_speed
-    vy = sin(h_rad) * vessel.current_speed
-
-    c_rad = radians(environment.current_direction)
-    vx += cos(c_rad) * environment.current_speed * CURRENT_INFLUENCE
-    vy += sin(c_rad) * environment.current_speed * CURRENT_INFLUENCE
-
-    push_rad = radians((environment.wind_direction + 180.0) % 360.0)
-    wind_kn = environment.wind_speed * vessel._windage_factor()
-    vx += cos(push_rad) * wind_kn
-    vy += sin(push_rad) * wind_kn
-
-    cog_rad = atan2(vy, vx)
-    cog_speed = hypot(vx, vy)
-
-    drift = (degrees(cog_rad) - vessel.heading + 180.0) % 360.0 - 180.0
-    if abs(drift) < COG_MIN_DRIFT_DEG:
-        return None
-
-    return cog_rad, cog_speed
-
-
-# ---------------------------------------------------------------------------
-# Test scenario: heading=0, speed=6 kn; current 3 kn at 90°; no wind
-# ---------------------------------------------------------------------------
-vessel = Vessel(
-    name="Test",
-    vessel_type="cargo",
-    position=(500.0, 350.0),
-    heading=0.0,           # 0° = east in world coords
-    target_speed=6.0,
-    current_speed=6.0,     # already at cruise — no ramp needed
-    max_speed=12.0,
-    acceleration=0.020,
-    deceleration=0.017,
-    turn_rate=1.0,
-    length_m=150.0,
-    beam_m=25.0,
-    draft_m=8.0,
-    fuel=80.0,
-    fuel_capacity=100.0,
-    fuel_consumption_rate=3.5,
-)
-
+vessel = make_vessel()
 env = Environment(
     current_speed=3.0,        # 3 kn
     current_direction=90.0,   # southward in world coords (0=east, 90=south)
-    wind_speed=0.0,           # no wind — isolate current effect
+    wind_speed=0.0,           # no wind: isolate the current
     wind_direction=0.0,
 )
+expected_vx = cos(radians(0.0)) * 6.0 + cos(radians(90.0)) * 3.0 * CURRENT_INFLUENCE
+expected_vy = sin(radians(0.0)) * 6.0 + sin(radians(90.0)) * 3.0 * CURRENT_INFLUENCE
+expected_drift = degrees(atan2(expected_vy, expected_vx)) - vessel.heading
 
-# Manual expected values
-expected_vx  = cos(radians(0.0)) * 6.0 + cos(radians(90.0)) * 3.0  # = 6
-expected_vy  = sin(radians(0.0)) * 6.0 + sin(radians(90.0)) * 3.0  # = 3
-expected_cog = degrees(atan2(expected_vy, expected_vx))             # ≈ 26.565°
-expected_drift = expected_cog - vessel.heading                       # ≈ 26.565°
-
-result = _cog_direction(vessel, env)
-
-print("=" * 55)
-print("COG MATH VERIFICATION")
-print("=" * 55)
-print(f"  Vessel heading:        {vessel.heading:.1f}°")
-print(f"  Vessel speed:          {vessel.current_speed:.1f} kn")
-print(f"  Current direction:     {env.current_direction:.1f}°  (toward)")
-print(f"  Current speed:         {env.current_speed:.1f} kn")
-print(f"  CURRENT_INFLUENCE:     {CURRENT_INFLUENCE}")
-print()
-print(f"  Expected velocity vector:  ({expected_vx:.3f}, {expected_vy:.3f}) kn")
-print(f"  Expected COG angle:        {expected_cog:.3f}°")
-print(f"  Expected drift:            {expected_drift:.3f}°")
-print()
-
+result = cog_direction(vessel, env)
+print(f"  Check 1: heading {vessel.heading:.1f} deg at {vessel.current_speed:.1f} kn, "
+      f"current {env.current_speed:.1f} kn toward {env.current_direction:.1f} deg")
+print(f"    expected drift:  {expected_drift:.3f} deg")
 if result is None:
-    print("  _cog_direction returned None")
-    if vessel.current_speed <= 0:
-        print("  REASON: current_speed is 0")
-    else:
-        h_rad = radians(vessel.heading)
-        vx = cos(h_rad) * vessel.current_speed
-        vy = sin(h_rad) * vessel.current_speed
-        c_rad = radians(env.current_direction)
-        vx += cos(c_rad) * env.current_speed * CURRENT_INFLUENCE
-        vy += sin(c_rad) * env.current_speed * CURRENT_INFLUENCE
-        cog_rad = atan2(vy, vx)
-        actual_drift = (degrees(cog_rad) - vessel.heading + 180.0) % 360.0 - 180.0
-        print(f"  Computed drift before threshold check: {actual_drift:.3f}°")
-        print(f"  COG_MIN_DRIFT_DEG threshold: {COG_MIN_DRIFT_DEG}°")
-        if abs(actual_drift) < COG_MIN_DRIFT_DEG:
-            print("  REASON: drift is below display threshold (would not render)")
-        else:
-            print("  REASON: unknown — check function body")
-    print()
-    print(f"  VERDICT: BUG — current vector not contributing drift")
+    check1 = False
+    print("    actual:          cog_direction returned None (no drift reported)")
 else:
-    cog_rad, cog_speed = result
-    actual_cog_deg = degrees(cog_rad)
-    actual_drift = (actual_cog_deg - vessel.heading + 180.0) % 360.0 - 180.0
+    actual_drift = (degrees(result[0]) - vessel.heading + 180.0) % 360.0 - 180.0
+    check1 = abs(actual_drift - expected_drift) < TOLERANCE_DEG
+    print(f"    actual drift:    {actual_drift:.3f} deg  -> {'PASS' if check1 else 'FAIL'}")
 
-    print(f"  Actual COG angle:          {actual_cog_deg:.3f}°")
-    print(f"  Actual COG speed:          {cog_speed:.3f} kn")
-    print(f"  Actual drift angle:        {actual_drift:.3f}°")
-    print()
+# ---------------------------------------------------------------------------
+# Check 2: cog_direction agrees with one real Vessel.move() step (wind on)
+# ---------------------------------------------------------------------------
+vessel2 = make_vessel()
+env2 = Environment(
+    current_speed=1.5, current_direction=120.0,
+    wind_speed=12.0, wind_direction=200.0,
+)
+predicted = cog_direction(vessel2, env2)
+mover = copy.deepcopy(vessel2)
+x0, y0 = mover.position
+mover.move(MOVE_DT_S, env2)
+dx, dy = mover.position[0] - x0, mover.position[1] - y0
+# Displacement over MOVE_DT_S, converted back to knots.
+moved_speed_kn = hypot(dx, dy) / (KNOTS_TO_UNITS_PER_HOUR * MOVE_DT_S / 3600.0)
+moved_dir = degrees(atan2(dy, dx))
+print(f"  Check 2: one move() step with current and wind")
+if predicted is None:
+    check2 = False
+    print("    cog_direction returned None, but this scenario has clear drift  -> FAIL")
+else:
+    pred_dir = degrees(predicted[0])
+    dir_err = abs((moved_dir - pred_dir + 180.0) % 360.0 - 180.0)
+    spd_err = abs(moved_speed_kn - predicted[1])
+    check2 = dir_err < MOVE_TOL_DEG and spd_err < MOVE_TOL_KN
+    print(f"    cog_direction:   {pred_dir:.3f} deg at {predicted[1]:.3f} kn")
+    print(f"    move() actual:   {moved_dir:.3f} deg at {moved_speed_kn:.3f} kn")
+    print(f"    difference:      {dir_err:.5f} deg, {spd_err:.5f} kn  "
+          f"-> {'PASS' if check2 else 'FAIL'}")
 
-    error = abs(actual_drift - expected_drift)
-    ok = error < 0.001
-    print(f"  Drift matches expected:    {ok}  (error={error:.6f}°)")
-    print()
-    if ok:
-        print(f"  VERDICT: COG math is correct -- drift ~26.6 deg as expected.")
-        print("  COG line will render as a solid teal-green line (COLOR_COG_VECTOR)")
-        print("  diverging ~26 deg from the dashed blue heading predictor for this scenario.")
-    else:
-        print(f"  VERDICT: BUG -- expected ~{expected_drift:.1f} deg, got {actual_drift:.1f} deg")
-
-# Exit status for CI: zero only when the function returned a COG and the drift matches.
-sys.exit(0 if result is not None and ok else 1)
+print()
+ok = check1 and check2
+print(f"  VERDICT: {'COG maths correct and consistent with move()' if ok else 'FAIL'}")
+sys.exit(0 if ok else 1)

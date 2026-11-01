@@ -20,6 +20,7 @@ sys.path.insert(0, ".")
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
+from engine.navigation import steer_ai_vessel, below_safe_depth
 from engine.collision import compute_cpa_tcpa, update_collision_avoidance
 from data.world_data import (
     populate_world,
@@ -29,7 +30,7 @@ from data.world_data import (
     VESSEL_ROUTE_TUG, VESSEL_ROUTE_SAILBOAT2,
 )
 from config import (
-    ARRIVAL_DISTANCE, PORT_DETECT_RADIUS, DRAFT_SAFETY_MARGIN_M,
+    ARRIVAL_DISTANCE, PORT_DETECT_RADIUS,
     PORT_STAY_FERRY_S, PORT_STAY_CARGO_S,
     PORT_STAY_FISHING_S, PORT_STAY_SAILBOAT_S,
     NM_PER_WORLD_UNIT, KNOTS_TO_UNITS_PER_HOUR,
@@ -66,22 +67,19 @@ def _step_vessels(vessels, env, dt, world=None):
     for v in vessels:
         if v.status == "in_port":
             v.update_route(dt, world)
-        if v.status == "avoiding":
-            v.turn_toward(v.avoid_heading, dt)
-        elif v.destination and v.status == "underway":
-            v.turn_toward(v.bearing_to(v.destination), dt)
+        # The game's own steering step (engine/navigation.py), not a copy.
+        steer_ai_vessel(v, dt)
         v.update_speed(dt, env)
         v.move(dt, env)
         if (world and v.status in ("underway", "avoiding")
                 and v.destination
                 and v.at_destination(v.destination, tolerance=PORT_DETECT_RADIUS)):
             v.arrive(world)
-        if world and v.status in ("underway", "avoiding"):
-            if v._port_at(v.position, world) is None:
-                depth = world.water_depth_at(v.position, env.tide_level)
-                if depth < v.draft_m + DRAFT_SAFETY_MARGIN_M:
-                    v.status = "aground"
-                    v.current_speed = 0.0
+        # The game's own grounding rule (engine/navigation.py), not a copy.
+        if (world and v.status in ("underway", "avoiding")
+                and below_safe_depth(v, world, env.tide_level)):
+            v.status = "aground"
+            v.current_speed = 0.0
 
     update_collision_avoidance(vessels)
 

@@ -29,6 +29,8 @@ engine/            Pure simulation logic
                    hull_integrity, autopilot_destination
   environment.py   Weather OU-drift, events (fog/squall/storm), tide, time
   collision.py     CPA/TCPA COLREGS avoidance + find_safe_path
+  navigation.py    steer_ai_vessel, below_safe_depth, cog_direction
+                   (shared by main.py and the tests; never copy them)
   career.py        PlayerCareer (money/rep/achievements/tier_name), JobBoard,
                    Contract (7 types), save_career/load_career/delete_save,
                    REP tiers, ACHIEVEMENT_DEFS

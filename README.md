@@ -140,6 +140,7 @@ engine/          Pure Python simulation, no Pygame
   ship.py        Vessel physics, fuel, route state machine, autopilot
   environment.py Weather drift, fog/squall/storm events, tide, day/night
   collision.py   COLREGS avoidance: CPA/TCPA, give-way logic, safe pathfinding
+  navigation.py  AI steering step, grounding rule, course-over-ground maths
   career.py      Career state, job board, contracts, ranks, save and load
   mission.py     AI mission generation and tracking
 
