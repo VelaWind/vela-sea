@@ -700,12 +700,21 @@ SAIL_RUN_FACTOR  = 0.65
 # ============================================================================
 # Environmental Force Visuals
 # ============================================================================
-# Course-over-ground vector — drawn as a solid teal-green line when the actual
-# track over ground diverges from heading by more than COG_MIN_DRIFT_DEG.
-# The existing muted-blue dashed predictor shows heading direction; this line
-# shows real track, making current set-and-drift immediately readable.
+# Course-over-ground vector: a solid teal-green line with an arrowhead, drawn
+# from the hull for the player and the followed vessel when the actual track
+# over ground (engine/navigation.cog_direction) diverges from heading by more
+# than COG_MIN_DRIFT_DEG.  The hull triangle points along heading, so the angle
+# between the two shows current set-and-drift and wind leeway at a glance.
+# Length: SHIP_VECTOR_MINUTES of travel over ground, clamped to between
+# COG_VECTOR_MIN_SIZE_MULT and COG_VECTOR_MAX_SIZE_MULT hull sizes so it always
+# shows past the bow but never dominates the symbol.
 COLOR_COG_VECTOR   = (100, 210, 170)   # soft teal-green; distinct from heading blue
 COG_MIN_DRIFT_DEG  = 0.5               # suppress when drift is visually negligible
+COG_VECTOR_MIN_SIZE_MULT = 4.0         # shortest line, in hull sizes (clears the name label)
+COG_VECTOR_MAX_SIZE_MULT = 8.0         # longest line, in hull sizes
+COG_VECTOR_WIDTH_PX = 2                # line width (design px)
+COG_VECTOR_HEAD_PX = 6                 # arrowhead arm length (design px)
+COG_VECTOR_HEAD_ANGLE_DEG = 30.0       # arrowhead arms, degrees off the line
 
 # AI approach slowdown (engine/navigation.py steer_ai_vessel).  Inside
 # APPROACH_SLOWDOWN_RADIUS_FACTOR x ARRIVAL_DISTANCE of its destination an AI
