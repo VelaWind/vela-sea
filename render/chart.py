@@ -34,6 +34,8 @@ from config import (
     DEPTH_CONTOUR_WIDTH, SHIP_SELECT_RADIUS, SHIP_SELECT_GLOW_WIDTH,
     SHIP_MIN_SIZE, SHIP_MAX_SIZE, SHIP_LABEL_OFFSET,
     SHIP_PREDICTOR_MINUTES, SHIP_VECTOR_MINUTES, SHIP_RANGE_RING_INTERVAL_NM,
+    COLOR_COG_VECTOR, COG_VECTOR_MIN_SIZE_MULT, COG_VECTOR_MAX_SIZE_MULT,
+    COG_VECTOR_WIDTH_PX, COG_VECTOR_HEAD_PX, COG_VECTOR_HEAD_ANGLE_DEG, NM_PER_WORLD_UNIT,
     SHIP_RANGE_RING_COUNT, SHIP_SELECTION_ALPHA,
     SHIP_SYMBOL_ZOOM_SCALE, KNOTS_TO_UNITS_PER_HOUR,
     COLOR_CURRENT_ARROW, CURRENT_ARROW_SPACING_PX, CURRENT_ARROW_ALPHA, CURRENT_ARROW_SIZE,
@@ -72,6 +74,7 @@ from config import (
     WEB_STATIC_EDGE_MARGIN_FRAC, WEB_STATIC_SMOOTHSCALE,
 )
 from render.camera import Camera
+from engine.navigation import cog_direction  # track over ground, shared with tests
 from render.fonts import safe_sysfont, ui_px, get_ui_scale, web_narrow_layout
 from render import theme
 
@@ -1439,6 +1442,16 @@ class Chart:
                 dash_length=8.0, gap_length=5.0,
             )
 
+        # ── Course-over-ground vector ─────────────────────────────────────────
+        # Player and followed vessel only, and only when the track over ground
+        # really differs from heading (cog_direction returns None otherwise).
+        # Drawn before the hull so the triangle covers the line's origin.
+        if (environment is not None
+                and (_is_player or vessel is self.camera.follow_target)):
+            _cog = cog_direction(vessel, environment)
+            if _cog is not None:
+                self._draw_cog_vector(screen_x, screen_y, size, _cog[0], _cog[1])
+
         # ── Hull triangle (AIS-style) ─────────────────────────────────────────
         # Triangle points UP (bow = −y); rotated to heading via heading+90.
         hull_local = _vessel_hull_points(vessel.vessel_type, size)
@@ -1494,6 +1507,34 @@ class Chart:
                     priority=110,
                     anchor_pos=(screen_x, screen_y),
                 )
+
+    def _draw_cog_vector(self, sx: float, sy: float, size: int,
+                         cog_rad: float, cog_speed_kn: float) -> None:
+        """Solid line with an arrowhead along the course over ground.
+
+        Length is SHIP_VECTOR_MINUTES of travel at the speed over ground,
+        clamped to COG_VECTOR_MIN/MAX_SIZE_MULT hull sizes: a few minutes of
+        travel is only a few pixels on this chart, and the line has to clear
+        the bow to be seen at all.  World angle 0 is east and +y is south,
+        the same orientation as the screen, so no conversion is needed.
+        """
+        nm = cog_speed_kn * SHIP_VECTOR_MINUTES / 60.0
+        length = self.camera.distance_to_screen(nm / NM_PER_WORLD_UNIT)  # takes wu
+        length = max(size * COG_VECTOR_MIN_SIZE_MULT,
+                     min(length, size * COG_VECTOR_MAX_SIZE_MULT))
+        cx, cy = math.cos(cog_rad), math.sin(cog_rad)
+        ex, ey = sx + cx * length, sy + cy * length
+        width = max(1, ui_px(COG_VECTOR_WIDTH_PX))
+        pygame.draw.line(self.surface, COLOR_COG_VECTOR,
+                         (int(sx), int(sy)), (int(ex), int(ey)), width)
+        # Chevron head: two arms swept back either side of the line.
+        head = ui_px(COG_VECTOR_HEAD_PX)
+        for side in (-1.0, 1.0):
+            a = cog_rad + math.pi + side * math.radians(COG_VECTOR_HEAD_ANGLE_DEG)
+            pygame.draw.line(self.surface, COLOR_COG_VECTOR,
+                             (int(ex), int(ey)),
+                             (int(ex + math.cos(a) * head), int(ey + math.sin(a) * head)),
+                             width)
 
     def draw_current_arrows(self, environment) -> None:
         """Draw a sparse field of directional arrows indicating current set-and-drift.

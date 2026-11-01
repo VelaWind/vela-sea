@@ -700,12 +700,21 @@ SAIL_RUN_FACTOR  = 0.65
 # ============================================================================
 # Environmental Force Visuals
 # ============================================================================
-# Course-over-ground vector — drawn as a solid teal-green line when the actual
-# track over ground diverges from heading by more than COG_MIN_DRIFT_DEG.
-# The existing muted-blue dashed predictor shows heading direction; this line
-# shows real track, making current set-and-drift immediately readable.
+# Course-over-ground vector: a solid teal-green line with an arrowhead, drawn
+# from the hull for the player and the followed vessel when the actual track
+# over ground (engine/navigation.cog_direction) diverges from heading by more
+# than COG_MIN_DRIFT_DEG.  The hull triangle points along heading, so the angle
+# between the two shows current set-and-drift and wind leeway at a glance.
+# Length: SHIP_VECTOR_MINUTES of travel over ground, clamped to between
+# COG_VECTOR_MIN_SIZE_MULT and COG_VECTOR_MAX_SIZE_MULT hull sizes so it always
+# shows past the bow but never dominates the symbol.
 COLOR_COG_VECTOR   = (100, 210, 170)   # soft teal-green; distinct from heading blue
 COG_MIN_DRIFT_DEG  = 0.5               # suppress when drift is visually negligible
+COG_VECTOR_MIN_SIZE_MULT = 4.0         # shortest line, in hull sizes (clears the name label)
+COG_VECTOR_MAX_SIZE_MULT = 8.0         # longest line, in hull sizes
+COG_VECTOR_WIDTH_PX = 2                # line width (design px)
+COG_VECTOR_HEAD_PX = 6                 # arrowhead arm length (design px)
+COG_VECTOR_HEAD_ANGLE_DEG = 30.0       # arrowhead arms, degrees off the line
 
 # AI approach slowdown (engine/navigation.py steer_ai_vessel).  Inside
 # APPROACH_SLOWDOWN_RADIUS_FACTOR x ARRIVAL_DISTANCE of its destination an AI
@@ -981,6 +990,16 @@ STANDOFF_UKC_M   = 3.0   # metres under-keel clearance required at the standoff
 STANDOFF_STEP_WU = 2.0   # world units per outward probe ring
 STANDOFF_MAX_WU  = 24.0  # give up beyond this and fall back to the raw position
 
+# Rescue completion distance.  A rescue counts as done only when the rescuer is
+# within this many world units of the casualty when it reaches a waypoint
+# (engine/navigation.within_rescue_range).  It is derived, not tuned: the
+# rescuer is routed to a standoff at most STANDOFF_MAX_WU from the casualty, and
+# "reached" means within PORT_DETECT_RADIUS of that standoff, so any genuine
+# arrival is inside STANDOFF_MAX_WU + PORT_DETECT_RADIUS (26 wu = 3.9 nm).
+# Before this existed, reaching the FIRST hop of a multi-hop route completed the
+# rescue, even from the far side of an island (KNOWN_ISSUES #12).
+RESCUE_COMPLETE_RANGE_WU = STANDOFF_MAX_WU + PORT_DETECT_RADIUS
+
 # Dispatch retry cooldown.  _sar_dispatch runs every sim step, and for a casualty
 # nobody can route to it re-walked every candidate every tick — each attempt a
 # find_standoff (up to 192 depth probes) plus a find_safe_path (~2,300 samples).
@@ -1255,6 +1274,7 @@ SOUND_RELATIVE_VOLUMES = {
 ZONE_FINE_NO_ENTRY   = 500.0    # £ fine for entering a no-entry zone
 ZONE_FINE_SPEED      = 150.0    # £ fine for exceeding a speed-limit zone
 ZONE_FINE_INTERVAL_S = 30.0     # minimum seconds between successive fines in the same zone
+ZONE_FINE_GRACE_S    = 10.0     # seconds in violation before the first fine (engine/rules.py)
 
 GROUNDING_HULL_DAMAGE  = 0.30   # hull integrity lost per grounding event (30 %).
                                 # Repairing it (~£1500) is what makes a sloppy run
