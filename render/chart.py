@@ -25,7 +25,7 @@ from config import (
     FONT_UI_NAME, FONT_DATA_NAME, FONT_SIZE_SMALL, FONT_SIZE_LABEL,
     FONT_SIZE_MAP_LABEL, FONT_SIZE_DATA, FONT_SIZE_BIG, FONT_SIZE_SECTION,
     WORLD_WIDTH, WORLD_HEIGHT, GRID_SPACING, GRID_LABEL_INTERVAL,
-    COMPASS_SIZE, COMPASS_OFFSET_X, COMPASS_OFFSET_Y,
+    COMPASS_SIZE, COMPASS_OFFSET_X, COMPASS_OFFSET_Y, STATUS_BAR_HEIGHT_PX,
     SCALE_BAR_MAX_WIDTH, SCALE_BAR_TARGET_WIDTH, SCALE_BAR_OFFSET_X, SCALE_BAR_OFFSET_Y,
     SCALE_BAR_HEIGHT, PORT_SYMBOL_SIZE, PORT_LABEL_OFFSET,
     ZONE_BORDER_WIDTH, ZONE_LABEL_OFFSET, ZONE_FILL_ALPHA,
@@ -68,10 +68,11 @@ from config import (
     STORM_WAVE_LINE_SPACING_PX, STORM_WAVE_SCROLL_PX_S,
     SQUALL_FLASH_ALPHA, SQUALL_FLASH_DURATION_S,
     IS_WEB, WEB_PROFILE, WEB_STATIC_CHUNK_FACTOR, WEB_STATIC_REBUILD_MS,
+    WEB_STATUS_MIN_GAP_PX,
     WEB_STATIC_EDGE_MARGIN_FRAC, WEB_STATIC_SMOOTHSCALE,
 )
 from render.camera import Camera
-from render.fonts import safe_sysfont, ui_px, get_ui_scale
+from render.fonts import safe_sysfont, ui_px, get_ui_scale, web_narrow_layout
 from render import theme
 
 Position = Tuple[float, float]
@@ -1611,7 +1612,8 @@ class Chart:
         self.surface.blit(
             self._compass_surf,
             (COMPASS_OFFSET_X - self._compass_surf.get_width() // 2,
-             COMPASS_OFFSET_Y - self._compass_surf.get_height() // 2))
+             COMPASS_OFFSET_Y + self._status_bar_growth()
+             - self._compass_surf.get_height() // 2))
 
     def _paint_compass_rose(self, center_x: int, center_y: int) -> None:
         radius = COMPASS_SIZE // 2
@@ -1675,7 +1677,18 @@ class Chart:
             self._scalebar_surf = surf.convert_alpha()
             self._scalebar_key = key
         self.surface.blit(self._scalebar_surf,
-                          (SCALE_BAR_OFFSET_X, SCALE_BAR_OFFSET_Y))
+                          (SCALE_BAR_OFFSET_X,
+                           SCALE_BAR_OFFSET_Y + self._status_bar_growth()))
+
+    @staticmethod
+    def _status_bar_growth() -> int:
+        """Extra status-bar height the UI scale adds on web (0 at scale 1).
+
+        Only the web branches call this.  The compass and scale bar sit at
+        fixed offsets tuned for the scale-1 bar, so without this shift a scaled
+        bar (phones, tall windows) covered the top of the compass rose.
+        """
+        return ui_px(STATUS_BAR_HEIGHT_PX) - STATUS_BAR_HEIGHT_PX
 
     def _paint_scale_bar(self, start_x: int, start_y: int,
                          pixel_length: int, world_distance: float) -> None:
@@ -1689,7 +1702,7 @@ class Chart:
         self._blit_text_shadow(label, start_x, bar_bottom + 6)
 
     def draw_status_bar(self, environment, selected_vessel) -> None:
-        bar_height = ui_px(40)
+        bar_height = ui_px(STATUS_BAR_HEIGHT_PX)
         bar_rect = pygame.Rect(0, 0, self.surface.get_width(), bar_height)
         pygame.draw.rect(self.surface, theme.BAR_FILL, bar_rect)
         pygame.draw.line(self.surface, theme.BAR_LINE, bar_rect.bottomleft, bar_rect.bottomright, 1)
@@ -1716,9 +1729,52 @@ class Chart:
 
         padding = ui_px(18)
         _ty = ui_px(10)
+        if web_narrow_layout(self.surface):
+            # Phones: the centred full line runs into the speed readout, so
+            # use the shortest needed wording and centre it in the free gap.
+            self._draw_status_bar_narrow(environment, left_text, speed_text,
+                                         wind_text, vis_display, event,
+                                         padding, _ty)
+            return
         self._blit_text_shadow(left_text, padding, _ty)
         self._blit_text_shadow(mid_text, self.surface.get_width() // 2 - mid_text.get_width() // 2, _ty)
         self._blit_text_shadow(right_text, self.surface.get_width() - right_text.get_width() - padding, _ty)
+
+    def _draw_status_bar_narrow(self, environment, left_text, speed_text,
+                                wind_text, vis_display, event, padding, ty) -> None:
+        """Narrow web layout of the status bar: no readout may overlap another.
+
+        Tries wordings from longest to shortest and uses the first whose middle
+        readout fits between the clock and the speed with a minimum gap on each
+        side.  Only the wording shrinks; every value stays on screen.
+        """
+        w = self.surface.get_width()
+        gap = ui_px(WEB_STATUS_MIN_GAP_PX)
+        ev = f" | {event.upper()}" if event else ""
+        knots = f"{environment.wind_speed:.1f} kn"
+        card = wind_text.rsplit(" ", 1)[-1]          # compass point, e.g. "NE"
+        short_speed = ("PAUSED" if environment.time_speed_multiplier == 0
+                       else f"{environment.time_speed_multiplier:.0f}x")
+        candidates = [
+            (f"{wind_text} | Vis {vis_display}{ev}", speed_text),
+            (f"{knots} {card} | Vis {vis_display}{ev}", speed_text),
+            (f"{knots} {card} | {vis_display}{ev}", speed_text),
+            (f"{knots} {card} | {vis_display}{ev}", short_speed),
+        ]
+        left_end = padding + left_text.get_width()
+        for mid_str, right_str in candidates:
+            mid = self.font_mono.render(mid_str, True, theme.BAR_TEXT_M)
+            right = self.font_mono.render(right_str, True, COLOR_ACCENT)
+            right_x = w - right.get_width() - padding
+            if left_end + gap + mid.get_width() + gap <= right_x:
+                break
+        # Centre the middle readout in the space between the other two (the
+        # last candidate is used even if it is still tight on a tiny screen).
+        free_l, free_r = left_end + gap, right_x - gap
+        mid_x = max(free_l, free_l + (free_r - free_l - mid.get_width()) // 2)
+        self._blit_text_shadow(left_text, padding, ty)
+        self._blit_text_shadow(mid, mid_x, ty)
+        self._blit_text_shadow(right, right_x, ty)
 
     def _blit_text_shadow(self, text_surface: pygame.Surface, x: int, y: int) -> None:
         shadow = text_surface.copy()

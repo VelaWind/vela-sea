@@ -144,6 +144,16 @@ WEB_FB_FALLBACK_H = 900
 # softness is the trade.  1.0 disables (render at native device pixels).
 WEB_RENDER_SCALE = 0.8
 
+# Narrow web layout (phones, narrow windows).  A web viewport counts as narrow
+# when its framebuffer width divided by the UI scale is below this many design
+# pixels.  Dividing by the UI scale matters: a phone at 3x pixel density has a
+# wide framebuffer but a large UI scale, so raw pixels would never look narrow.
+# 560 design px is a 700 CSS px window at WEB_RENDER_SCALE 0.8 and UI scale 1,
+# the same 700px cut-off the loading screen uses for its touch-screen note.
+WEB_NARROW_LAYOUT_W = 560
+# Minimum gap between status-bar readouts in the narrow layout (design px).
+WEB_STATUS_MIN_GAP_PX = 10
+
 # Pre-rendered static world layer (web).  All static chart content (sea, the
 # full-quality depth glow, islands, zone shapes) renders ONCE into a camera-
 # centered chunk WEB_STATIC_CHUNK_FACTOR x the viewport (clamped to world
@@ -341,6 +351,10 @@ CAMERA_PAN_MARGIN_WU = 400.0
 # Compass & Scale
 # ============================================================================
 COMPASS_SIZE = 48
+# Height of the top status bar at UI scale 1 (design px).  On web the bar
+# grows with the UI scale, and the compass and scale bar below it move down by
+# the extra height so the bar never covers them.
+STATUS_BAR_HEIGHT_PX = 40
 COMPASS_OFFSET_X = 70
 COMPASS_OFFSET_Y = 70
 SCALE_BAR_MAX_WIDTH = 220

@@ -12,7 +12,7 @@ from math import atan2, degrees
 
 import math
 from render.chart import _vessel_hull_points, _rotate_points
-from render.fonts import safe_sysfont, ui_px
+from render.fonts import safe_sysfont, ui_px, web_narrow_layout
 from render import theme
 from engine.settings import KEYBIND_ACTIONS, DIFFICULTIES, RESOLUTION_CHOICES
 from config import (
@@ -941,6 +941,11 @@ class FleetStatusPanel:
     One row per vessel: name on the left, status label on the right.
     Click a row to select and follow that vessel.
     Hidden when the settings panel is open.
+
+    Narrow web viewports (phones): the list would cover most of the chart, so
+    it starts collapsed to a one-row "Fleet (N)" button.  A tap opens it, and
+    picking a vessel closes it again so the chart is visible.  Desktop and
+    wide web windows never see the button and draw exactly as before.
     """
 
     ROW_H  = 22
@@ -961,20 +966,45 @@ class FleetStatusPanel:
         self.PAD_X = ui_px(FleetStatusPanel.PAD_X)
         self.PAD_Y = ui_px(FleetStatusPanel.PAD_Y)
         self.TOP_Y = ui_px(FleetStatusPanel.TOP_Y)
+        # Narrow-layout state (web only).  Starts collapsed; the toggle rect is
+        # the clickable "Fleet (N)" row, None whenever the button isn't drawn.
+        self._collapsed = True
+        self._toggle_rect: Optional[pygame.Rect] = None
+        self._narrow = False
+        # Width the panel actually took on screen last frame, so the chart can
+        # inset its grid labels past it.  Equals WIDTH except when collapsed.
+        self.occupied_width = self.WIDTH
 
     def draw(self, world, selected_vessel) -> None:
         if not world or not world.vessels:
             return
 
+        self._narrow = web_narrow_layout(self.surface)
+        x = ui_px(20)
+        y = self.TOP_Y
+        self._toggle_rect = None
+        if self._narrow and selected_vessel is not None:
+            # The selected vessel's info card fills a phone screen; a fleet
+            # button drawn over it would collide with its text.  Tapping away
+            # from the ship deselects it and brings the button back.
+            self._rows = []
+            self._collapsed = True
+            self.occupied_width = 0
+            return
+        if self._narrow:
+            y = self._draw_toggle(x, y, len(world.vessels))
+            if self._collapsed:
+                self._rows = []
+                return
+        self.occupied_width = self.WIDTH
+
         # Cap the row count so the panel always ends ≥ 10 px above the bottom
         # edge, however short the window or long the fleet.
         vh = self.surface.get_height()
-        max_rows = max(1, (vh - self.TOP_Y - 10 - self.PAD_Y * 2) // self.ROW_H)
+        max_rows = max(1, (vh - y - 10 - self.PAD_Y * 2) // self.ROW_H)
         vessels = world.vessels[:max_rows]
         n = len(vessels)
         h = n * self.ROW_H + self.PAD_Y * 2
-        x = ui_px(20)
-        y = self.TOP_Y
 
         # Background — themed translucent panel (theme tokens: modern hairline
         # card on web, the legacy 2px-border panel on desktop).  The border is
@@ -1033,10 +1063,51 @@ class FleetStatusPanel:
             sx = x + self.WIDTH - self.PAD_X - status_surf.get_width()
             self.surface.blit(status_surf, (sx, cy))
 
+    def _draw_toggle(self, x: int, y: int, count: int) -> int:
+        """Draw the narrow-layout "Fleet (N)  show/hide" button; return the y
+        where the vessel rows start (just below the button)."""
+        label = self._font_name.render(f"Fleet ({count})", True, theme.ROW_NAME)
+        action = self._font_status.render(
+            "show" if self._collapsed else "hide", True, theme.ROW_NAME_SEL)
+        _gutter = ui_px(theme.ROW_GUTTER)
+        # Collapsed: a compact pill sized to its text.  Open: full panel width,
+        # so the button reads as the panel's header.
+        w = (self.WIDTH if not self._collapsed else
+             self.PAD_X * 2 + label.get_width() + _gutter + action.get_width())
+        h = self.ROW_H + self.PAD_Y * 2
+        bg = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(bg, theme.PANEL_FILL, bg.get_rect(),
+                         border_radius=theme.PANEL_RADIUS)
+        pygame.draw.rect(bg, theme.PANEL_BORDER, bg.get_rect(),
+                         width=theme.PANEL_BORDER_W,
+                         border_radius=theme.PANEL_RADIUS)
+        self.surface.blit(bg, (x, y))
+        cy = y + (h - label.get_height()) // 2
+        self.surface.blit(label, (x + self.PAD_X, cy))
+        self.surface.blit(action, (x + w - self.PAD_X - action.get_width(), cy))
+        self._toggle_rect = pygame.Rect(x, y, w, h)
+        self.occupied_width = w
+        return y + h + ui_px(4)
+
+    def handle_toggle(self, screen_pos) -> bool:
+        """Open or close the narrow-layout list if its button was clicked.
+
+        Returns True when the click was consumed.  Always False on desktop and
+        wide web windows, where the button is never drawn.
+        """
+        if self._toggle_rect is not None and self._toggle_rect.collidepoint(screen_pos):
+            self._collapsed = not self._collapsed
+            return True
+        return False
+
     def handle_click(self, screen_pos) -> object:
         """Return the vessel whose row was clicked, or None."""
         for rect, vessel in self._rows:
             if rect.collidepoint(screen_pos):
+                if self._narrow:
+                    # On a phone the open list hides the chart; close it once
+                    # a vessel is picked so the user sees what they chose.
+                    self._collapsed = True
                 return vessel
         return None
 
