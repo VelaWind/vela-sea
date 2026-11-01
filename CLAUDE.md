@@ -29,8 +29,11 @@ engine/            Pure simulation logic
                    hull_integrity, autopilot_destination
   environment.py   Weather OU-drift, events (fog/squall/storm), tide, time
   collision.py     CPA/TCPA COLREGS avoidance + find_safe_path
-  navigation.py    steer_ai_vessel, below_safe_depth, cog_direction
+  navigation.py    steer_ai_vessel, below_safe_depth, cog_direction,
+                   within_rescue_range
                    (shared by main.py and the tests; never copy them)
+  rules.py         RulesEngine: zone speed caps, fines, grace/cooldown
+                   (main.py only applies the side effects)
   career.py        PlayerCareer (money/rep/achievements/tier_name), JobBoard,
                    Contract (7 types), save_career/load_career/delete_save,
                    REP tiers, ACHIEVEMENT_DEFS
@@ -69,7 +72,7 @@ config.py          Every constant: physics, colors, career, sound, polish
   (engine, ambient) + one-shots (docking, warning, mayday)
 
 ## Testing
-- `pytest tests/ -q` — 16 tests (collision, traffic, save/load, bot)
+- `pytest tests/ -q`: 25 tests (collision, traffic, save/load, rules, rescue range, bot)
 - `python tests/test_bot.py` — human-readable 16-scenario report
 - `python tests/verify_new_routes.py` — run after ANY geography change
 - `python tests/test_visual_perf.py` — draw_all budget (< 8 ms)

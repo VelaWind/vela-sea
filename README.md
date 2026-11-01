@@ -140,7 +140,8 @@ engine/          Pure Python simulation, no Pygame
   ship.py        Vessel physics, fuel, route state machine, autopilot
   environment.py Weather drift, fog/squall/storm events, tide, day/night
   collision.py   COLREGS avoidance: CPA/TCPA, give-way logic, safe pathfinding
-  navigation.py  AI steering step, grounding rule, course-over-ground maths
+  navigation.py  AI steering step, grounding rule, COG maths, rescue range
+  rules.py       Zone rules: speed caps, fines, grace period and cooldown
   career.py      Career state, job board, contracts, ranks, save and load
   mission.py     AI mission generation and tracking
 
@@ -159,7 +160,7 @@ config.py            Tunable constants (401 of them)
 Every tunable number lives in `config.py` rather than at its use site, so
 balance changes are edits to one file.
 
-`main.py` is the weakest part of the structure at 3,544 lines, and some logic
+`main.py` is the weakest part of the structure at 3,570 lines, and some logic
 that belongs in `engine/` (search-and-rescue dispatch, AI decision helpers,
 vessel spawning) currently sits in the `Game` class instead.
 
@@ -186,7 +187,7 @@ second limit, and the rejected patches.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/ -q                    # 16 tests
+pytest tests/ -q                    # 25 tests
 python tests/test_bot.py            # 16 gameplay scenarios end to end
 python tests/test_visual_perf.py    # per-frame render budget, machine-dependent
 python tools/verify/verify_cog_math.py   # and the other tools/verify scripts

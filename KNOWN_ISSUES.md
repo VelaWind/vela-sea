@@ -15,9 +15,8 @@ An honest list of what doesn't work perfectly, with severity ratings.
 | 9 | **Time speed tops out at 3×** (key 4). Long passages across the full 210 nm sea can still take several real minutes. | Low |
 | 10 | **Docking refusal reuses the departure-grace mechanism**: after being refused at a draft-restricted port you must leave its radius before any new docking attempt there registers. | Low |
 | 11 | **Displaced vessels have no defined way back to their route.** Routes in `data/world_data.py` are verified as geometry (`tests/verify_new_routes.py`), but rescue duty, MOB searches, trawl wander, party-tender runs and tide refloating all move vessels far off that geometry, and every "hand back to the schedule" site then sets `destination = route[route_index]` — a straight line from wherever the vessel ended up. Measured over 3 seeds x 14 sim-days: **84% of groundings occur >15 wu from the vessel's own route, against 1% on it.** See the design note below. | Medium — with depth-aware routing closed (`route_refused` = 0) and the emergency lifecycle fixed, refloat flap is now the sole remaining driver |
-| 12 | **Rescue completion fires on waypoint arrival, not on reaching the casualty.** `find_safe_path` can hand a SAR rescuer a multi-hop route, and the arrival check in `update_simulation` calls `_sar_refloat` on the first hop it reaches while `player_commanded` is still set — it tests `at_destination(vessel.destination)`, never the rescuer's distance to the casualty. A rescuer can therefore "complete" a rescue from the far side of an island, which inflates rescue-success and episode-resolution metrics against the reachability numbers in `tools/diag_groundings.py`. | Medium — corrupts the SAR metrics the routing work is graded on; gameplay effect is a casualty freed early |
-| 13 | **The course-over-ground (COG) vector is not drawn.** `cog_direction` (now `engine/navigation.py`, previously `_cog_direction` in `render/chart.py`) computes the track over ground, and `COLOR_COG_VECTOR` exists in `config.py`, but nothing calls the function to draw it: the chart shows heading and predictor lines only. Found while moving the function out of `render/`. Behaviour was left unchanged on purpose. | Low (missing chart aid; the maths is tested) |
 | 14 | **COG maths and `Vessel.move()` still compute the same velocity separately.** `cog_direction` (heading + current + wind drift, in knots) and `move()` (the same terms as distances) are two implementations. `tools/verify/verify_cog_math.py` now runs one real `move()` step and fails if the two disagree, so drift between them is caught, but merging them would change `move()`'s floating-point order and was not done here. | Low |
+| 15 | **The scale bar and range rings understate distance by a factor of 6.7.** Both pass nautical miles to `camera.distance_to_screen`, which takes world units (1 wu = 0.15 nm), so the bar labelled "50 nm" spans 50 wu (7.5 nm) and a ring labelled "8 nm" is drawn at 8 wu (1.2 nm). Found while drawing the COG vector, which converts correctly. Not fixed in `fix/open-items-a` because it is outside that branch's scope. | Medium (a chart that misreports distance) |
 
 ## Resolved after v0.6.1: tests that checked copies (branch `fix/tests-use-real-code`)
 
@@ -36,6 +35,53 @@ unchanged: a seeded 6,000-frame run produces identical vessel state and
 identical frames before and after. One difference for the tests: their old
 copy of the steering step lacked the game's approach slowdown, so they now
 exercise slightly different (the game's real) behaviour, and still pass.
+
+## Resolved after v0.6.1: open items A (branch `fix/open-items-a`)
+
+**COG vector (was #13).** The chart now draws the course-over-ground vector
+for the player and the followed vessel: a teal-green line with an arrowhead
+from the hull along the track over ground, from
+`engine/navigation.cog_direction`, only when it differs from heading by more
+than `COG_MIN_DRIFT_DEG`. Its length is `SHIP_VECTOR_MINUTES` of travel,
+clamped to 4 to 8 hull sizes so it clears the vessel's name label.
+
+**Zone rules (`engine/rules.py`).** The speed caps and fines the game enforces
+used to sit inline in `Game.update_simulation`, while `engine/rules.py` held a
+`RulesEngine` that nothing instantiated. They now live in `RulesEngine`
+(`speed_cap_kn`, `violated_zone`, `fine_amount`, `step_player`); `main.py`
+keeps only the side effects. A seeded harness recorded every fine (sim time,
+amount, zone), every warning and a digest of every AI speed cap at each
+difficulty, with and without a hazmat contract, and in the tutorial: all
+identical before and after. `tests/test_rules.py` covers the rules headlessly.
+
+**Rescue completion (was #12).** A rescuer reaching a waypoint now refloats its
+casualty only within `RESCUE_COMPLETE_RANGE_WU` (26 wu, 3.9 nm: the standoff
+limit plus the arrival tolerance). Measured with a wrapper around
+`_sar_refloat`, 3 seeds x 4 sim-days: before, 145 of 543 rescuer completions
+(27%) happened more than 3.9 nm from the casualty, the farthest 58.6 nm away;
+after, none of 455.
+
+The fix has a large side effect on the fleet. `tools/diag_groundings.py`
+(3 seeds x 14 sim-days) before and after:
+
+| Metric | Before | After |
+|---|---|---|
+| Arrivals and dockings | 686 | 358 |
+| Distress events | 707 | 460 |
+| Distress events per arrival | 1.03 | 1.28 |
+| Episodes never assigned a rescuer | 81 (11%) | 80 (17%) |
+| Still stranded at run end | 38 | 43 |
+| Median episode length | 2.1 h | 1.5 h |
+
+A probe of 2 seeds x 4 sim-days found no dispatch loop: 61 rescuers arrived
+out of range mid-route and carried on (each a false rescue before), only 14
+reached their last waypoint still out of range and were released and
+re-dispatched, and casualties dispatched three or more times rose from 13 to
+17. Rescuer-hours on SAR duty rose 27% (829 to 1,052): rescuers now sail
+their whole route, and that time comes out of port runs. The earlier arrival
+and rescue figures were inflated by the bug, so the before column is not a
+clean baseline, but arrivals are the diagnostic's health counter and halving them
+is a real change in how the sea looks. Open question for review.
 
 ---
 
