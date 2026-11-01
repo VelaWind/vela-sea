@@ -19,13 +19,13 @@ def trigger_random_event(vessel, world, environment, event_log=None) -> None:
     """Trigger one random emergency event on an underway vessel.
 
     Three types (equal probability among eligible events):
-      0 — Engine failure (powered vessels only; sailboats are ineligible)
-      1 — Medical emergency (divert to nearest port)
-      2 — Man overboard (stop, turn 180°, slow search for MOB_SEARCH_DURATION_S)
+      0: Engine failure (powered vessels only; sailboats are ineligible)
+      1: Medical emergency (divert to nearest port)
+      2: Man overboard (stop, turn 180°, slow search for MOB_SEARCH_DURATION_S)
     """
     t = sim_time_str(environment)
 
-    # Sailboats have no engine — they can only get medical or MOB.
+    # Sailboats have no engine: they can only get medical or MOB.
     eligible = [1, 2] if vessel.fuel is None else [0, 1, 2]
     event_type = random.choice(eligible)
 
@@ -36,7 +36,7 @@ def trigger_random_event(vessel, world, environment, event_log=None) -> None:
         if event_log is not None:
             event_log.add(t, f"ENGINE FAILURE — {vessel.name}", EVENT_MAYDAY)
 
-    elif event_type == 1:  # Medical emergency — head to nearest port
+    elif event_type == 1:  # Medical emergency: head to nearest port
         nearest = min(world.ports, key=lambda p: vessel.distance_to(p.position))
         vessel.destination = nearest.position
         vessel.player_commanded = True
@@ -107,7 +107,7 @@ def start_waypoint_pause(vessel) -> None:
         vessel.target_speed   = 0.0
 
 
-# VIP charter commentary — shown in the captain's log, cycling every 600 sim-s.
+# VIP charter commentary: shown in the captain's log, cycling every 600 sim-s.
 VIP_MESSAGES = [
     "Guests enjoying the crossing",
     "Favorable winds — making good progress",
@@ -123,13 +123,13 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
     across calls; boolean flags prevent duplicate log entries.
 
     Priority order (highest first):
-      A  Weather awareness — fog/low-vis speed reduction
-      B  Fuel efficiency   — cargo/tanker economy mode (skipped while A active)
-      C  Traffic awareness — log collision-avoidance transitions
-      D  Port congestion   — slow on approach to a busy berth
-      E  Scenic stops      — SY Windward / SY Blue Horizon anchor/depart log
-      F  Wind seeking      — sailboat tack-log when heading near no-go zone
-      G  VIP commentary    — periodic log messages for SY Blue Horizon guests
+      A  Weather awareness: fog/low-vis speed reduction
+      B  Fuel efficiency  : cargo/tanker economy mode (skipped while A active)
+      C  Traffic awareness: log collision-avoidance transitions
+      D  Port congestion  : slow on approach to a busy berth
+      E  Scenic stops     : SY Windward / SY Blue Horizon anchor/depart log
+      F  Wind seeking     : sailboat tack-log when heading near no-go zone
+      G  VIP commentary   : periodic log messages for SY Blue Horizon guests
     """
     # Only apply to actively navigating vessels not under special control.
     if vessel.status not in ("underway", "avoiding"):
@@ -139,7 +139,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
     if vessel.mob_timer > 0:
         return
 
-    # (E) Scenic stops — detect anchor/depart transitions for leisure yachts.
+    # (E) Scenic stops: detect anchor/depart transitions for leisure yachts.
     # Must run BEFORE the trawling_timer early-return so we catch the step when
     # the vessel first enters or leaves its anchor pause.
     if vessel.vessel_type == "sailboat" and vessel.name in ("SY Blue Horizon", "SY Windward"):
@@ -159,7 +159,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
 
     vis = environment.visibility
 
-    # (A) Weather awareness — reduce to 60 % max in low vis, restore at 200 m.
+    # (A) Weather awareness: reduce to 60 % max in low vis, restore at 200 m.
     if vis < 150.0 and not state.get("low_vis"):
         state["low_vis"] = True
         vessel.target_speed = vessel.max_speed * 0.6
@@ -169,7 +169,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
         vessel.target_speed = vessel.max_speed
         vessel.log_decision(sim_time, "Visibility clear — resuming cruise speed")
 
-    # (B) Fuel efficiency — cargo/tanker only; skip while low-vis override is active.
+    # (B) Fuel efficiency: cargo/tanker only; skip while low-vis override is active.
     # Always reapply speed so recovery from (A) doesn't leave the wrong rate.
     if vessel.vessel_type in ("cargo", "tanker") and not state.get("low_vis"):
         next_port = None
@@ -200,7 +200,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
                 state["economy"] = False
                 state["near_port"] = False
 
-    # (C) Traffic awareness — log when collision avoidance activates or clears.
+    # (C) Traffic awareness: log when collision avoidance activates or clears.
     is_avoiding = vessel.status == "avoiding"
     if is_avoiding and not state.get("was_avoiding"):
         nearest_name = "unknown vessel"
@@ -220,7 +220,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
         vessel.log_decision(sim_time, "Course resumed — traffic clear")
         state["was_avoiding"] = False
 
-    # (D) Port congestion — slow to 30 % max on approach to a busy port.
+    # (D) Port congestion: slow to 30 % max on approach to a busy port.
     if vessel.status == "underway" and vessel.route:
         wp = vessel.route[vessel.route_index]
         dest_port = None
@@ -247,7 +247,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
 
     # ── Yacht-specific underway behaviors ─────────────────────────────────────
     if vessel.vessel_type == "sailboat":
-        # (F) Wind seeking — check every 300 sim-s; nudge toward beam reach when
+        # (F) Wind seeking: check every 300 sim-s; nudge toward beam reach when
         # within 30° of the no-go zone boundary.
         state["wind_ticks"] = state.get("wind_ticks", 0) + 1
         if state["wind_ticks"] >= 300:
@@ -268,7 +268,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
                     delta += 360.0
                 vessel.heading = (vessel.heading + max(-3.0, min(3.0, delta))) % 360.0
 
-        # (G) VIP commentary — SY Blue Horizon, one rotating message per 600 sim-s.
+        # (G) VIP commentary: SY Blue Horizon, one rotating message per 600 sim-s.
         if vessel.name == "SY Blue Horizon":
             state["vip_ticks"] = state.get("vip_ticks", 0) + 1
             if state["vip_ticks"] >= 600:
@@ -277,7 +277,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
                 vessel.log_decision(sim_time, VIP_MESSAGES[idx])
                 state["vip_msg_idx"] = (idx + 1) % len(VIP_MESSAGES)
 
-    # (H) Personality-driven cruise-speed baseline — applied only when no
+    # (H) Personality-driven cruise-speed baseline: applied only when no
     # higher-priority override (fog, fuel economy, port congestion) is active.
     # Cautious captains ease off the throttle; aggressive ones always push hard.
     _no_override = (not state.get("low_vis") and not state.get("economy")
@@ -290,7 +290,7 @@ def apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict
             vessel.target_speed = vessel.max_speed  # full rated speed at all times
         elif _pers == "leisure":
             vessel.target_speed = vessel.max_speed * PERSONALITY_LEISURE_SPEED
-        # "efficient" falls through — the default max_speed is already appropriate
+        # "efficient" falls through: the default max_speed is already appropriate
 
     # (I) Memory: warn when approaching a previously grounded position.
     _gpos_list = getattr(vessel, "memory", {}).get("grounded_positions", [])

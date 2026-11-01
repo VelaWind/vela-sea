@@ -61,7 +61,7 @@ def sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
             continue
         # The rescue_vessel pointer is a LEASE, not a lock.  This skip used to be
         # unconditional on "rescue_vessel is not None", and the field is cleared
-        # only by refloat() — which needs the assigned rescuer to arrive.  So when
+        # only by refloat(): which needs the assigned rescuer to arrive.  So when
         # a rescuer broke down en route (the random-event sweep below has no
         # player_commanded guard, so a rescuer can take an engine failure or run
         # aground like anyone else) the casualty held a pointer to a vessel that
@@ -79,7 +79,7 @@ def sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
                 # Deliberately NOT touching the ex-rescuer.  Releasing it here
                 # with destination = route[route_index] was measured and reverted:
                 # it is a new instance of the displacement-return problem
-                # (KNOWN_ISSUES #11 mechanism 2 — aiming a displaced vessel at the
+                # (KNOWN_ISSUES #11 mechanism 2: aiming a displaced vessel at the
                 # one waypoint it happened to be heading for), and it cost
                 # arrivals 498 -> 430 while shifting the whole port-visit
                 # distribution (Saltgate 112 -> 41, Thornwick 45 -> 88).  The
@@ -89,7 +89,7 @@ def sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
                 continue
         # Retry cooldown.  A casualty nobody can route to used to be re-swept
         # against every candidate on every sim step, at ~2,500 depth lookups per
-        # attempt — 271k router calls in three sim-days, 89% of wall time, which
+        # attempt: 271k router calls in three sim-days, 89% of wall time, which
         # would put the frame budget on the floor.  After a failed sweep, sit the
         # casualty out for SAR_DISPATCH_RETRY_S; the fleet will have moved by then
         # and a route may exist.  Counted down here rather than compared against a
@@ -109,7 +109,7 @@ def sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
             if v.player_commanded:
                 # An ORPHANED rescuer is available.  Dropping a dead lease (above)
                 # leaves the ex-rescuer carrying a live "sar" command it will only
-                # shed when it happens to arrive somewhere — 7.52 of 16 vessels by
+                # shed when it happens to arrive somewhere: 7.52 of 16 vessels by
                 # sim-day 13, all of them ineligible, which is why zero-eligible
                 # samples rose to 48.5%.  It is serving no casualty by definition
                 # (nothing points at it, checked above), so it is free to be
@@ -135,7 +135,7 @@ def sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
                 best, waypoints = v, [grounded.position]
                 break
             # Aim at a standoff, not the casualty itself: the casualty is aground,
-            # so its exact position is by definition too shallow to float it — and
+            # so its exact position is by definition too shallow to float it: and
             # a rescuer steered there grounds alongside it.  The standoff must
             # clear the RESCUER's draft, which may be deeper than the casualty's.
             target = find_standoff(grounded.position, v.draft_m, world)
@@ -158,7 +158,7 @@ def sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
                               f"RESCUE — {best.name} → {grounded.name}",
                               EVENT_RESCUE)
         else:
-            # No reachable rescuer this sweep — stamp the cooldown so the next
+            # No reachable rescuer this sweep: stamp the cooldown so the next
             # attempt waits for the fleet to move instead of re-running the same
             # doomed search every tick.  Deliberately not logged: even at one
             # message per cooldown this would clutter the event log with a
