@@ -83,7 +83,15 @@ def user_data_dir() -> str:
 # ============================================================================
 # Game identity & persistence
 # ============================================================================
-GAME_VERSION  = "0.6.1"        # shown on the title screen and stamped into saves
+GAME_VERSION  = "0.6.2"        # shown on the title screen and stamped into saves
+# Save files whose "version" may load into this build.  New saves are stamped
+# GAME_VERSION; a save is accepted when its version is listed here (and it has
+# every required field).  v0.6.1 is listed because the save format has not
+# changed since then (engine/career.py is identical to the v0.6.1 tag): without
+# it, every player upgrading from the v0.6.1 release would lose their career.
+# Add the new version here, and keep the old ones, whenever GAME_VERSION moves
+# and the format stays the same.
+SAVE_COMPATIBLE_VERSIONS = ("0.6.1", "0.6.2")
 # Career save lives in a user-writable location: %APPDATA%/VelaSea when
 # frozen (the bundle dir is read-only), cwd-relative "save.json" from source.
 SAVE_FILEPATH = os.path.join(user_data_dir(), "save.json")
