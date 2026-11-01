@@ -48,6 +48,7 @@ from render.fonts import safe_sysfont, ui_px
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
+from engine.navigation import steer_ai_vessel, below_safe_depth
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
@@ -2499,19 +2500,12 @@ class Game:
                             _set_underway_mission_status(vessel)
                             if vessel.route:
                                 vessel.destination = vessel.route[vessel.route_index]
-                    elif vessel.status == "avoiding":
-                        vessel.turn_toward(vessel.avoid_heading, SIM_TIMESTEP)
-                    elif vessel.destination and vessel.status == "underway":
-                        target_bearing = vessel.bearing_to(vessel.destination)
-                        vessel.turn_toward(target_bearing, SIM_TIMESTEP)
-                        # Approach slowdown: bleed speed within 3 wu of destination.
-                        # The else branch restores cruise speed once outside the zone
-                        # so target_speed never stays pinned at 2 kn after a waypoint pass.
-                        dist_to_dest = vessel.distance_to(vessel.destination)
-                        if dist_to_dest < ARRIVAL_DISTANCE * 3:
-                            vessel.target_speed = max(2.0, vessel.current_speed * 0.3)
-                        elif vessel.target_speed < vessel.max_speed:
-                            vessel.target_speed = vessel.max_speed
+                    else:
+                        # Normal navigation: collision-avoidance heading, or
+                        # steer for the destination with approach slowdown.
+                        # Lives in engine/navigation.py so the tests run this
+                        # exact step instead of a copy.
+                        steer_ai_vessel(vessel, SIM_TIMESTEP)
 
                     # Smart captain decisions: weather, fuel efficiency, traffic, port congestion.
                     _apply_smart_decisions(
@@ -2680,16 +2674,14 @@ class Game:
                         _sar_refloat(vessel, self.event_log,
                                      _sim_time_str(self.environment))
                     continue
-                # Skip vessels inside a port approach zone (no false groundings).
-                if vessel._port_at(vessel.position, self.world) is not None:
-                    continue
-                depth = self.world.water_depth_at(
-                    vessel.position, self.environment.tide_level
-                )
+                # The grounding rule itself (port approaches exempt, depth vs
+                # draft + margin) is engine/navigation.below_safe_depth, shared
+                # with the tests.
                 # Training wheels: the player can't run aground during the
                 # guided tutorial — the green route already keeps them in deep
                 # water; this just forgives a stray first-timer.
-                if (depth < vessel.draft_m + DRAFT_SAFETY_MARGIN_M
+                if (below_safe_depth(vessel, self.world,
+                                     self.environment.tide_level)
                         and not (_is_player and self._tutorial_active)):
                     vessel.status = "aground"
                     vessel.current_speed = 0.0

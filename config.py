@@ -693,6 +693,15 @@ SAIL_RUN_FACTOR  = 0.65
 COLOR_COG_VECTOR   = (100, 210, 170)   # soft teal-green; distinct from heading blue
 COG_MIN_DRIFT_DEG  = 0.5               # suppress when drift is visually negligible
 
+# AI approach slowdown (engine/navigation.py steer_ai_vessel).  Inside
+# APPROACH_SLOWDOWN_RADIUS_FACTOR x ARRIVAL_DISTANCE of its destination an AI
+# vessel bleeds speed to APPROACH_SPEED_FRACTION of its current speed, never
+# below APPROACH_MIN_SPEED_KN, so it does not overshoot a waypoint.  Outside
+# that radius cruise speed is restored.  (These were literals in main.py.)
+APPROACH_SLOWDOWN_RADIUS_FACTOR = 3
+APPROACH_SPEED_FRACTION = 0.3
+APPROACH_MIN_SPEED_KN = 2.0
+
 # Sparse current-flow arrow field drawn as a chart layer.
 # Light steel-blue at low alpha evokes isobar/current conventions on paper charts
 # while staying subordinate to vessel symbols and coastlines.

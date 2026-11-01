@@ -36,8 +36,6 @@ from config import (
     SHIP_PREDICTOR_MINUTES, SHIP_VECTOR_MINUTES, SHIP_RANGE_RING_INTERVAL_NM,
     SHIP_RANGE_RING_COUNT, SHIP_SELECTION_ALPHA,
     SHIP_SYMBOL_ZOOM_SCALE, KNOTS_TO_UNITS_PER_HOUR,
-    CURRENT_INFLUENCE,
-    COLOR_COG_VECTOR, COG_MIN_DRIFT_DEG,
     COLOR_CURRENT_ARROW, CURRENT_ARROW_SPACING_PX, CURRENT_ARROW_ALPHA, CURRENT_ARROW_SIZE,
     SAIL_IRONS_DISPLAY_THRESHOLD,
     DEPTH_COLOR_SHOAL,
@@ -135,42 +133,6 @@ def _interpolate_point(start: Position, end: Position, fraction: float) -> Posit
         start[0] + (end[0] - start[0]) * fraction,
         start[1] + (end[1] - start[1]) * fraction,
     )
-
-
-def _cog_direction(vessel, environment):
-    """Return (cog_angle_rad, cog_speed_kn) when the vessel's actual track over
-    ground diverges meaningfully from its heading, otherwise None.
-
-    Mirrors the physics in ship.py move() — heading vector + current set-and-drift
-    + wind drift — but is read-only and used only for drawing.
-    """
-    if environment is None or vessel.current_speed <= 0:
-        return None
-
-    h_rad = math.radians(vessel.heading)
-    vx = math.cos(h_rad) * vessel.current_speed
-    vy = math.sin(h_rad) * vessel.current_speed
-
-    # Current set-and-drift (toward current_direction)
-    c_rad = math.radians(environment.current_direction)
-    vx += math.cos(c_rad) * environment.current_speed * CURRENT_INFLUENCE
-    vy += math.sin(c_rad) * environment.current_speed * CURRENT_INFLUENCE
-
-    # Wind drift (away from wind_direction — same sign as ship.py)
-    push_rad = math.radians((environment.wind_direction + 180.0) % 360.0)
-    wind_kn = environment.wind_speed * vessel._windage_factor()
-    vx += math.cos(push_rad) * wind_kn
-    vy += math.sin(push_rad) * wind_kn
-
-    cog_rad = math.atan2(vy, vx)
-    cog_speed = math.hypot(vx, vy)
-
-    # Shortest signed arc between COG and heading; skip if negligible
-    drift = (math.degrees(cog_rad) - vessel.heading + 180.0) % 360.0 - 180.0
-    if abs(drift) < COG_MIN_DRIFT_DEG:
-        return None
-
-    return cog_rad, cog_speed
 
 
 class Chart:
