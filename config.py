@@ -351,6 +351,10 @@ CAMERA_PAN_MARGIN_WU = 400.0
 # Compass & Scale
 # ============================================================================
 COMPASS_SIZE = 48
+# Height of the top status bar at UI scale 1 (design px).  On web the bar
+# grows with the UI scale, and the compass and scale bar below it move down by
+# the extra height so the bar never covers them.
+STATUS_BAR_HEIGHT_PX = 40
 COMPASS_OFFSET_X = 70
 COMPASS_OFFSET_Y = 70
 SCALE_BAR_MAX_WIDTH = 220
