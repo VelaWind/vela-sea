@@ -1940,7 +1940,7 @@ class Game:
                     self.mission_manager.sim_elapsed_s) is not None:
                 return
 
-        # Fleet status panel click — check before chart click.  The open/close
+        # Fleet status panel click: check before chart click.  The open/close
         # button only exists in the narrow web layout; elsewhere this is False.
         if self.fleet_panel.handle_toggle(screen_pos):
             return
