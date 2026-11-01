@@ -183,3 +183,22 @@ away as a matter of geometry, not of range tuning — widening the range would
 dispatch that last vessel across the sea and relabel the failure, masking pool
 exhaustion rather than fixing it. The pool is the variable to attack, not the
 radius.
+
+## Resolved after v0.6.1: web demo on phones (branch `fix/web-small-screen`)
+
+On a phone (375 to 390 CSS px wide) the web demo opened with the fleet list
+covering most of the chart, the status bar's visibility readout running into
+"Speed 1x", and the top of the compass rose hidden under the status bar.
+
+In the web build, a viewport narrower than `WEB_NARROW_LAYOUT_W` design
+pixels (framebuffer width divided by UI scale, so high-density phones count)
+now uses a compact layout. The fleet list starts collapsed as a "Fleet (N)"
+button that opens on a tap and closes after a vessel is picked. The status
+bar picks the longest wording that fits between the clock and the speed. The
+compass and scale bar move down by the extra height the UI scale adds to the
+status bar. Desktop is unchanged: seeded desktop frames are byte-identical
+before and after, as are web frames at the 1440 px layout.
+
+Still open on phones: selecting a vessel opens its information card, which
+fills almost the whole screen. Tapping away from the ship closes it. A
+compact card for narrow screens would be the next step.
