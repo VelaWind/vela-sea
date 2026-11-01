@@ -16,7 +16,7 @@ tests/test_collision.py, tests/test_traffic.py, tools/verify/verify_cog_math.py.
 import math
 
 from config import (
-    ARRIVAL_DISTANCE, CURRENT_INFLUENCE, COG_MIN_DRIFT_DEG,
+    ARRIVAL_DISTANCE, COG_MIN_DRIFT_DEG,
     DRAFT_SAFETY_MARGIN_M,
     APPROACH_SLOWDOWN_RADIUS_FACTOR, APPROACH_SPEED_FRACTION,
     APPROACH_MIN_SPEED_KN, RESCUE_COMPLETE_RANGE_WU,
@@ -27,27 +27,22 @@ def cog_direction(vessel, environment):
     """Return (cog_angle_rad, cog_speed_kn) when the vessel's actual track over
     ground diverges meaningfully from its heading, otherwise None.
 
-    Mirrors the physics in ship.py move(): heading vector + current set-and-
-    drift + wind drift.  Read-only.  The chart draws the result as the COG
-    vector; tools/verify/verify_cog_math.py checks it against move().
+    Sums Vessel.ground_velocity_terms, the same terms move() applies as
+    displacements, so the chart's COG vector and the vessel's real motion come
+    from one definition (KNOWN_ISSUES #14).  Read-only.
     """
     if environment is None or vessel.current_speed <= 0:
         return None
 
-    h_rad = math.radians(vessel.heading)
-    vx = math.cos(h_rad) * vessel.current_speed
-    vy = math.sin(h_rad) * vessel.current_speed
-
-    # Current set-and-drift (toward current_direction)
-    c_rad = math.radians(environment.current_direction)
-    vx += math.cos(c_rad) * environment.current_speed * CURRENT_INFLUENCE
-    vy += math.sin(c_rad) * environment.current_speed * CURRENT_INFLUENCE
-
-    # Wind drift (away from wind_direction, same sign as ship.py)
-    push_rad = math.radians((environment.wind_direction + 180.0) % 360.0)
-    wind_kn = environment.wind_speed * vessel._windage_factor()
-    vx += math.cos(push_rad) * wind_kn
-    vy += math.sin(push_rad) * wind_kn
+    terms = vessel.ground_velocity_terms(environment)
+    # Start from the first term rather than 0.0: 0.0 + (-0.0) is +0.0, and the
+    # sign of a zero component changes atan2's answer (pi versus -pi).
+    angle, speed = terms[0]
+    vx = math.cos(angle) * speed
+    vy = math.sin(angle) * speed
+    for angle, speed in terms[1:]:
+        vx += math.cos(angle) * speed
+        vy += math.sin(angle) * speed
 
     cog_rad = math.atan2(vy, vx)
     cog_speed = math.hypot(vx, vy)
