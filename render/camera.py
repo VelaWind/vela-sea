@@ -13,7 +13,8 @@ The camera is defined by:
 from dataclasses import dataclass
 from typing import Tuple
 
-from config import WORLD_WIDTH, WORLD_HEIGHT, CAMERA_PAN_MARGIN_WU, IS_WEB
+from config import (WORLD_WIDTH, WORLD_HEIGHT, CAMERA_PAN_MARGIN_WU, IS_WEB,
+                    NM_PER_WORLD_UNIT)
 
 Position = Tuple[float, float]
 
@@ -122,6 +123,16 @@ class Camera:
         """Convert a world-space distance to screen pixels."""
         return distance_world_units * self.zoom
 
+    def nm_to_screen(self, distance_nm: float) -> float:
+        """Convert a distance in nautical miles to screen pixels.
+
+        The one place chart annotations go from nautical miles to pixels.
+        distance_to_screen takes WORLD UNITS (1 wu = NM_PER_WORLD_UNIT nm);
+        passing it nautical miles directly is what made the scale bar and range
+        rings read 6.7 times too short (KNOWN_ISSUES #15).
+        """
+        return self.distance_to_screen(distance_nm / NM_PER_WORLD_UNIT)
+
     def distance_to_world(self, distance_pixels: float) -> float:
         """Convert a screen-space distance to world units."""
         return distance_pixels / self.zoom
@@ -160,3 +171,28 @@ class Camera:
                 self.position = (nx, ny)
             else:
                 self.position = self.follow_target.position
+
+
+def choose_scale_nm(px_per_nm: float, target_px: float, max_px: float,
+                    candidates_nm) -> float:
+    """Pick the round distance whose on-screen length best fits target_px.
+
+    px_per_nm is the current pixels per nautical mile (Camera.nm_to_screen(1)).
+    Returns the candidate closest to target_px whose length does not exceed
+    max_px, or the smallest candidate if none fits.  Pure arithmetic, so the
+    chart's scale bar and range rings can be tested headlessly.
+    """
+    best, best_score = candidates_nm[0], float("inf")
+    for nm in candidates_nm:
+        px = nm * px_per_nm
+        if px > max_px:
+            break
+        score = abs(px - target_px)
+        if score < best_score:
+            best, best_score = nm, score
+    return best
+
+
+def scale_label(nm: float) -> str:
+    """Label text for a chart distance: '50 nm', '0.5 nm'."""
+    return f"{nm:g} nm"

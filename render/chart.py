@@ -27,13 +27,14 @@ from config import (
     WORLD_WIDTH, WORLD_HEIGHT, GRID_SPACING, GRID_LABEL_INTERVAL,
     COMPASS_SIZE, COMPASS_OFFSET_X, COMPASS_OFFSET_Y, STATUS_BAR_HEIGHT_PX,
     SCALE_BAR_MAX_WIDTH, SCALE_BAR_TARGET_WIDTH, SCALE_BAR_OFFSET_X, SCALE_BAR_OFFSET_Y,
+    SCALE_BAR_CANDIDATES_NM, SHIP_RANGE_RING_CANDIDATES_NM, SHIP_RANGE_RING_TARGET_PX,
     SCALE_BAR_HEIGHT, PORT_SYMBOL_SIZE, PORT_LABEL_OFFSET,
     ZONE_BORDER_WIDTH, ZONE_LABEL_OFFSET, ZONE_FILL_ALPHA,
     ZONE_HATCH_ALPHA, ZONE_HATCH_SPACING, SHALLOW_WATER_BAND_WIDTH,
     SHALLOW_WATER_BAND_STEPS, SHALLOW_WATER_BAND_STEP_PX, SHALLOW_WATER_BAND_MAX_ALPHA,
     DEPTH_CONTOUR_WIDTH, SHIP_SELECT_RADIUS, SHIP_SELECT_GLOW_WIDTH,
     SHIP_MIN_SIZE, SHIP_MAX_SIZE, SHIP_LABEL_OFFSET,
-    SHIP_PREDICTOR_MINUTES, SHIP_VECTOR_MINUTES, SHIP_RANGE_RING_INTERVAL_NM,
+    SHIP_PREDICTOR_MINUTES, SHIP_VECTOR_MINUTES,
     COLOR_COG_VECTOR, COG_VECTOR_MIN_SIZE_MULT, COG_VECTOR_MAX_SIZE_MULT,
     COG_VECTOR_WIDTH_PX, COG_VECTOR_HEAD_PX, COG_VECTOR_HEAD_ANGLE_DEG, NM_PER_WORLD_UNIT,
     SHIP_RANGE_RING_COUNT, SHIP_SELECTION_ALPHA,
@@ -73,7 +74,7 @@ from config import (
     WEB_STATUS_MIN_GAP_PX,
     WEB_STATIC_EDGE_MARGIN_FRAC, WEB_STATIC_SMOOTHSCALE,
 )
-from render.camera import Camera
+from render.camera import Camera, choose_scale_nm, scale_label
 from engine.navigation import cog_direction  # track over ground, shared with tests
 from render.fonts import safe_sysfont, ui_px, get_ui_scale, web_narrow_layout
 from render import theme
@@ -1476,15 +1477,20 @@ class Chart:
         # ── Range rings: always shown for player, else only when selected ─────
         if selected or _is_player:
             ring_color = COLOR_ACCENT if _is_player else COLOR_VESSEL_RANGE
+            # True nautical miles: the interval steps with zoom (radar-style)
+            # so the rings keep their designed size and the labels stay true.
+            _px_per_nm = self.camera.nm_to_screen(1.0)
+            _ring_nm = choose_scale_nm(
+                _px_per_nm, SHIP_RANGE_RING_TARGET_PX * self._ui,
+                float("inf"), SHIP_RANGE_RING_CANDIDATES_NM)
             for ring_index in range(1, SHIP_RANGE_RING_COUNT + 1):
-                radius = int(self.camera.distance_to_screen(
-                    ring_index * SHIP_RANGE_RING_INTERVAL_NM))
+                radius = int(self.camera.nm_to_screen(ring_index * _ring_nm))
                 if radius <= 0:
                     continue
                 pygame.gfxdraw.aacircle(
                     self.surface, int(screen_x), int(screen_y), radius, ring_color)
                 label = self.font_mono.render(
-                    f"{ring_index * SHIP_RANGE_RING_INTERVAL_NM:g} nm",
+                    scale_label(ring_index * _ring_nm),
                     True, COLOR_TEXT_SECONDARY)
                 label_x = int(screen_x - label.get_width() / 2)
                 label_y = int(screen_y - radius - label.get_height() - 6)
@@ -1680,22 +1686,13 @@ class Chart:
             self._blit_text_shadow(text, center_x + dx - text.get_width() / 2, center_y + dy - text.get_height() / 2)
 
     def draw_scale_bar(self) -> None:
-        candidates = [0.5, 1, 2, 5, 10, 20, 50]
-        target_pixels = SCALE_BAR_TARGET_WIDTH
-        best_distance = candidates[0]
-        best_score = float("inf")
-
-        for distance in candidates:
-            pixel_length = self.camera.distance_to_screen(distance)
-            if pixel_length > SCALE_BAR_MAX_WIDTH:
-                break
-            score = abs(pixel_length - target_pixels)
-            if score < best_score:
-                best_score = score
-                best_distance = distance
-
-        world_distance = best_distance
-        pixel_length = int(_clamp(self.camera.distance_to_screen(world_distance), 40, SCALE_BAR_MAX_WIDTH))
+        # True nautical miles (Camera.nm_to_screen).  No clamping: a clamped
+        # bar would no longer match its label.  SCALE_BAR_CANDIDATES_NM covers
+        # the whole zoom range, so a bar between ~60 and 220 px always exists.
+        world_distance = choose_scale_nm(
+            self.camera.nm_to_screen(1.0), SCALE_BAR_TARGET_WIDTH,
+            SCALE_BAR_MAX_WIDTH, SCALE_BAR_CANDIDATES_NM)
+        pixel_length = int(round(self.camera.nm_to_screen(world_distance)))
 
         if not IS_WEB:
             self._paint_scale_bar(SCALE_BAR_OFFSET_X, SCALE_BAR_OFFSET_Y,
@@ -1739,7 +1736,7 @@ class Chart:
         pygame.draw.line(self.surface, COLOR_TEXT_PRIMARY, (start_x, bar_top), (start_x, bar_bottom), 1)
         pygame.draw.line(self.surface, COLOR_TEXT_PRIMARY, (start_x + pixel_length, bar_top), (start_x + pixel_length, bar_bottom), 1)
         pygame.draw.line(self.surface, COLOR_TEXT_PRIMARY, (start_x + pixel_length // 2, bar_top), (start_x + pixel_length // 2, bar_bottom), 1)
-        label = self.font_mono.render(f"{world_distance:g} nm", True, COLOR_TEXT_PRIMARY)
+        label = self.font_mono.render(scale_label(world_distance), True, COLOR_TEXT_PRIMARY)
         self._blit_text_shadow(label, start_x, bar_bottom + 6)
 
     def draw_status_bar(self, environment, selected_vessel) -> None:
