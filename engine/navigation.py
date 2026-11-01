@@ -7,6 +7,7 @@ hand-copied versions that could drift away from what the game runs.
     cog_direction(vessel, environment)        course and speed over ground
     steer_ai_vessel(vessel, dt)               one AI steering step
     below_safe_depth(vessel, world, tide)     the grounding rule
+    within_rescue_range(rescuer, casualty)    whether a rescue may complete
 
 Callers: main.py (Game.update_simulation), render/chart.py (COG vector),
 tests/test_collision.py, tests/test_traffic.py, tools/verify/verify_cog_math.py.
@@ -18,7 +19,7 @@ from config import (
     ARRIVAL_DISTANCE, CURRENT_INFLUENCE, COG_MIN_DRIFT_DEG,
     DRAFT_SAFETY_MARGIN_M,
     APPROACH_SLOWDOWN_RADIUS_FACTOR, APPROACH_SPEED_FRACTION,
-    APPROACH_MIN_SPEED_KN,
+    APPROACH_MIN_SPEED_KN, RESCUE_COMPLETE_RANGE_WU,
 )
 
 
@@ -97,3 +98,13 @@ def below_safe_depth(vessel, world, tide_level: float) -> bool:
         return False
     depth = world.water_depth_at(vessel.position, tide_level)
     return depth < vessel.draft_m + DRAFT_SAFETY_MARGIN_M
+
+
+def within_rescue_range(rescuer, casualty) -> bool:
+    """True when rescuer is close enough to casualty to complete the rescue.
+
+    The game checks this when a SAR rescuer reaches a waypoint.  Reaching an
+    intermediate hop of a multi-hop route is not reaching the casualty, so the
+    rescue continues; only an arrival within RESCUE_COMPLETE_RANGE_WU counts.
+    """
+    return rescuer.distance_to(casualty.position) <= RESCUE_COMPLETE_RANGE_WU

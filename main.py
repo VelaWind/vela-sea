@@ -47,7 +47,7 @@ from render.fonts import safe_sysfont, ui_px
 from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
-from engine.navigation import steer_ai_vessel, below_safe_depth
+from engine.navigation import steer_ai_vessel, below_safe_depth, within_rescue_range
 from engine.rules import RulesEngine, ZoneFineState
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
@@ -2557,16 +2557,20 @@ class Game:
                 if (vessel.status in ("underway", "avoiding")
                         and vessel.destination
                         and vessel.at_destination(vessel.destination, tolerance=PORT_DETECT_RADIUS)):
-                    # SAR rescue completion: if this vessel was dispatched as a rescuer,
-                    # refloat the grounded vessel before resuming its own route.
+                    # SAR rescue completion: if this vessel was dispatched as a rescuer
+                    # and has actually reached its casualty, refloat it before the
+                    # rescuer resumes its own route.  Reaching an intermediate hop of
+                    # a multi-hop route is not reaching the casualty: the rescue goes
+                    # on to the next hop (KNOWN_ISSUES #12, within_rescue_range).
                     if vessel.player_commanded:
                         for grounded in self.world.vessels:
                             if (grounded is not vessel
                                     and grounded.distress
                                     and grounded.rescue_vessel is vessel
                                     and grounded.status in ("aground", "adrift")):
-                                _sar_refloat(grounded, self.event_log,
-                                             _sim_time_str(self.environment))
+                                if within_rescue_range(vessel, grounded):
+                                    _sar_refloat(grounded, self.event_log,
+                                                 _sim_time_str(self.environment))
                                 break
                     _was_player_cmd = vessel.player_commanded
                     _was_reason = vessel.command_reason

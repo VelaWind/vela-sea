@@ -990,6 +990,16 @@ STANDOFF_UKC_M   = 3.0   # metres under-keel clearance required at the standoff
 STANDOFF_STEP_WU = 2.0   # world units per outward probe ring
 STANDOFF_MAX_WU  = 24.0  # give up beyond this and fall back to the raw position
 
+# Rescue completion distance.  A rescue counts as done only when the rescuer is
+# within this many world units of the casualty when it reaches a waypoint
+# (engine/navigation.within_rescue_range).  It is derived, not tuned: the
+# rescuer is routed to a standoff at most STANDOFF_MAX_WU from the casualty, and
+# "reached" means within PORT_DETECT_RADIUS of that standoff, so any genuine
+# arrival is inside STANDOFF_MAX_WU + PORT_DETECT_RADIUS (26 wu = 3.9 nm).
+# Before this existed, reaching the FIRST hop of a multi-hop route completed the
+# rescue, even from the far side of an island (KNOWN_ISSUES #12).
+RESCUE_COMPLETE_RANGE_WU = STANDOFF_MAX_WU + PORT_DETECT_RADIUS
+
 # Dispatch retry cooldown.  _sar_dispatch runs every sim step, and for a casualty
 # nobody can route to it re-walked every candidate every tick — each attempt a
 # find_standoff (up to 192 depth probes) plus a find_safe_path (~2,300 samples).
