@@ -86,3 +86,15 @@ def test_delete_save(tmp_path):
     assert not os.path.exists(path)
     # Deleting an already-missing file must not raise.
     delete_save(filepath=path)
+
+
+def test_v061_save_still_loads(tmp_path):
+    """A career saved by the v0.6.1 release must load in later builds with the
+    same save format, or upgrading players lose their career."""
+    path = tmp_path / "save.json"
+    save_career(_make_career(), filepath=str(path))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["version"] = "0.6.1"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    loaded = load_career(filepath=str(path))
+    assert loaded is not None and loaded["money"] == data["money"]

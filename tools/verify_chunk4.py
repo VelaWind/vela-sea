@@ -7,10 +7,12 @@ from config import (
     ZOOM_MAX,
     SCALE_BAR_MAX_WIDTH,
     SCALE_BAR_TARGET_WIDTH,
-    SHIP_RANGE_RING_INTERVAL_NM,
+    SCALE_BAR_CANDIDATES_NM,
+    SHIP_RANGE_RING_CANDIDATES_NM,
+    SHIP_RANGE_RING_TARGET_PX,
     SHIP_RANGE_RING_COUNT,
 )
-from render.camera import Camera
+from render.camera import Camera, choose_scale_nm
 from render.chart import Chart
 from main import Game
 from engine.ship import Vessel
@@ -20,21 +22,14 @@ pygame.init()
 
 cam = Camera(1600, 950)
 
-candidates = [0.5, 1, 2, 5, 10, 20, 50]
-
+# Uses the chart's own functions (render/camera.py) rather than a copy, so this
+# script can no longer drift from what the chart draws (the old copy carried
+# the nm-vs-world-unit bug, KNOWN_ISSUES #15).
 def choose_scale(zoom):
     cam.zoom = zoom
-    best_distance = candidates[0]
-    best_score = float('inf')
-    for distance in candidates:
-        pixel_length = cam.distance_to_screen(distance)
-        if pixel_length > SCALE_BAR_MAX_WIDTH:
-            break
-        score = abs(pixel_length - SCALE_BAR_TARGET_WIDTH)
-        if score < best_score:
-            best_score = score
-            best_distance = distance
-    return best_distance, cam.distance_to_screen(best_distance)
+    nm = choose_scale_nm(cam.nm_to_screen(1.0), SCALE_BAR_TARGET_WIDTH,
+                         SCALE_BAR_MAX_WIDTH, SCALE_BAR_CANDIDATES_NM)
+    return nm, cam.nm_to_screen(nm)
 
 low_dist, low_px = choose_scale(ZOOM_MIN)
 high_dist, high_px = choose_scale(ZOOM_MAX)
@@ -52,9 +47,11 @@ for status in ['underway', 'docked', 'aground']:
     screen_pos = cam.world_to_screen(v.position)
     assert screen_pos == (800.0, 475.0)
     ring_info = []
+    ring_nm = choose_scale_nm(cam.nm_to_screen(1.0), SHIP_RANGE_RING_TARGET_PX,
+                              float("inf"), SHIP_RANGE_RING_CANDIDATES_NM)
     for ring_index in range(1, SHIP_RANGE_RING_COUNT + 1):
-        nm_radius = ring_index * SHIP_RANGE_RING_INTERVAL_NM
-        px_radius = cam.distance_to_screen(nm_radius)
+        nm_radius = ring_index * ring_nm
+        px_radius = cam.nm_to_screen(nm_radius)
         ring_info.append((nm_radius, px_radius))
     print(f'status={status} ring radii: {ring_info}')
 

@@ -83,7 +83,15 @@ def user_data_dir() -> str:
 # ============================================================================
 # Game identity & persistence
 # ============================================================================
-GAME_VERSION  = "0.6.1"        # shown on the title screen and stamped into saves
+GAME_VERSION  = "0.6.2"        # shown on the title screen and stamped into saves
+# Save files whose "version" may load into this build.  New saves are stamped
+# GAME_VERSION; a save is accepted when its version is listed here (and it has
+# every required field).  v0.6.1 is listed because the save format has not
+# changed since then (engine/career.py is identical to the v0.6.1 tag): without
+# it, every player upgrading from the v0.6.1 release would lose their career.
+# Add the new version here, and keep the old ones, whenever GAME_VERSION moves
+# and the format stays the same.
+SAVE_COMPATIBLE_VERSIONS = ("0.6.1", "0.6.2")
 # Career save lives in a user-writable location: %APPDATA%/VelaSea when
 # frozen (the bundle dir is read-only), cwd-relative "save.json" from source.
 SAVE_FILEPATH = os.path.join(user_data_dir(), "save.json")
@@ -359,6 +367,11 @@ COMPASS_OFFSET_X = 70
 COMPASS_OFFSET_Y = 70
 SCALE_BAR_MAX_WIDTH = 220
 SCALE_BAR_TARGET_WIDTH = 140
+# Round distances the scale bar may show, in nautical miles.  The bar picks the
+# one whose TRUE length (render/camera.Camera.nm_to_screen) is closest to
+# SCALE_BAR_TARGET_WIDTH without exceeding SCALE_BAR_MAX_WIDTH.  Covers
+# ZOOM_MIN..ZOOM_MAX (0.4: 50 nm = 133 px; 4.0: 5 nm = 133 px).
+SCALE_BAR_CANDIDATES_NM = (0.5, 1, 2, 5, 10, 20, 50, 100)
 SCALE_BAR_OFFSET_X = 70
 SCALE_BAR_OFFSET_Y = 100
 SCALE_BAR_HEIGHT = 8
@@ -413,7 +426,13 @@ SHIP_PREDICTOR_MINUTES = 5.0
 # by the max(16, ...) guard.  The hard pixel cap (max(size*3, 20)) in chart.py
 # then trims it further at high zoom so it never dominates the symbol.
 SHIP_VECTOR_MINUTES = 3.0
-SHIP_RANGE_RING_INTERVAL_NM = 8.0
+# Range rings step with zoom, like a radar's range setting: the interval is the
+# round distance (true nautical miles) whose first ring lands closest to
+# SHIP_RANGE_RING_TARGET_PX on screen, so the rings keep their designed size
+# while every label stays true (8 nm at default zoom, 16 nm zoomed out, 2 nm
+# zoomed in).  The old fixed 8.0 was drawn as 8 world units = 1.2 nm.
+SHIP_RANGE_RING_CANDIDATES_NM = (0.5, 1, 2, 4, 8, 16, 32)
+SHIP_RANGE_RING_TARGET_PX = 50
 SHIP_RANGE_RING_COUNT = 3
 SHIP_SELECTION_ALPHA = 48
 SHIP_PREDICTOR_ALPHA = 120

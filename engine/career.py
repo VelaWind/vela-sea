@@ -14,7 +14,7 @@ from config import (
     PLAYER_STARTING_MONEY, PLAYER_STARTING_REPUTATION,
     HULL_REPAIR_COST_PER_POINT, CONTRACT_PENALTY,
     NM_PER_WORLD_UNIT,
-    GAME_VERSION, SAVE_FILEPATH,
+    GAME_VERSION, SAVE_COMPATIBLE_VERSIONS, SAVE_FILEPATH,
     HAZMAT_RATE_MULT, HAZMAT_REP_REQUIRED, HAZMAT_DEADLINE_RANGE_H,
     CHARTER_RATE_PER_NM, CHARTER_DEADLINE_RANGE_H,
     CONTRACT_DEADLINE_RANGE_H,
@@ -203,7 +203,8 @@ def save_career(career: "PlayerCareer", filepath: str = SAVE_FILEPATH,
 
 def load_career(filepath: str = SAVE_FILEPATH) -> Optional[dict]:
     """Read a save file. Returns the field dict, or None when the file is
-    missing, unparseable, the wrong version, or missing any required field.
+    missing, unparseable, a version not in SAVE_COMPATIBLE_VERSIONS, or
+    missing any required field.
 
     Returning the raw dict (not a PlayerCareer) lets the caller restore both
     the career object and the player vessel's hull in one place.
@@ -213,7 +214,8 @@ def load_career(filepath: str = SAVE_FILEPATH) -> Optional[dict]:
             data = json.load(f)
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or data.get("version") != GAME_VERSION:
+    if (not isinstance(data, dict)
+            or data.get("version") not in SAVE_COMPATIBLE_VERSIONS):
         return None
     if any(k not in data for k in _SAVE_FIELDS):
         return None
