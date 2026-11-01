@@ -33,10 +33,9 @@ from config import SAR_DISPATCH_RETRY_S, ENGINE_REPAIR_TIME_S
 from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
 from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM, THROTTLE_FLASH_MS
 from config import HULL_REPAIR_COST_PER_POINT
-from config import (ZONE_FINE_NO_ENTRY, ZONE_FINE_SPEED, ZONE_FINE_INTERVAL_S,
-                    GROUNDING_HULL_DAMAGE, STORM_WAVE_THRESHOLD,
+from config import (GROUNDING_HULL_DAMAGE, STORM_WAVE_THRESHOLD,
                     STORM_HULL_DAMAGE_RATE, STORM_MAX_SPEED_KN,
-                    HAZMAT_FINE_MULT, CHARTER_MAX_SPEED_KN)
+                    CHARTER_MAX_SPEED_KN)
 from config import (
     PORT_STAY_CARGO_LOAD_S, PORT_STAY_FERRY_BOARD_S, PORT_STAY_FISHING_UNLOAD_S,
     PORT_STAY_SAIL_ANCHOR_S, PORT_STAY_TUG_S,
@@ -49,6 +48,7 @@ from engine.world import World
 from engine.ship import Vessel
 from engine.environment import Environment
 from engine.navigation import steer_ai_vessel, below_safe_depth
+from engine.rules import RulesEngine, ZoneFineState
 from config import SAVE_FILEPATH, PLAYER_DOCKING_MAX_SPEED_KN, PORT_CLICK_RADIUS_PX
 from config import FOG_LOW_VIS_THRESHOLD_M
 from config import REP_TIER_3, LUCKY_ESCAPE_HULL_MIN
@@ -847,9 +847,9 @@ class Game:
         self._departed_port: Optional[str] = None
 
         # Player consequence trackers (Game-level; engine stays pure)
-        self._zone_timer: float = 0.0          # cumulative seconds inside violation zone
-        self._zone_fine_cooldown: float = 0.0  # seconds until next fine can fire
-        self._zone_warning_sent: bool = False  # one-time entry-warning flag
+        # Zone-violation state (grace timer, fine cooldown, warning flag); the
+        # rules that advance it live in engine/rules.py.
+        self._zone_state = ZoneFineState()
         self._storm_speed_warning_sent: bool = False
 
         # Onboarding state — Game owns step progression, career owns the
@@ -870,6 +870,8 @@ class Game:
         # Simulation state
         self.world = World()
         populate_world(self.world)  # Load the Vela Sea map
+        # The one place the zone rules (speed caps, fines) are decided.
+        self.rules = RulesEngine(self.world)
 
         self.environment = Environment()
         self.selected_vessel: Optional[Vessel] = None
@@ -2426,55 +2428,38 @@ class Game:
                         else:
                             self._storm_speed_warning_sent = False
 
-                    # Zone violation: warn once on entry, fine every 30 s after 10 s grace.
+                    # Zone violation: warn once on entry, fine every 30 s after a
+                    # 10 s grace.  engine/rules.py decides; Game does the side
+                    # effects.  Training wheels: the tutorial warns but never
+                    # fines, so a learning captain isn't bankrupted by the Maren
+                    # approach speed limit on their first run.
                     if vessel.status in ("underway", "avoiding"):
-                        _viol_zone = None
-                        for _z in self.world.get_zones_containing(vessel.position):
-                            if _z.kind == "no_entry":
-                                _viol_zone = _z
-                                break
-                            if (_z.speed_limit is not None
-                                    and vessel.current_speed > _z.speed_limit):
-                                _viol_zone = _z
-                        if _viol_zone is not None:
-                            self._zone_timer += SIM_TIMESTEP
-                            self._zone_fine_cooldown = max(
-                                0.0, self._zone_fine_cooldown - SIM_TIMESTEP)
-                            if not self._zone_warning_sent:
-                                self._zone_warning_sent = True
-                                self.sound.play("warning")
-                                self.event_log.add(
-                                    _pt,
-                                    f"WARNING — entering restricted zone: {_viol_zone.name}",
-                                    EVENT_COLOR_MAYDAY)
-                            # Training wheels: the onboarding tutorial warns but
-                            # never fines — a learning captain isn't bankrupted
-                            # by the Maren approach speed limit on their first run.
-                            if (self._zone_timer >= 10.0
-                                    and self._zone_fine_cooldown <= 0.0
-                                    and not self._tutorial_active):
-                                _fine = (ZONE_FINE_NO_ENTRY
-                                         if _viol_zone.kind == "no_entry"
-                                         else ZONE_FINE_SPEED)
-                                # Hazmat clause: dangerous cargo doubles every
-                                # zone fine for the duration of the contract.
-                                _active_c = self.job_board.active
-                                if (_active_c is not None
-                                        and _active_c.job_type == "hazmat"):
-                                    _fine *= HAZMAT_FINE_MULT
-                                # Difficulty preset scales fines (Easy 0.5x / Hard 1.5x).
-                                _fine *= self.settings.fine_multiplier()
-                                self.career.force_spend(
-                                    _fine, f"Zone fine: {_viol_zone.name}")
-                                self.career.fines_paid += _fine
-                                self.event_log.add(
-                                    _pt,
-                                    f"FINE — \xa3{_fine:.0f} zone violation",
-                                    EVENT_COLOR_MAYDAY)
-                                self._zone_fine_cooldown = ZONE_FINE_INTERVAL_S
-                        else:
-                            self._zone_timer = 0.0
-                            self._zone_warning_sent = False
+                        _zs = self.rules.step_player(
+                            self._zone_state, vessel.position,
+                            vessel.current_speed, SIM_TIMESTEP,
+                            fines_allowed=not self._tutorial_active)
+                        if _zs.warn:
+                            self.sound.play("warning")
+                            self.event_log.add(
+                                _pt,
+                                f"WARNING — entering restricted zone: {_zs.zone.name}",
+                                EVENT_COLOR_MAYDAY)
+                        if _zs.fine_due:
+                            # Hazmat clause doubles every zone fine for the
+                            # duration of the contract; difficulty scales it.
+                            _active_c = self.job_board.active
+                            _fine = self.rules.fine_amount(
+                                _zs.zone,
+                                hazmat=(_active_c is not None
+                                        and _active_c.job_type == "hazmat"),
+                                difficulty_mult=self.settings.fine_multiplier())
+                            self.career.force_spend(
+                                _fine, f"Zone fine: {_zs.zone.name}")
+                            self.career.fines_paid += _fine
+                            self.event_log.add(
+                                _pt,
+                                f"FINE — \xa3{_fine:.0f} zone violation",
+                                EVENT_COLOR_MAYDAY)
                 else:
                     # Navigation priority: MOB > trawling/anchoring > avoidance > normal.
                     # The countdown itself is hoisted above the player/AI split;
@@ -2521,12 +2506,7 @@ class Game:
                     # Finds the most restrictive speed limit among all zones the vessel
                     # is currently inside; overrides any higher target_speed.
                     if vessel.status in ("underway", "avoiding"):
-                        _zone_limit = None
-                        for _zone in self.world.zones:
-                            if (_zone.speed_limit is not None
-                                    and _zone.contains(vessel.position)):
-                                if _zone_limit is None or _zone.speed_limit < _zone_limit:
-                                    _zone_limit = _zone.speed_limit
+                        _zone_limit = self.rules.speed_cap_kn(vessel.position)
                         if _zone_limit is not None and vessel.target_speed > _zone_limit:
                             vessel.target_speed = _zone_limit
 
@@ -2915,7 +2895,7 @@ class Game:
         self.player_hud.draw(
             self.player_vessel,
             career=self.career,
-            zone_violation=self._zone_warning_sent,
+            zone_violation=self._zone_state.warning_sent,
             frame_count=pygame.time.get_ticks() // 250,
             low_visibility=self.environment.visibility < FOG_LOW_VIS_THRESHOLD_M,
             active_contract=self.job_board.active,

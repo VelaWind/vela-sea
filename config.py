@@ -1264,6 +1264,7 @@ SOUND_RELATIVE_VOLUMES = {
 ZONE_FINE_NO_ENTRY   = 500.0    # £ fine for entering a no-entry zone
 ZONE_FINE_SPEED      = 150.0    # £ fine for exceeding a speed-limit zone
 ZONE_FINE_INTERVAL_S = 30.0     # minimum seconds between successive fines in the same zone
+ZONE_FINE_GRACE_S    = 10.0     # seconds in violation before the first fine (engine/rules.py)
 
 GROUNDING_HULL_DAMAGE  = 0.30   # hull integrity lost per grounding event (30 %).
                                 # Repairing it (~£1500) is what makes a sloppy run
