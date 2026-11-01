@@ -426,6 +426,37 @@ class Vessel:
         actual_change = max(-max_change, min(max_change, delta))
         self.current_speed = max(0.0, self.current_speed + actual_change)
 
+    def ground_velocity_terms(self, environment=None) -> list:
+        """The vessel's velocity over ground, as (direction_rad, speed_kn) terms.
+
+        The one definition of how the vessel moves over the ground, used by
+        move() (as displacements) and by engine/navigation.cog_direction (as a
+        velocity).  World angles: 0 = east, 90 = south.  In order:
+
+          1. Through-water motion along the heading, only with headway.  A
+             stopped vessel still floats on the current and is pushed by wind.
+          2. Set-and-drift: current_direction is the direction the current
+             flows TOWARD, so 90 pushes vessels southward.  Applies at any
+             through-water speed.
+          3. Wind drift: wind_direction is the bearing the wind blows FROM, so
+             the push on the hull is the opposite direction (+180), scaled by
+             the hull's windage factor.
+
+        Terms 2 and 3 need an environment.  Summing the terms in this order
+        reproduces the earlier separate calculations exactly while
+        CURRENT_INFLUENCE is 1.0 (multiplying by 1.0 is exact); any other value
+        reorders one multiplication and can change the last bit.
+        """
+        terms = []
+        if self.current_speed > 0:
+            terms.append((radians(self.heading), self.current_speed))
+        if environment is not None:
+            terms.append((radians(environment.current_direction),
+                          environment.current_speed * CURRENT_INFLUENCE))
+            terms.append((radians((environment.wind_direction + 180.0) % 360.0),
+                          environment.wind_speed * self._windage_factor()))
+        return terms
+
     def move(self, dt: float, environment=None, world=None, sim_time: str = "") -> None:
         """Move the vessel by one time step, applying environment forces and consuming fuel.
 
@@ -450,32 +481,14 @@ class Vessel:
         hours = dt / 3600.0
         new_x, new_y = self.position
 
-        # 1. Through-water motion — only when the vessel has headway.
-        #    A stopped underway vessel has no through-water contribution but
-        #    still floats on the current and is pushed by wind (forces 2 & 3).
-        if self.current_speed > 0:
-            distance = self.current_speed * KNOTS_TO_UNITS_PER_HOUR * hours
-            heading_rad = radians(self.heading)
-            new_x += cos(heading_rad) * distance
-            new_y += sin(heading_rad) * distance
-
-        if environment is not None:
-            # 2. Set-and-drift: current_direction is the direction the current flows
-            #    TOWARD, so a current_direction of 90° pushes vessels southward.
-            #    Applies regardless of through-water speed — a vessel stopped in the
-            #    water still floats with the tidal stream.
-            cur_rad = radians(environment.current_direction)
-            cur_dist = environment.current_speed * KNOTS_TO_UNITS_PER_HOUR * hours * CURRENT_INFLUENCE
-            new_x += cos(cur_rad) * cur_dist
-            new_y += sin(cur_rad) * cur_dist
-
-            # 3. Wind drift: wind_direction is the bearing the wind blows FROM, so
-            #    the push on the hull is in the opposite direction (+180°).
-            wind_push_kn = environment.wind_speed * self._windage_factor()
-            push_rad = radians((environment.wind_direction + 180.0) % 360.0)
-            wind_dist = wind_push_kn * KNOTS_TO_UNITS_PER_HOUR * hours
-            new_x += cos(push_rad) * wind_dist
-            new_y += sin(push_rad) * wind_dist
+        # The three forces come from ground_velocity_terms, the one place the
+        # vessel's velocity over ground is defined; engine/navigation.
+        # cog_direction sums the same terms.  Each is added as its own
+        # displacement, in the same order as before (KNOWN_ISSUES #14).
+        for angle_rad, speed_kn in self.ground_velocity_terms(environment):
+            distance = speed_kn * KNOTS_TO_UNITS_PER_HOUR * hours
+            new_x += cos(angle_rad) * distance
+            new_y += sin(angle_rad) * distance
 
         self.position = (new_x, new_y)
 

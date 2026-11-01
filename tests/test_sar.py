@@ -19,9 +19,8 @@ from config import (
     SAR_DISPATCH_RANGE_NM,
 )
 
-# Import SAR helpers from main (avoids re-implementing the logic)
-sys.path.insert(0, ".")
-from main import _sar_dispatch, _sar_refloat
+# The game's own SAR code (engine/sar.py), not a copy; no Pygame needed.
+from engine.sar import sar_dispatch as _sar_dispatch, sar_refloat as _sar_refloat
 
 ERRORS = []
 
