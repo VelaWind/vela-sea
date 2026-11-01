@@ -400,9 +400,24 @@ _record("B", "14",
         f"expected={expected_b14:.8f}  actual={actual_b14:.8f}  "
         f"err={abs(actual_b14 - expected_b14):.2e}")
 
-# --- B7 (COG vector) -- BLOCKED, requires render/chart.py (pygame) ----------
-_blocked("B", "15", "COG direction vector (_cog_direction in render/chart.py)",
-         "render/chart.py imports pygame -- cannot be imported headlessly")
+# --- B7 (COG vector) -- engine/navigation.cog_direction (pure Python) -------
+# Formerly BLOCKED: the function lived in render/chart.py, which imports
+# Pygame.  It now lives in engine/, so it is checked directly.  Heading east
+# at 6 kn with a 3 kn current toward south: COG = atan2(3, 6) = 26.565 deg.
+from engine.navigation import cog_direction
+v15 = Vessel(name="B15", vessel_type="cargo", position=(500.0, 350.0),
+             heading=0.0, target_speed=6.0, current_speed=6.0, max_speed=12.0,
+             acceleration=0.02, deceleration=0.017, turn_rate=1.0,
+             length_m=150.0, beam_m=25.0, draft_m=8.0, fuel=80.0,
+             fuel_capacity=100.0, fuel_consumption_rate=3.5)
+e15 = Environment(current_speed=3.0, current_direction=90.0,
+                  wind_speed=0.0, wind_direction=0.0)
+r15 = cog_direction(v15, e15)
+expected_b15 = math.degrees(math.atan2(3.0, 6.0))
+actual_b15 = math.degrees(r15[0]) if r15 else float("nan")
+_record("B", "15", "COG direction vector (engine/navigation.cog_direction)",
+        r15 is not None and _near(actual_b15, expected_b15),
+        f"expected={expected_b15:.4f} deg  actual={actual_b15:.4f} deg")
 
 
 # ===========================================================================
