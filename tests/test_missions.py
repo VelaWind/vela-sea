@@ -24,9 +24,10 @@ from config import (
     PORT_STAY_CARGO_S, PORT_STAY_FERRY_S, PORT_STAY_FISHING_S, PORT_STAY_SAILBOAT_S,
     PORT_DETECT_RADIUS,
 )
-from main import (
-    _set_port_mission_status, _set_underway_mission_status,
-    _start_waypoint_pause,
+from engine.ai import (
+    set_port_mission_status as _set_port_mission_status,
+    set_underway_mission_status as _set_underway_mission_status,
+    start_waypoint_pause as _start_waypoint_pause,
 )
 
 ERRORS = []

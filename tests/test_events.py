@@ -16,7 +16,7 @@ from config import (
     PORT_DETECT_RADIUS, FUEL_COAST_DECELERATION,
     MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN,
 )
-from main import _trigger_random_event
+from engine.ai import trigger_random_event as _trigger_random_event
 
 ERRORS = []
 

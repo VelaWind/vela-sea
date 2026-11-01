@@ -28,9 +28,9 @@ from config import (
 from config import ARRIVAL_DISTANCE, PORT_DETECT_RADIUS, SHIP_SELECT_RADIUS
 from config import TIME_COMPRESSION
 from config import DRAFT_SAFETY_MARGIN_M
-from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR, FUEL_EMERGENCY_REFUEL_FRACTION
-from config import SAR_DISPATCH_RETRY_S, ENGINE_REPAIR_TIME_S
-from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_DURATION_S, MOB_SEARCH_SPEED_KN
+from config import SAR_DISPATCH_RANGE_NM, KNOTS_TO_UNITS_PER_HOUR
+from config import ENGINE_REPAIR_TIME_S
+from config import RANDOM_EVENT_PROBABILITY, MOB_SEARCH_SPEED_KN
 from config import PLAYER_THROTTLE_STEP, PLAYER_TURN_RATE, PLAYER_FOLLOW_CAM, THROTTLE_FLASH_MS
 from config import HULL_REPAIR_COST_PER_POINT
 from config import (GROUNDING_HULL_DAMAGE, STORM_WAVE_THRESHOLD,
@@ -39,7 +39,7 @@ from config import (GROUNDING_HULL_DAMAGE, STORM_WAVE_THRESHOLD,
 from config import (
     PORT_STAY_CARGO_LOAD_S, PORT_STAY_FERRY_BOARD_S, PORT_STAY_FISHING_UNLOAD_S,
     PORT_STAY_SAIL_ANCHOR_S, PORT_STAY_TUG_S,
-    TRAWL_DURATION_S, TRAWL_WANDER_INTERVAL_S, TRAWL_SPEED_KN, SAIL_ANCHOR_DURATION_S,
+    TRAWL_WANDER_INTERVAL_S, TRAWL_SPEED_KN,
 )
 from render.camera import Camera
 from render.chart import Chart
@@ -79,8 +79,7 @@ from data.world_data import (populate_world,
 from config import (PORT_STAY_FERRY_S, PORT_STAY_CARGO_S,
                     PORT_STAY_FISHING_S, PORT_STAY_SAILBOAT_S,
                     PORT_STAY_PATROL_S, PORT_STAY_TENDER_S)
-from config import (PERSONALITY_CAUTIOUS_SPEED, PERSONALITY_AGGRESSIVE_SPEED,
-                    PERSONALITY_LEISURE_SPEED,
+from config import (PERSONALITY_AGGRESSIVE_SPEED,
                     MOOD_TIRED_AFTER_S, MOOD_CONFIDENT_AFTER_S, MOOD_RESTED_AFTER_S,
                     PARTY_DURATION_MIN_S, PARTY_DURATION_MAX_S, PARTY_TENDER_NAME)
 from config import NM_PER_WORLD_UNIT
@@ -89,7 +88,7 @@ from config import (IS_WEB, WORLD_WIDTH, WORLD_HEIGHT, WEB_PROFILE,
                     WEB_MAX_SIM_STEPS_PER_FRAME,
                     WEB_FB_MAX_W, WEB_FB_MAX_H, WEB_FB_FALLBACK_W, WEB_FB_FALLBACK_H,
                     WEB_HUD_PERF, WEB_HUD_PERF_START_VISIBLE, WEB_RENDER_SCALE)
-from engine.collision import update_collision_avoidance, find_safe_path, find_standoff
+from engine.collision import update_collision_avoidance, find_safe_path
 from engine.mission import MissionManager
 from engine.career import PlayerCareer, JobBoard, save_career, load_career, delete_save
 from engine.settings import Settings, DEFAULT_KEYBINDS
@@ -99,453 +98,38 @@ from engine.settings import Settings, DEFAULT_KEYBINDS
 # SAR helpers — module-level so the test suite can import them independently
 # ---------------------------------------------------------------------------
 
-def _sim_time_str(environment) -> str:
-    """Format environment.time_of_day as HH:MM for event log entries."""
-    h = int(environment.time_of_day)
-    m = int((environment.time_of_day % 1) * 60)
-    return f"{h:02d}:{m:02d}"
+# Simulation helpers moved to engine/ (Pygame-free).  Imported under their old
+# names so the call sites below, the tests, and tools/diag_groundings.py (which
+# patches main._sar_dispatch) keep working unchanged.
+from engine.events import (sim_time_str as _sim_time_str, EVENT_MAYDAY,
+                           EVENT_RESCUE, EVENT_REFLOAT, EVENT_MEDICAL,
+                           EVENT_WEATHER)
+from engine.sar import sar_refloat as _sar_refloat, sar_dispatch as _sar_dispatch
+from engine.ai import (trigger_random_event as _trigger_random_event,
+                       set_port_mission_status as _set_port_mission_status,
+                       set_underway_mission_status as _set_underway_mission_status,
+                       start_waypoint_pause as _start_waypoint_pause,
+                       apply_smart_decisions as _apply_smart_decisions)
 
 
-def _sar_refloat(grounded, event_log=None, sim_time: str = "") -> None:
-    """Refloat a grounded/adrift vessel and release its rescuer (if any).
+class _EngineEventLog:
+    """Adapter: engine code logs an event KIND, the panel draws it in a colour.
 
-    Calls vessel.refloat() for the grounded vessel's own state, then
-    clears the rescuer's player_commanded flag and restores its schedule.
-
-    Fuel-exhaustion case: when the vessel ran dry (fuel == 0), give it an
-    emergency partial refuel so it can motor to the nearest port instead of
-    immediately going adrift again the moment the rescuer leaves.
+    Wraps the Game's current EventLog (looked up per call, because the display
+    heal rebuilds panels) and maps each engine/events.py kind to the colour the
+    log used before the move, so log text and colours are unchanged.
     """
-    rescuer = grounded.rescue_vessel
-    # Emergency refuel for fuel-exhausted vessels so they can reach a port.
-    fuel_rescue = (grounded.fuel is not None
-                   and grounded.fuel == 0.0
-                   and grounded.fuel_capacity is not None)
-    if fuel_rescue:
-        grounded.fuel = grounded.fuel_capacity * FUEL_EMERGENCY_REFUEL_FRACTION
-    grounded.refloat()
-    if rescuer is not None and rescuer.player_commanded:
-        rescuer.player_commanded = False
-        rescuer.command_reason = ""
-        if rescuer.route:
-            rescuer.destination = rescuer.route[rescuer.route_index]
-    if event_log is not None:
-        msg = (f"RESCUED — {grounded.name} (emergency fuel)"
-               if fuel_rescue else f"REFLOATED — {grounded.name}")
-        event_log.add(sim_time, msg, EVENT_COLOR_REFLOAT)
+    _COLORS = {
+        EVENT_MAYDAY: EVENT_COLOR_MAYDAY, EVENT_RESCUE: EVENT_COLOR_RESCUE,
+        EVENT_REFLOAT: EVENT_COLOR_REFLOAT, EVENT_MEDICAL: EVENT_COLOR_MEDICAL,
+        EVENT_WEATHER: EVENT_COLOR_WEATHER,
+    }
 
+    def __init__(self, log):
+        self._log = log
 
-def _sar_dispatch(vessels, range_wu: float, event_log=None, sim_time: str = "",
-                  player_paths: dict = None, world=None) -> None:
-    """Auto-dispatch the nearest eligible vessel to each unrescued distressed vessel.
-
-    Eligibility: underway, not already player_commanded, not already a rescuer.
-    Only one rescuer is dispatched per grounded vessel.
-
-    When world is provided, find_safe_path() is used so the rescuer avoids
-    islands en-route.  Multi-hop paths are stored in player_paths (keyed by
-    id(vessel)) and advanced in the main update loop on each arrival.
-    """
-    # Build set of vessel IDs already acting as rescuers so we can skip them.
-    # Using id() because Vessel is a dataclass with __eq__ and is not hashable.
-    active_rescuer_ids = {id(v.rescue_vessel) for v in vessels if v.rescue_vessel is not None}
-
-    for grounded in vessels:
-        if not grounded.distress:
-            continue
-        # The rescue_vessel pointer is a LEASE, not a lock.  This skip used to be
-        # unconditional on "rescue_vessel is not None", and the field is cleared
-        # only by refloat() — which needs the assigned rescuer to arrive.  So when
-        # a rescuer broke down en route (the random-event sweep below has no
-        # player_commanded guard, so a rescuer can take an engine failure or run
-        # aground like anyone else) the casualty held a pointer to a vessel that
-        # would never come, and was never re-swept.  Observed live: Ardent Pilot
-        # aground 70 h 55 m holding "FV North Fisher", itself flagged DISTRESS.
-        # Measured 3.70 casualties on average holding a dead pointer, rising to
-        # 6.33 by sim-day 13.  Drop the lease and re-sweep instead.
-        _r = grounded.rescue_vessel
-        if _r is not None:
-            if (_r.distress or _r.engine_failure
-                    or not _r.player_commanded
-                    or _r.status not in ("underway", "avoiding")):
-                grounded.rescue_vessel = None
-                grounded._sar_retry_timer = 0.0
-                # Deliberately NOT touching the ex-rescuer.  Releasing it here
-                # with destination = route[route_index] was measured and reverted:
-                # it is a new instance of the displacement-return problem
-                # (KNOWN_ISSUES #11 mechanism 2 — aiming a displaced vessel at the
-                # one waypoint it happened to be heading for), and it cost
-                # arrivals 498 -> 430 while shifting the whole port-visit
-                # distribution (Saltgate 112 -> 41, Thornwick 45 -> 88).  The
-                # ex-rescuer clears its own command state through arrive() as it
-                # always did; only the casualty's dead lease is our business here.
-            else:
-                continue
-        # Retry cooldown.  A casualty nobody can route to used to be re-swept
-        # against every candidate on every sim step, at ~2,500 depth lookups per
-        # attempt — 271k router calls in three sim-days, 89% of wall time, which
-        # would put the frame budget on the floor.  After a failed sweep, sit the
-        # casualty out for SAR_DISPATCH_RETRY_S; the fleet will have moved by then
-        # and a route may exist.  Counted down here rather than compared against a
-        # clock because environment.time_of_day wraps at 24 h and is not monotonic.
-        _cooldown = getattr(grounded, "_sar_retry_timer", 0.0)
-        if _cooldown > 0.0:
-            grounded._sar_retry_timer = _cooldown - SIM_TIMESTEP
-            continue
-        candidates = []
-        for v in vessels:
-            if v is grounded:
-                continue
-            if v.status not in ("underway", "avoiding"):
-                continue
-            if id(v) in active_rescuer_ids:
-                continue
-            if v.player_commanded:
-                # An ORPHANED rescuer is available.  Dropping a dead lease (above)
-                # leaves the ex-rescuer carrying a live "sar" command it will only
-                # shed when it happens to arrive somewhere — 7.52 of 16 vessels by
-                # sim-day 13, all of them ineligible, which is why zero-eligible
-                # samples rose to 48.5%.  It is serving no casualty by definition
-                # (nothing points at it, checked above), so it is free to be
-                # re-dispatched.  Its navigation is left completely alone: the
-                # alternative, handing it a fresh route waypoint, is the
-                # displacement-return pattern that cost arrivals 663 -> 430.
-                if not (v.command_reason == "sar"
-                        and v.status in ("underway", "avoiding")):
-                    continue
-            d = v.distance_to(grounded.position)
-            if d <= range_wu:
-                candidates.append((d, v))
-        candidates.sort(key=lambda c: c[0])
-
-        # Try candidates nearest-first and take the first one that can actually
-        # get there.  The nearest vessel is not always the right answer: it may
-        # be the far side of a shoal, and find_safe_path now returns [] rather
-        # than a leg it knows is too shallow.  Walking the list keeps a casualty
-        # from going unrescued just because its closest neighbour is blocked.
-        best, waypoints = None, None
-        for _d, v in candidates:
-            if world is None:
-                best, waypoints = v, [grounded.position]
-                break
-            # Aim at a standoff, not the casualty itself: the casualty is aground,
-            # so its exact position is by definition too shallow to float it — and
-            # a rescuer steered there grounds alongside it.  The standoff must
-            # clear the RESCUER's draft, which may be deeper than the casualty's.
-            target = find_standoff(grounded.position, v.draft_m, world)
-            path = find_safe_path(v.position, target, world, v.draft_m)
-            if path:
-                best, waypoints = v, path
-                break
-
-        if best is not None:
-            grounded._sar_retry_timer = 0.0
-            best.destination = waypoints[0]
-            best.player_commanded = True
-            best.command_reason = "sar"
-            grounded.rescue_vessel = best
-            active_rescuer_ids.add(id(best))
-            if player_paths is not None and len(waypoints) > 1:
-                player_paths[id(best)] = waypoints[1:]
-            if event_log is not None:
-                event_log.add(sim_time,
-                              f"RESCUE — {best.name} → {grounded.name}",
-                              EVENT_COLOR_RESCUE)
-        else:
-            # No reachable rescuer this sweep — stamp the cooldown so the next
-            # attempt waits for the fleet to move instead of re-running the same
-            # doomed search every tick.  Deliberately not logged: even at one
-            # message per cooldown this would clutter the event log with a
-            # situation the player cannot act on.
-            grounded._sar_retry_timer = SAR_DISPATCH_RETRY_S
-
-
-def _trigger_random_event(vessel, world, environment, event_log=None) -> None:
-    """Trigger one random emergency event on an underway vessel.
-
-    Three types (equal probability among eligible events):
-      0 — Engine failure (powered vessels only; sailboats are ineligible)
-      1 — Medical emergency (divert to nearest port)
-      2 — Man overboard (stop, turn 180°, slow search for MOB_SEARCH_DURATION_S)
-    """
-    t = _sim_time_str(environment)
-
-    # Sailboats have no engine — they can only get medical or MOB.
-    eligible = [1, 2] if vessel.fuel is None else [0, 1, 2]
-    event_type = random.choice(eligible)
-
-    if event_type == 0:  # Engine failure
-        vessel.status = "adrift"
-        vessel.engine_failure = True
-        vessel.distress = True
-        if event_log is not None:
-            event_log.add(t, f"ENGINE FAILURE — {vessel.name}", EVENT_COLOR_MAYDAY)
-
-    elif event_type == 1:  # Medical emergency — head to nearest port
-        nearest = min(world.ports, key=lambda p: vessel.distance_to(p.position))
-        vessel.destination = nearest.position
-        vessel.player_commanded = True
-        vessel.command_reason = "medical"
-        if event_log is not None:
-            event_log.add(t, f"MEDICAL EMERGENCY — {vessel.name} → {nearest.name}",
-                          EVENT_COLOR_MEDICAL)
-
-    else:  # Man overboard
-        vessel.mob_position = vessel.position
-        vessel.mob_timer = MOB_SEARCH_DURATION_S
-        vessel.target_speed = 0.0
-        vessel.heading = (vessel.heading + 180.0) % 360.0
-        if event_log is not None:
-            event_log.add(t, f"MAN OVERBOARD — {vessel.name}", EVENT_COLOR_MAYDAY)
-
-
-# ---------------------------------------------------------------------------
-# Mission helpers
-# ---------------------------------------------------------------------------
-
-def _set_port_mission_status(vessel) -> None:
-    """Set mission_status when vessel enters port, based on mission_type."""
-    mt = vessel.mission_type
-    if mt == "cargo_run":
-        # Alternate LOADING / UNLOADING each port visit.
-        vessel.mission_status = "LOADING" if vessel.port_visit_count % 2 == 1 else "UNLOADING"
-    elif mt == "ferry_run":
-        vessel.mission_status = "BOARDING"
-    elif mt == "fishing_trip":
-        vessel.mission_status = "UNLOADING CATCH"
-    elif mt == "sailing_cruise":
-        vessel.mission_status = "AT ANCHOR"
-    elif mt == "tug_duty":
-        vessel.mission_status = "STANDBY"
-    elif mt == "patrol":
-        vessel.mission_status = "ON STATION"
-
-
-def _set_underway_mission_status(vessel) -> None:
-    """Set mission_status when vessel departs port or resumes open-sea navigation."""
-    mt = vessel.mission_type
-    if mt == "cargo_run":
-        vessel.mission_status = "UNDERWAY"
-    elif mt == "ferry_run":
-        vessel.mission_status = "ON SCHEDULE"
-    elif mt == "fishing_trip":
-        vessel.mission_status = "TRANSIT"
-    elif mt == "sailing_cruise":
-        vessel.mission_status = "SAILING"
-    elif mt == "tug_duty":
-        vessel.mission_status = "ESCORTING"
-    elif mt == "patrol":
-        vessel.mission_status = "PATROLLING"
-
-
-def _start_waypoint_pause(vessel) -> None:
-    """Start a trawling or anchoring pause when a mission vessel reaches an open-sea WP."""
-    mt = vessel.mission_type
-    if mt == "fishing_trip":
-        vessel.trawling_timer         = TRAWL_DURATION_S
-        vessel.trawling_heading_timer = TRAWL_WANDER_INTERVAL_S
-        vessel.mission_status         = "TRAWLING"
-        vessel.target_speed           = TRAWL_SPEED_KN
-    elif mt == "sailing_cruise":
-        vessel.trawling_timer = SAIL_ANCHOR_DURATION_S
-        vessel.mission_status = "ANCHORED"
-        vessel.target_speed   = 0.0
-
-
-# VIP charter commentary — shown in the captain's log, cycling every 600 sim-s.
-_VIP_MESSAGES = [
-    "Guests enjoying the crossing",
-    "Favorable winds — making good progress",
-    "Guests requesting refreshments",
-    "Perfect sailing conditions",
-]
-
-
-def _apply_smart_decisions(vessel, world, environment, sim_time: str, state: dict) -> None:
-    """Apply intelligent speed adjustments and log reasoning to captain_log.
-
-    Called each sim step.  state is a per-vessel mutable dict that persists
-    across calls; boolean flags prevent duplicate log entries.
-
-    Priority order (highest first):
-      A  Weather awareness — fog/low-vis speed reduction
-      B  Fuel efficiency   — cargo/tanker economy mode (skipped while A active)
-      C  Traffic awareness — log collision-avoidance transitions
-      D  Port congestion   — slow on approach to a busy berth
-      E  Scenic stops      — SY Windward / SY Blue Horizon anchor/depart log
-      F  Wind seeking      — sailboat tack-log when heading near no-go zone
-      G  VIP commentary    — periodic log messages for SY Blue Horizon guests
-    """
-    # Only apply to actively navigating vessels not under special control.
-    if vessel.status not in ("underway", "avoiding"):
-        return
-    if vessel.player_commanded or vessel.distress or vessel.engine_failure:
-        return
-    if vessel.mob_timer > 0:
-        return
-
-    # (E) Scenic stops — detect anchor/depart transitions for leisure yachts.
-    # Must run BEFORE the trawling_timer early-return so we catch the step when
-    # the vessel first enters or leaves its anchor pause.
-    if vessel.vessel_type == "sailboat" and vessel.name in ("SY Blue Horizon", "SY Windward"):
-        _was_anch = state.get("anchored", False)
-        _is_anch = (vessel.trawling_timer > 0
-                    and getattr(vessel, "mission_status", "") == "ANCHORED")
-        if _is_anch and not _was_anch:
-            state["anchored"] = True
-            vessel.log_decision(sim_time, "Dropping anchor — scenic stop")
-        elif not _is_anch and _was_anch:
-            state["anchored"] = False
-            vessel.log_decision(sim_time, "Weighing anchor — continuing cruise")
-
-    # Speed/routing decisions skip vessels on anchor pause or MOB search.
-    if vessel.trawling_timer > 0:
-        return
-
-    vis = environment.visibility
-
-    # (A) Weather awareness — reduce to 60 % max in low vis, restore at 200 m.
-    if vis < 150.0 and not state.get("low_vis"):
-        state["low_vis"] = True
-        vessel.target_speed = vessel.max_speed * 0.6
-        vessel.log_decision(sim_time, f"Reducing speed — low visibility ({vis:.0f}m)")
-    elif vis >= 200.0 and state.get("low_vis"):
-        state["low_vis"] = False
-        vessel.target_speed = vessel.max_speed
-        vessel.log_decision(sim_time, "Visibility clear — resuming cruise speed")
-
-    # (B) Fuel efficiency — cargo/tanker only; skip while low-vis override is active.
-    # Always reapply speed so recovery from (A) doesn't leave the wrong rate.
-    if vessel.vessel_type in ("cargo", "tanker") and not state.get("low_vis"):
-        next_port = None
-        if vessel.route:
-            for offset in range(len(vessel.route)):
-                wp = vessel.route[(vessel.route_index + offset) % len(vessel.route)]
-                for port in world.ports:
-                    if abs(wp[0] - port.position[0]) < 2 and abs(wp[1] - port.position[1]) < 2:
-                        next_port = port
-                        break
-                if next_port:
-                    break
-        if next_port is not None:
-            dist = vessel.distance_to(next_port.position)
-            if dist > 200.0:
-                if not state.get("economy"):
-                    state["economy"] = True
-                    state["near_port"] = False
-                    vessel.log_decision(sim_time, "Long passage — fuel economy mode")
-                vessel.target_speed = vessel.max_speed * 0.75
-            elif dist < 50.0:
-                if not state.get("near_port"):
-                    state["near_port"] = True
-                    state["economy"] = False
-                    vessel.log_decision(sim_time, "Approaching port — increasing speed")
-                vessel.target_speed = vessel.max_speed * 0.9
-            else:
-                state["economy"] = False
-                state["near_port"] = False
-
-    # (C) Traffic awareness — log when collision avoidance activates or clears.
-    is_avoiding = vessel.status == "avoiding"
-    if is_avoiding and not state.get("was_avoiding"):
-        nearest_name = "unknown vessel"
-        nearest_dist = float("inf")
-        for other in world.vessels:
-            if other is vessel:
-                continue
-            d = vessel.distance_to(other.position)
-            if d < nearest_dist:
-                nearest_dist = d
-                nearest_name = other.name
-        vessel.log_decision(
-            sim_time, f"Altering course — vessel {nearest_name} on collision bearing"
-        )
-        state["was_avoiding"] = True
-    elif not is_avoiding and state.get("was_avoiding"):
-        vessel.log_decision(sim_time, "Course resumed — traffic clear")
-        state["was_avoiding"] = False
-
-    # (D) Port congestion — slow to 30 % max on approach to a busy port.
-    if vessel.status == "underway" and vessel.route:
-        wp = vessel.route[vessel.route_index]
-        dest_port = None
-        for port in world.ports:
-            if abs(wp[0] - port.position[0]) < 2 and abs(wp[1] - port.position[1]) < 2:
-                dest_port = port
-                break
-        if dest_port is not None:
-            dist_to_port = vessel.distance_to(dest_port.position)
-            docked_count = sum(
-                1 for v in world.vessels if v._docked_port_name == dest_port.name
-            )
-            if dist_to_port < 60.0 and docked_count >= 2 and not state.get("congested"):
-                state["congested"] = True
-                vessel.target_speed = max(2.0, vessel.max_speed * 0.3)
-                vessel.log_decision(sim_time, "Port congested — reducing approach speed")
-            elif state.get("congested") and (dist_to_port >= 60.0 or docked_count < 2):
-                state["congested"] = False
-                vessel.log_decision(sim_time, "Port clear — proceeding to berth")
-            if state.get("congested"):
-                vessel.target_speed = max(2.0, vessel.max_speed * 0.3)
-        elif state.get("congested"):
-            state["congested"] = False
-
-    # ── Yacht-specific underway behaviors ─────────────────────────────────────
-    if vessel.vessel_type == "sailboat":
-        # (F) Wind seeking — check every 300 sim-s; nudge toward beam reach when
-        # within 30° of the no-go zone boundary.
-        state["wind_ticks"] = state.get("wind_ticks", 0) + 1
-        if state["wind_ticks"] >= 300:
-            state["wind_ticks"] = 0
-            wind_ang = abs(vessel._wind_angle_to_heading(environment))
-            if wind_ang < 30.0:
-                vessel.log_decision(sim_time, "Tacking — seeking better wind angle")
-                # 3° nudge toward the nearer beam-reach heading.
-                opt1 = (environment.wind_direction + 90.0) % 360.0
-                opt2 = (environment.wind_direction - 90.0) % 360.0
-                d1 = abs(vessel.heading - opt1); d1 = min(d1, 360.0 - d1)
-                d2 = abs(vessel.heading - opt2); d2 = min(d2, 360.0 - d2)
-                best = opt1 if d1 <= d2 else opt2
-                delta = best - vessel.heading
-                if delta > 180.0:
-                    delta -= 360.0
-                elif delta < -180.0:
-                    delta += 360.0
-                vessel.heading = (vessel.heading + max(-3.0, min(3.0, delta))) % 360.0
-
-        # (G) VIP commentary — SY Blue Horizon, one rotating message per 600 sim-s.
-        if vessel.name == "SY Blue Horizon":
-            state["vip_ticks"] = state.get("vip_ticks", 0) + 1
-            if state["vip_ticks"] >= 600:
-                state["vip_ticks"] = 0
-                idx = state.get("vip_msg_idx", 0)
-                vessel.log_decision(sim_time, _VIP_MESSAGES[idx])
-                state["vip_msg_idx"] = (idx + 1) % len(_VIP_MESSAGES)
-
-    # (H) Personality-driven cruise-speed baseline — applied only when no
-    # higher-priority override (fog, fuel economy, port congestion) is active.
-    # Cautious captains ease off the throttle; aggressive ones always push hard.
-    _no_override = (not state.get("low_vis") and not state.get("economy")
-                    and not state.get("near_port") and not state.get("congested"))
-    if _no_override:
-        _pers = getattr(vessel, "personality", "efficient")
-        if _pers == "cautious":
-            vessel.target_speed = vessel.max_speed * PERSONALITY_CAUTIOUS_SPEED
-        elif _pers == "aggressive":
-            vessel.target_speed = vessel.max_speed  # full rated speed at all times
-        elif _pers == "leisure":
-            vessel.target_speed = vessel.max_speed * PERSONALITY_LEISURE_SPEED
-        # "efficient" falls through — the default max_speed is already appropriate
-
-    # (I) Memory: warn when approaching a previously grounded position.
-    _gpos_list = getattr(vessel, "memory", {}).get("grounded_positions", [])
-    if _gpos_list:
-        _near_gnd = any(vessel.distance_to(gp) < 80.0 for gp in _gpos_list)
-        if _near_gnd and not state.get("warned_grounding"):
-            state["warned_grounding"] = True
-            vessel.log_decision(sim_time, "Caution — approaching previously grounded area")
-        elif not _near_gnd:
-            state["warned_grounding"] = False
+    def add(self, sim_time: str, message: str, kind: str) -> None:
+        self._log.add(sim_time, message, self._COLORS[kind])
 
 
 # Known-safe open-water fallback positions — used when all route-relative
@@ -722,6 +306,11 @@ class FrameProfiler:
 class Game:
     """Manages the main game loop and ties together input, simulation, and rendering."""
 
+
+    @property
+    def _engine_log(self) -> "_EngineEventLog":
+        """The event log as engine/ functions expect it (kind, not colour)."""
+        return _EngineEventLog(self.event_log)
     def __init__(self):
         """Initialize Pygame and the game state."""
         pygame.init()
@@ -2569,7 +2158,7 @@ class Game:
                                     and grounded.rescue_vessel is vessel
                                     and grounded.status in ("aground", "adrift")):
                                 if within_rescue_range(vessel, grounded):
-                                    _sar_refloat(grounded, self.event_log,
+                                    _sar_refloat(grounded, self._engine_log,
                                                  _sim_time_str(self.environment))
                                 break
                     _was_player_cmd = vessel.player_commanded
@@ -2658,7 +2247,7 @@ class Game:
                         vessel.position, self.environment.tide_level
                     )
                     if depth >= vessel.draft_m + DRAFT_SAFETY_MARGIN_M:
-                        _sar_refloat(vessel, self.event_log,
+                        _sar_refloat(vessel, self._engine_log,
                                      _sim_time_str(self.environment))
                     continue
                 # The grounding rule itself (port approaches exempt, depth vs
@@ -2728,7 +2317,7 @@ class Game:
                 if vessel.distress or vessel.engine_failure or vessel.mob_timer > 0:
                     continue
                 if random.random() < RANDOM_EVENT_PROBABILITY * SIM_TIMESTEP:
-                    _trigger_random_event(vessel, self.world, self.environment, self.event_log)
+                    _trigger_random_event(vessel, self.world, self.environment, self._engine_log)
                     if vessel.distress:
                         self.mission_manager.generate_mission(
                             "rescue", vessel, vessel.position)
@@ -2738,7 +2327,7 @@ class Game:
             _sar_dispatch(
                 self.world.vessels,
                 SAR_DISPATCH_RANGE_NM * KNOTS_TO_UNITS_PER_HOUR,
-                self.event_log, _t,
+                self._engine_log, _t,
                 player_paths=self._pending_player_paths,
                 world=self.world,
             )
